@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-execution-system is the Execution System of Agent Ops Ledger — the small, host-neutral execution boundary that resolves and validates one exact Workflow Package, binds it in an immutable Delivery Manifest, coordinates the current Delivery, and emits bounded observations. It is embedded per repository/workspace and continues to run when Evidence or telemetry is unavailable.
+execution-system is the Execution System of workflow-self-recursive — the small, host-neutral execution boundary that resolves and validates one exact Workflow Package, binds it in an immutable Delivery Manifest, coordinates the current Delivery, and emits bounded observations. It is embedded per repository/workspace and continues to run when Evidence or telemetry is unavailable.
 
 Three modules carry this responsibility:
 
@@ -14,11 +14,11 @@ Runtimes are replaceable adapters behind a Core-owned seam: [DeepSeek Harness](h
 
 ## Developer preview
 
-This repository is part of Agent Ops Ledger's architecture-first developer preview for trusted local use by individuals and small teams. It publishes the Execution design and component boundaries; it does not yet provide a runnable end-user release. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+This repository is part of workflow-self-recursive's architecture-first developer preview for trusted local use by individuals and small teams. It publishes the Execution design and component boundaries; it does not yet provide a runnable end-user release. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
 
 ## Get the source
 
-This repository is normally consumed as a submodule of [Agent Ops Ledger](https://github.com/firestige/workflow-self-recursive):
+This repository is normally consumed as a submodule of [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive):
 
 ```sh
 git clone --recurse-submodules https://github.com/firestige/workflow-self-recursive.git

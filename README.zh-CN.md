@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-execution-system 是 Agent Ops Ledger 的 Execution System —— 一个与宿主无关的小型执行边界：它解析并校验一个确定的 Workflow Package，将绑定信息写入不可变的 Delivery Manifest，协调当前交付并发出有界观测事实。它嵌入在每个仓库/工作区中，当 Evidence 或遥测不可用时仍会继续运行。
+execution-system 是 workflow-self-recursive 的 Execution System —— 一个与宿主无关的小型执行边界：它解析并校验一个确定的 Workflow Package，将绑定信息写入不可变的 Delivery Manifest，协调当前交付并发出有界观测事实。它嵌入在每个仓库/工作区中，当 Evidence 或遥测不可用时仍会继续运行。
 
 三个 Module 承担上述职责：
 
@@ -14,11 +14,11 @@ Runtime 是位于 Core 边界之后的可替换适配器：[DeepSeek Harness](ht
 
 ## Developer preview
 
-本仓库是 Agent Ops Ledger 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。当前发布 Execution 设计与组件边界，尚未提供可供最终用户运行的发行版。**后续会有破坏兼容性的变更。**
+本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。当前发布 Execution 设计与组件边界，尚未提供可供最终用户运行的发行版。**后续会有破坏兼容性的变更。**
 
 ## 获取源码
 
-本仓库通常作为 [Agent Ops Ledger](https://github.com/firestige/workflow-self-recursive) 的 submodule 使用：
+本仓库通常作为 [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive) 的 submodule 使用：
 
 ```sh
 git clone --recurse-submodules https://github.com/firestige/workflow-self-recursive.git
