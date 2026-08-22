@@ -10,6 +10,19 @@ export interface SourceImport {
 
 type RuntimeModule = "coordinator" | "host" | "invocation" | "custody" | "interpreter";
 
+const ALLOWED_CONTRACT_IMPORTS: Readonly<Record<string, ReadonlySet<string>>> = {
+  "primitives": new Set(),
+  "generated/workflow-contract": new Set(["primitives"]),
+  "lifecycle-records": new Set(["primitives"]),
+  "runner-activation": new Set(["primitives", "generated/workflow-contract", "lifecycle-records"]),
+  "compiled-activation": new Set(["primitives", "runner-activation"]),
+  "compiler": new Set(["runner-activation", "compiled-activation"]),
+  "custody-capability": new Set(["primitives", "runner-activation", "lifecycle-records"]),
+  "invocation-capability": new Set(["primitives", "runner-activation", "compiled-activation", "custody-capability", "lifecycle-records"]),
+  "interaction-capability": new Set(["primitives", "invocation-capability"]),
+  "host-capability": new Set(["primitives", "compiled-activation", "lifecycle-records", "invocation-capability", "interaction-capability"]),
+};
+
 const ALLOWED_RUNTIME_IMPORTS: Readonly<Record<RuntimeModule, ReadonlySet<RuntimeModule>>> = {
   coordinator: new Set(["host", "invocation", "custody"]),
   host: new Set(["invocation", "custody"]),
@@ -29,6 +42,11 @@ function runtimeModule(file: string): RuntimeModule | undefined {
     | undefined;
 }
 
+function contractModule(file: string): string | undefined {
+  const match = /(?:^|\/)src\/contracts\/(.+?)(?:\.[cm]?[jt]s)$/.exec(file);
+  return match?.[1];
+}
+
 export function boundaryViolations(sources: readonly SourceImport[]): string[] {
   const violations: string[] = [];
   for (const source of sources) {
@@ -37,9 +55,15 @@ export function boundaryViolations(sources: readonly SourceImport[]): string[] {
       continue;
     }
     const owner = runtimeModule(source.from);
+    const contractOwner = contractModule(source.from);
     const isProviderAdapter = /(?:^|\/)src\/providers(?:\/|$)/.test(source.from);
     for (const imported of source.imports) {
       const target = normalizedTarget(source, imported);
+      const contractDependency = contractModule(target);
+      if (contractOwner !== undefined && contractOwner !== "index" && contractDependency !== undefined && contractDependency !== contractOwner && !ALLOWED_CONTRACT_IMPORTS[contractOwner]?.has(contractDependency)) {
+        violations.push(`${source.from} cannot import contract/${contractDependency}`);
+        continue;
+      }
       if (/(?:^|\/)test\/support(?:\/|$)/.test(target)) {
         violations.push(`${source.from} cannot import test support`);
         continue;

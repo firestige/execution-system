@@ -1,0 +1,17 @@
+import type { ArtifactId, AuditCorrelationId, CheckpointId, ContractRevision, DeliveryId, DeliveryRef, FrozenJsonValue, GitTreeId, ImplementationId, Knowledge, PreservedResultId, PublicationGuardId, PublicationId, PublicationTargetId, RetirementAuthorizationRef, RuntimeProfileId, SavepointId, SettlementId, Sha256, SnapshotId, StableId, ThreadRef, WorkflowResultId } from "./primitives.js";
+
+export interface SavepointRef { readonly deliveryIdentity: DeliveryId; readonly savepointIdentity: SavepointId; readonly gitTree: GitTreeId }
+export interface CheckpointRef { readonly identity: CheckpointId; readonly thread: ThreadRef; readonly stateIdentity: Sha256; readonly savepoint: Knowledge<SavepointRef> }
+export interface ArtifactVersionRef { readonly artifactIdentity: ArtifactId; readonly versionIdentity: StableId<"artifact-version">; readonly contentIdentity: Sha256 }
+export interface BoundedWorkflowResult { readonly identity: WorkflowResultId; readonly content: FrozenJsonValue; readonly contentIdentity: Sha256; readonly artifacts: Readonly<Record<ArtifactId, ArtifactVersionRef>> }
+export interface PreservedResultRef { readonly identity: PreservedResultId; readonly delivery: DeliveryRef; readonly contentIdentity: Sha256; readonly savepoint: Knowledge<SavepointRef> }
+export interface PublicationTargetRef { readonly identity: PublicationTargetId }
+export interface PublicationGuardRef { readonly identity: PublicationGuardId; readonly expectedGitTree: GitTreeId }
+export interface PublicationRef { readonly identity: PublicationId; readonly target: PublicationTargetRef; readonly result: PreservedResultRef }
+export type PublicationDisposition = Readonly<{ kind: "published" | "already-at-target"; reference: PublicationRef }> | Readonly<{ kind: "conflict"; preservedResult: PreservedResultRef }> | Readonly<{ kind: "unknown"; preservedResult: PreservedResultRef; uncertainty: import("./primitives.js").UnknownState }>;
+export type SettledPublicationDisposition = Exclude<PublicationDisposition, { readonly kind: "unknown" }>;
+export type RuntimeTerminalOutcome = "COMPLETED" | "INCOMPLETE" | "FAILED" | "CANCELLED";
+export type TerminalReason = "DECLARED_TERMINAL" | "DECLARED_INCOMPLETE" | "ACTION_FAILED" | "CANCELLED" | "RECOVERY_EXHAUSTED" | "CONTROL_EXPIRED" | "INVARIANT_VIOLATION";
+export interface OwnerRetirementDispositionRef { readonly identity: import("./primitives.js").OwnerRetirementDispositionId; readonly owner: "coordinator" | "host" | "invocation" | "custody"; readonly authorization: RetirementAuthorizationRef }
+export type OwnerRetirementDisposition = Readonly<{ reference: OwnerRetirementDispositionRef; state: "retired" | "retained-for-recovery" }> | Readonly<{ reference: OwnerRetirementDispositionRef; state: "unknown"; uncertainty: import("./primitives.js").UnknownState }>;
+export interface TerminalSettlementRecord { readonly identity: SettlementId; readonly delivery: DeliveryRef; readonly profileIdentity: RuntimeProfileId; readonly contractIdentity: ContractRevision; readonly implementationIdentity: ImplementationId; readonly snapshotIdentity: SnapshotId; readonly outcome: RuntimeTerminalOutcome; readonly reason: TerminalReason; readonly checkpoint: CheckpointRef; readonly result: Knowledge<PreservedResultRef>; readonly publication: SettledPublicationDisposition; readonly retirementAuthorization: RetirementAuthorizationRef; readonly ownerDispositionRefs: readonly OwnerRetirementDispositionRef[]; readonly auditCorrelation: AuditCorrelationId }

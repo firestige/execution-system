@@ -86,4 +86,15 @@ describe("static dependency boundary", () => {
       const four = require("../four.js");
     `)).toEqual(["../one.js", "../two.js", "../three.js", "../four.js"]);
   });
+
+  it("replacement G00 enforces the frozen shared-contract import DAG", () => {
+    expect(boundaryViolations([
+      source("src/contracts/generated/workflow-contract.ts", "../runner-activation.js"),
+      source("src/contracts/compiler.ts", "./host-capability.js"),
+      source("src/contracts/runner-activation.ts", "./generated/workflow-contract.js", "./primitives.js"),
+    ])).toEqual([
+      "src/contracts/generated/workflow-contract.ts cannot import contract/runner-activation",
+      "src/contracts/compiler.ts cannot import contract/host-capability",
+    ]);
+  });
 });

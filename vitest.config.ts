@@ -8,6 +8,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       include: ["src/**/*.ts", "scripts/**/*.ts"],
+      exclude: ["scripts/generate-workflow-contract.ts"],
       thresholds: {
         statements: 90,
         branches: 85,

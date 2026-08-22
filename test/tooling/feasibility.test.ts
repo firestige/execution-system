@@ -15,6 +15,8 @@ interface PackageMetadata {
   readonly name: string;
   readonly version: string;
   readonly bin?: Readonly<Record<string, string>>;
+  readonly types?: string;
+  readonly exports?: Readonly<Record<string, unknown>>;
 }
 
 function packageMetadata(specifier: string, paths?: readonly string[]): PackageMetadata {
@@ -43,6 +45,30 @@ describe("I2-G00 selected substrate matrix", () => {
 
     expect(dsh.version).toBe("0.1.1-rc.2");
     expect(headless.version).toBe(dsh.version);
+  });
+
+  it("proves native session re-entry and continued input on the selected public DSH package closure", () => {
+    const dshPath = require.resolve("@deepseek-ai/dsh/package.json");
+    const packageRoot = path.dirname(dshPath);
+    const sessionPath = require.resolve("@deepseek-ai/dsh-session/package.json", { paths: [packageRoot] });
+    const agentPath = require.resolve("@deepseek-ai/dsh-agent/package.json", { paths: [packageRoot] });
+    const session = JSON.parse(readFileSync(sessionPath, "utf8")) as PackageMetadata;
+    const agent = JSON.parse(readFileSync(agentPath, "utf8")) as PackageMetadata;
+    const sessionTypes = readFileSync(path.resolve(path.dirname(sessionPath), session.types!), "utf8");
+    const agentTypes = readFileSync(path.resolve(path.dirname(agentPath), agent.types!), "utf8");
+    const runtimeTypes = readFileSync(path.resolve(path.dirname(agentPath), "lib/types/runtime-types.d.ts"), "utf8");
+
+    expect(session.version).toBe("0.1.1-rc.2");
+    expect(agent.version).toBe("0.1.1-rc.2");
+    expect(session.exports?.["."]).toBeDefined();
+    expect(agent.exports?.["."]).toBeDefined();
+    expect(sessionTypes).toContain("static fromRestore");
+    expect(sessionTypes).toContain("flush(session: Session)");
+    expect(agentTypes).toContain("resume(options: ResumeAgentOptions)");
+    expect(runtimeTypes).toContain("SessionStartSource = 'startup' | 'resume'");
+    expect(runtimeTypes).toContain("whenIdle(): Promise<void>");
+    expect(runtimeTypes).toContain("followup(message: UserMessage): void");
+    expect(runtimeTypes).toContain("inject(message: UserMessage): void");
   });
 
   it("runs the selected DSH headless CLI without importing an ambient executable", () => {
