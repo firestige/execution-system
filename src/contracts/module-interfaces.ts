@@ -75,7 +75,7 @@ export const PROVIDER_CAPABILITIES = [
 
 export const PROVIDER_BINDINGS = frozen({
   "dsh-headless": {
-    availability: "USABLE" as const,
+    availability: "IMPLEMENTATION_SELECTED" as const,
     capabilities: [...PROVIDER_CAPABILITIES],
   },
   "copilot-sdk": {

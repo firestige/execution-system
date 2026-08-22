@@ -61,10 +61,10 @@ describe("shared module interfaces", () => {
     expect(request.operation).toBe("activate");
   });
 
-  it("G00-PROVIDER-VOCABULARY exposes one usable DSH binding and two exact Iter2 shells", () => {
+  it("G00-PROVIDER-VOCABULARY selects DSH implementation and two exact Iter2 shells", () => {
     expect(PROVIDER_BINDINGS).toEqual({
       "dsh-headless": {
-        availability: "USABLE",
+        availability: "IMPLEMENTATION_SELECTED",
         capabilities: ["agent.invoke", "cwd.bound", "session.scoped", "child.cancel"],
       },
       "copilot-sdk": {
