@@ -130,7 +130,7 @@ function compileExecution(activation: RunnerActivationContext, control: Compiled
       if (site.executor.requiredCapabilities.some((capability) => !executor.session.providedCapabilities.includes(capability))) throw new CompileIssue("UNSUPPORTED_CAPABILITY", `site '${key}' requires an unsupported Provider capability`);
       agentInvocations.push([key, {
         actionIdentity: site.actionIdentity, executorIdentity: executor.identity,
-        bindingIdentity: canonicalDigest({ site, action: admitted.actions[site.actionIdentity], executorBindingIdentity: executor.bindingIdentity }),
+        bindingIdentity: canonicalDigest({ site: site.site, action: admitted.actions[site.actionIdentity], executorBindingIdentity: executor.bindingIdentity }),
       }]);
     } else if (admitted.hostOperations[site.executor.identity] === undefined) {
       throw new CompileIssue("EXECUTION_CLOSURE_INVALID", `site '${key}' has unresolved Host operation`);
