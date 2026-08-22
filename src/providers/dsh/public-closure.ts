@@ -5,6 +5,10 @@ interface ConstructorWithPrototype {
   readonly prototype: Record<string, unknown>;
 }
 
+interface ContextConstructor extends ConstructorWithPrototype {
+  new (): { get(name: string): unknown };
+}
+
 export interface DshPublicClosure {
   readonly version: string;
   readonly AgentRegistry: ConstructorWithPrototype;
@@ -15,6 +19,12 @@ export interface DshPublicClosure {
   readonly defineTool: (options: Record<string, unknown>) => unknown;
   readonly SessionId: (value: string) => unknown;
   readonly installModelSelection: (context: unknown, selection: Record<string, unknown>) => unknown;
+  readonly DeepSeekAdapter: new (options: Record<string, unknown>) => { stream(options: unknown): AsyncIterable<unknown> };
+  readonly resolveDeepSeekAdapterOptions: (config: Record<string, unknown>) => Record<string, unknown>;
+  readonly Context: ContextConstructor;
+  readonly LlmRuntime: new (context: unknown, config?: Record<string, unknown>) => unknown;
+  readonly ToolRuntime: new (context: unknown, config?: Record<string, unknown>) => unknown;
+  readonly SystemPrompt: new (context: unknown, config?: Record<string, unknown>) => unknown;
 }
 
 async function publicModule(anchor: NodeRequire, specifier: string): Promise<Record<string, unknown>> {
@@ -33,19 +43,25 @@ export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
   const dshRequire = createRequire(manifestPath);
   const manifest = dshRequire(manifestPath) as { version?: unknown };
   if (manifest.version !== "0.1.1-rc.2") throw new TypeError("unsupported @deepseek-ai/dsh version");
-  const [agent, session, credentials, localCredentials, llm, tools] = await Promise.all([
+  const [agent, session, credentials, localCredentials, llm, tools, deepseek, cordis, systemPrompt] = await Promise.all([
     publicModule(dshRequire, "@deepseek-ai/dsh-agent"),
     publicModule(dshRequire, "@deepseek-ai/dsh-session"),
     publicModule(dshRequire, "@deepseek-ai/dsh-credentials"),
     publicModule(dshRequire, "@deepseek-ai/dsh-credentials-local"),
     publicModule(dshRequire, "@deepseek-ai/dsh-llm"),
     publicModule(dshRequire, "@deepseek-ai/dsh-tools"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-llm-deepseek"),
+    publicModule(dshRequire, "@deepseek-ai/cordis"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-system-prompt"),
   ]);
   const createUserMessage = llm.createUserMessage;
   if (typeof createUserMessage !== "function") throw new TypeError("DSH public closure is missing createUserMessage");
   if (typeof tools.defineTool !== "function") throw new TypeError("DSH public closure is missing defineTool");
   if (typeof session.SessionId !== "function") throw new TypeError("DSH public closure is missing SessionId");
   if (typeof agent.installModelSelection !== "function") throw new TypeError("DSH public closure is missing installModelSelection");
+  if (typeof deepseek.DeepSeekAdapter !== "function" || typeof deepseek.resolveAdapterOptions !== "function") {
+    throw new TypeError("DSH public closure is missing the DeepSeek operation adapter");
+  }
   return Object.freeze({
     version: manifest.version,
     AgentRegistry: constructor(agent, "AgentRegistry"),
@@ -56,5 +72,11 @@ export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
     defineTool: tools.defineTool as (options: Record<string, unknown>) => unknown,
     SessionId: session.SessionId as (value: string) => unknown,
     installModelSelection: agent.installModelSelection as (context: unknown, selection: Record<string, unknown>) => unknown,
+    DeepSeekAdapter: deepseek.DeepSeekAdapter as DshPublicClosure["DeepSeekAdapter"],
+    resolveDeepSeekAdapterOptions: deepseek.resolveAdapterOptions as DshPublicClosure["resolveDeepSeekAdapterOptions"],
+    Context: constructor(cordis, "Context") as ContextConstructor,
+    LlmRuntime: constructor(llm, "LlmRuntime") as DshPublicClosure["LlmRuntime"],
+    ToolRuntime: constructor(tools, "ToolRuntime") as DshPublicClosure["ToolRuntime"],
+    SystemPrompt: constructor(systemPrompt, "SystemPrompt") as DshPublicClosure["SystemPrompt"],
   });
 }

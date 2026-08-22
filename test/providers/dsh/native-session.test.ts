@@ -16,11 +16,6 @@ function nativeAgent(id: string) {
 
 const instructionIdentity = `sha256:${createHash("sha256").update("exact instructions").digest("hex")}`;
 const sessionBinding = { tools: [], providedCapabilities: ["structured-completion", "action-interaction"], instructions: { localReadOnlyPath: "/admitted/instructions.md", contentIdentity: instructionIdentity }, model: { providerModelIdentity: "deepseek-chat" }, driver: { providerIdentity: "dsh-headless", configuration: { providerRoute: "deepseek", credentialRef: "DEEPSEEK_API_KEY" } } };
-const operationAuthority = {
-  async install(_context: unknown, grant: { readonly tools: readonly { readonly name: string }[] }) {
-    return { authorizedToolNames: grant.tools.map((tool) => tool.name) };
-  },
-};
 
 describe("DSH native session adapter", () => {
   it("uses AgentRegistry.resume with the exact opaque session id and has no create fallback", async () => {
@@ -37,7 +32,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush(session: unknown) { calls.flush.push((session as { id?: string }).id ?? "flushed"); } },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority,
       readProjection: async () => "exact instructions",
     });
 
@@ -75,7 +69,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush() {} },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority,
       readProjection: async () => "exact instructions",
     });
     const session = await factory.open({
@@ -125,7 +118,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush() {} },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority,
       readProjection: async () => "exact instructions",
     });
     const session = await factory.open({
@@ -141,8 +133,7 @@ describe("DSH native session adapter", () => {
   });
 
   it("fails closed for missing composition, credential, provider binding, or exact resume identity", async () => {
-    await expect(createDshNativeSessionFactory({ agents: {} as never, sessions: {} as never, workspaceDirectory: "relative", operationAuthority })).rejects.toThrow("absolute");
-    await expect(createDshNativeSessionFactory({ agents: {} as never, sessions: {} as never, workspaceDirectory: "/admitted/worktree" } as never)).rejects.toThrow("operation authority");
+    await expect(createDshNativeSessionFactory({ agents: {} as never, sessions: {} as never, workspaceDirectory: "relative" })).rejects.toThrow("absolute");
     const agent = nativeAgent("different-native-id");
     let disposed = 0;
     const factory = await createDshNativeSessionFactory({
@@ -155,7 +146,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush() {} },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority,
       readProjection: async () => "exact instructions",
     });
     const request = {
@@ -191,7 +181,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush() {} },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority,
       readProjection: async () => "exact instructions",
     });
     const base = {
@@ -199,7 +188,7 @@ describe("DSH native session adapter", () => {
       executor: { session: { ...sessionBinding, tools: [{ configuration: { toolName: "admitted-fs", workspaceAccess: true } }] } },
     };
     await factory.open({ dispatch: base as never, credentials: { apiKey: "secret" }, signal: new AbortController().signal });
-    expect(restrictions).toEqual([{ allow: ["admitted-fs"] }]);
+    expect(restrictions).toEqual([{ deny: ["admitted-fs", "ambient-bash"] }]);
 
     await expect(factory.open({ dispatch: { ...base, executor: { session: { ...base.executor.session, tools: [{ configuration: {} }] } } } as never, credentials: { apiKey: "secret" }, signal: new AbortController().signal })).rejects.toThrow("tool binding");
     await expect(factory.open({ dispatch: { ...base, workspace: { kind: "none" } } as never, credentials: { apiKey: "secret" }, signal: new AbortController().signal })).rejects.toThrow("authorized workspace");
@@ -228,21 +217,16 @@ describe("DSH native session adapter", () => {
     await expect(broker.acquire({ executor: { session: { driver: { configuration: {} } } } } as never)).rejects.toThrow("credentialRef");
   });
 
-  it("installs the exact acquired credential and signed path authority on both create and resume", async () => {
+  it("installs production credential and signed path authority on both create and resume", async () => {
     const created = nativeAgent("native-created");
     const resumed = nativeAgent("native-exact");
-    const grants: unknown[] = [];
-    const authority = {
-      async install(_context: unknown, grant: unknown) {
-        grants.push(grant);
-        return { authorizedToolNames: ["admitted-fs"] };
-      },
-    };
+    const listeners: Array<(options: Record<string, unknown>, next: () => AsyncIterable<unknown>) => AsyncIterable<unknown>> = [];
+    const definitions: Array<{ name: string; execute(args: unknown): Promise<unknown> }> = [];
     const context = {
-      on: () => () => undefined,
+      on: (name: string, listener: typeof listeners[number]) => { if (name === "llm/stream") listeners.push(listener); return () => undefined; },
       get: (name: string) => name === "systemPrompt"
         ? { section() { return () => undefined; } }
-        : { schemas: () => [{ name: "ambient-bash" }, { name: "admitted-fs" }], restrict() { return () => undefined; }, register() { return () => undefined; } },
+        : { schemas: () => [{ name: "ambient-bash" }], restrict() { return () => undefined; }, register(definition: typeof definitions[number]) { definitions.push(definition); return () => undefined; } },
     };
     const factory = await createDshNativeSessionFactory({
       agents: {
@@ -251,7 +235,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush() {} },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority: authority,
       readProjection: async () => "exact instructions",
     });
     const dispatch = {
@@ -266,10 +249,8 @@ describe("DSH native session adapter", () => {
     await factory.open(request);
     await factory.restore({ ...request, opaqueIdentity: "native-exact" });
 
-    expect(grants).toEqual([
-      expect.objectContaining({ credential: { reference: "DEEPSEEK_API_KEY", value: "exact-secret" }, workspace: (dispatch as never as { workspace: unknown }).workspace, access: [{ mode: "write", path: "src/**" }] }),
-      expect.objectContaining({ credential: { reference: "DEEPSEEK_API_KEY", value: "exact-secret" }, workspace: (dispatch as never as { workspace: unknown }).workspace, access: [{ mode: "write", path: "src/**" }] }),
-    ]);
+    expect(listeners).toHaveLength(2);
+    expect(definitions.filter((definition) => definition.name === "admitted-fs")).toHaveLength(2);
   });
 
   it("does not register the input suspension tool without action-interaction capability", async () => {
@@ -291,7 +272,6 @@ describe("DSH native session adapter", () => {
       },
       sessions: { async flush() {} },
       workspaceDirectory: "/admitted/worktree",
-      operationAuthority,
       readProjection: async () => "exact instructions",
     });
     await factory.open({

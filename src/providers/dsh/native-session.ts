@@ -12,6 +12,7 @@ import type {
   NativeTurnEvent,
 } from "../provider.js";
 import { resolveDshPublicClosure, type DshPublicClosure } from "./public-closure.js";
+import { createDshOperationAuthority, type DshOperationAuthority } from "./operation-authority.js";
 
 interface DshSessionEvent {
   readonly seq: number;
@@ -60,16 +61,6 @@ export interface DshNativeSessionFactoryOptions {
   readonly sessions: DshSessions;
   readonly workspaceDirectory: string;
   readonly readProjection?: (absolutePath: string) => Promise<string>;
-  readonly operationAuthority: DshOperationAuthority;
-}
-
-export interface DshOperationAuthority {
-  install(context: unknown, grant: Readonly<{
-    credential: Readonly<{ reference: string; value: string }>;
-    workspace: InvocationDispatch["workspace"];
-    access: InvocationDispatch["executor"]["turn"]["access"];
-    tools: readonly Readonly<{ name: string; workspaceAccess: boolean }>[];
-  }>): Promise<Readonly<{ authorizedToolNames: readonly string[] }>>;
 }
 
 function configuration(dispatch: InvocationDispatch): Record<string, unknown> {
@@ -128,6 +119,9 @@ function dispositionSetup(
       throw new TypeError("DSH exact operation credential is unavailable");
     }
     const installed = await authority.install(context, {
+      provider: exactAgentOptions(dispatch).provider as string,
+      model: exactAgentOptions(dispatch).model as string,
+      ...(typeof configuration(dispatch).baseURL === "string" ? { baseURL: configuration(dispatch).baseURL as string } : {}),
       credential: { reference: credentialRef, value: credentials.apiKey },
       workspace: dispatch.workspace,
       access: dispatch.executor.turn?.access ?? [],
@@ -139,8 +133,10 @@ function dispositionSetup(
       throw new TypeError("DSH operation authority did not install the exact admitted tool scope");
     }
     const globalToolNames = tools.schemas().map((schema) => schema.name);
-    if (admittedToolNames.length > 0) tools.restrict({ allow: admittedToolNames });
-    else if (globalToolNames.length > 0) tools.restrict({ deny: globalToolNames });
+    // Admitted implementations were registered into this agent scope above.
+    // DSH restrictions apply only to inherited/global tools, so remove that
+    // entire ambient surface and leave the scoped capabilities intact.
+    if (globalToolNames.length > 0) tools.restrict({ deny: globalToolNames });
     tools.register(closure.defineTool({
       name: "workflow_complete",
       description: "Submit the one structured Action result. This is the only completion protocol.",
@@ -230,8 +226,8 @@ class DshNativeProviderSession implements NativeProviderSession {
 
 export async function createDshNativeSessionFactory(options: DshNativeSessionFactoryOptions): Promise<NativeProviderSessionFactory> {
   if (!options.workspaceDirectory.startsWith("/")) throw new TypeError("DSH workspace directory must be absolute");
-  if (options.operationAuthority === undefined || typeof options.operationAuthority.install !== "function") throw new TypeError("DSH operation authority is unavailable");
   const closure = await resolveDshPublicClosure();
+  const operationAuthority = createDshOperationAuthority(closure, options.workspaceDirectory);
   return Object.freeze({
     async open(request: NativeSessionOpenRequest): Promise<NativeProviderSession> {
       if (request.credentials.apiKey === undefined || request.credentials.apiKey === "") throw new TypeError("DSH credential is unavailable");
@@ -242,7 +238,7 @@ export async function createDshNativeSessionFactory(options: DshNativeSessionFac
         meta: { cwd: options.workspaceDirectory },
         agentOptions: exactAgentOptions(request.dispatch),
         signal: request.signal,
-        setup: dispositionSetup(closure, request.dispatch, instructions, request.credentials, options.operationAuthority, dispositions),
+        setup: dispositionSetup(closure, request.dispatch, instructions, request.credentials, operationAuthority, dispositions),
       });
       return new DshNativeProviderSession(handle, options.sessions, closure, dispositions);
     },
@@ -255,7 +251,7 @@ export async function createDshNativeSessionFactory(options: DshNativeSessionFac
         resumeSessionId: closure.SessionId(request.opaqueIdentity),
         agentOptions: exactAgentOptions(request.dispatch),
         signal: request.signal,
-        setup: dispositionSetup(closure, request.dispatch, instructions, request.credentials, options.operationAuthority, dispositions),
+        setup: dispositionSetup(closure, request.dispatch, instructions, request.credentials, operationAuthority, dispositions),
       });
       if (handle.agent.id !== request.opaqueIdentity) {
         await handle.dispose();
