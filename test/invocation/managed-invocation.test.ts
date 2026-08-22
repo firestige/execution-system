@@ -240,21 +240,32 @@ async function harness(turns: readonly (readonly NativeTurnEvent[])[]) {
     providers: { "dsh-headless": provider },
     credentials,
     journal,
-    validateResult: (schema, value) => {
-      if ((schema as { type?: unknown }).type === "boolean") return typeof value === "boolean";
-      if ((schema as { type?: unknown }).type === "string") return typeof value === "string";
-      return typeof schema === "object" &&
-        typeof value === "object" &&
-        value !== null &&
-        (value as { accepted?: unknown }).accepted === true;
+    resultValidator: {
+      validate(schema, value) {
+        if ((schema as { type?: unknown }).type === "boolean") return typeof value === "boolean";
+        if ((schema as { type?: unknown }).type === "string") return typeof value === "string";
+        return typeof schema === "object" &&
+          typeof value === "object" &&
+          value !== null &&
+          (value as { accepted?: unknown }).accepted === true;
+      },
     },
-    authorizeRetirement: (authorization, activeDelivery) =>
-      authorization.delivery.deliveryIdentity === activeDelivery.deliveryIdentity,
   });
   return { directory, provider, credentials, journal, manager };
 }
 
 describe("managed Invocation", () => {
+  it("requires the typed result-validator capability at construction", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "g03-journal-"));
+    temporaryDirectories.push(directory);
+    expect(() => createManagedInvocation({
+      providers: {},
+      credentials: new LeaseBroker(),
+      journal: new FileInvocationJournalStore(directory),
+      resultValidator: (() => true) as never,
+    })).toThrow("typed result validator");
+  });
+
   it("treats output and turn/end as frames and an invalid non-completion, never completed", async () => {
     const fixture = await harness([
       [
@@ -533,8 +544,7 @@ describe("managed Invocation", () => {
       providers: { "copilot-sdk": createCopilotProviderShell() },
       credentials: new LeaseBroker(),
       journal: new FileInvocationJournalStore(directory),
-      validateResult: () => true,
-      authorizeRetirement: () => true,
+      resultValidator: { validate: () => true },
     });
 
     expect(await manager.host.start(copilot, sink().value)).toEqual({ ok: false, error: { code: "PROVIDER_NOT_IMPLEMENTED" } });
@@ -576,6 +586,8 @@ describe("managed Invocation", () => {
 
     const wrong = { identity: "retirement-wrong", delivery: { ...delivery(), deliveryIdentity: "delivery-other" } } as unknown as RetirementAuthorizationRef;
     expect(await fixture.manager.control.retire(wrong)).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
+    const staleCorrelation = { identity: "retirement-stale", delivery: { ...delivery(), manifestBindingIdentity: `sha256:${"f".repeat(64)}` } } as unknown as RetirementAuthorizationRef;
+    expect(await fixture.manager.control.retire(staleCorrelation)).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
 
     const authorization = { identity: "retirement-1", delivery: delivery() } as unknown as RetirementAuthorizationRef;
     expect(await fixture.manager.control.retire(authorization)).toEqual({ ok: true, value: { owner: "invocation", authorization, state: "retired" } });

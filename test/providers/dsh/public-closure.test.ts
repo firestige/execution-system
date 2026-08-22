@@ -14,5 +14,8 @@ describe("DSH 0.1.1-rc.2 public package closure", () => {
     expect(closure.defineTool).toBeTypeOf("function");
     expect(closure.SessionId).toBeTypeOf("function");
     expect(closure.installModelSelection).toBeTypeOf("function");
+    expect(closure.AgentLoop.prototype.createAgent).toBeTypeOf("function");
+    expect(closure.JsonlSessionPersistence.prototype.prepare).toBeTypeOf("function");
+    expect(closure.parseCredentialsDocument("version: 1\nrefs:\n  EXACT_KEY: secret\n", "/configured/credentials.yml").refs.get("EXACT_KEY")).toBe("secret");
   });
 });

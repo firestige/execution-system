@@ -107,8 +107,7 @@ describe("G02 → G03 signed workspace capability collaboration", () => {
       providers: { "dsh-headless": provider },
       credentials: { async acquire() { return { material: { apiKey: "test-only" }, async release() {} }; } },
       journal: new FileInvocationJournalStore(path.join(root, "journals")),
-      validateResult: () => true,
-      authorizeRetirement: () => true,
+      resultValidator: { validate: () => true },
     });
     const output = { async publish() { return { ok: true as const, value: undefined }; } };
 

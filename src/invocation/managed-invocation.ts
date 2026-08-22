@@ -30,8 +30,11 @@ export interface ManagedInvocationOptions {
   readonly providers: Readonly<Record<string, NativeProviderSessionFactory>>;
   readonly credentials: CredentialLeaseBroker;
   readonly journal: InvocationJournalStore;
-  readonly validateResult: (schema: FrozenJsonSchema, value: FrozenJsonValue) => boolean;
-  readonly authorizeRetirement: (authorization: RetirementAuthorizationRef, delivery: DeliveryRef) => boolean;
+  readonly resultValidator: InvocationResultValidator;
+}
+
+export interface InvocationResultValidator {
+  validate(schema: FrozenJsonSchema, value: FrozenJsonValue): boolean;
 }
 
 export interface ManagedInvocation {
@@ -131,6 +134,10 @@ function failed(error: InvocationCallError): Result<never, InvocationCallError> 
 }
 
 export function createManagedInvocation(options: ManagedInvocationOptions): ManagedInvocation {
+  if (options.resultValidator === null || typeof options.resultValidator !== "object" || typeof options.resultValidator.validate !== "function") {
+    throw new TypeError("Managed Invocation requires a typed result validator capability");
+  }
+  const validateResult = options.resultValidator.validate.bind(options.resultValidator);
   const live = new Map<string, NativeProviderSession>();
 
   function cancelledDisposition(journal: DurableInvocationJournal): InvocationDisposition {
@@ -223,7 +230,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
       return { kind: "invalid", episode: journal.reference.episode, violation: { code: "PENDING_INPUT_AT_COMPLETION", detail: {} }, session: journal.session, journal: journal.reference };
     }
     if (completion !== undefined) {
-      const valid = options.validateResult(journal.dispatch.action.resultSchema, completion);
+      const valid = validateResult(journal.dispatch.action.resultSchema, completion);
       if (!await commitUnlessCancelled({ ...base, status: valid ? "completed" : "invalid", pendingInput: undefined })) return cancelledDisposition(journal);
       if (!valid) return { kind: "invalid", episode: journal.reference.episode, violation: { code: "RESULT_SCHEMA_INVALID", detail: {} }, session: journal.session, journal: journal.reference };
       return { kind: "completed", episode: journal.reference.episode, result: completion, session: journal.session, interactionReceipts: journal.interactionReceipts, journal: journal.reference };
@@ -359,7 +366,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
       if (journal === undefined || !episodeMatches(journal.reference.episode, request.episode) || journal.pendingInput?.identity !== request.response.requestIdentity || journal.status !== "awaiting-input") {
         return failed({ code: "CORRELATION_MISMATCH" });
       }
-      if (request.response.contentIdentity !== digest(request.response.content) || !options.validateResult(journal.pendingInput.responseSchema, request.response.content)) {
+      if (request.response.contentIdentity !== digest(request.response.content) || !validateResult(journal.pendingInput.responseSchema, request.response.content)) {
         if (!await commitUnlessCancelled({ ...journal, status: "invalid", pendingInput: undefined })) return ok(cancelledDisposition(journal));
         return ok({
           kind: "invalid",
@@ -486,7 +493,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
         }
         const allJournals = await options.journal.list();
         const deliveryJournal = allJournals.find((journal) => journal.reference.episode.thread.delivery.deliveryIdentity === authorization.delivery.deliveryIdentity);
-        if (deliveryJournal === undefined || !deliveryMatches(deliveryJournal.reference.episode.thread.delivery, authorization.delivery) || !options.authorizeRetirement(authorization, deliveryJournal.reference.episode.thread.delivery)) {
+        if (deliveryJournal === undefined || !deliveryMatches(deliveryJournal.reference.episode.thread.delivery, authorization.delivery)) {
           return failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
         }
         const journals = allJournals.filter((journal) => deliveryMatches(journal.reference.episode.thread.delivery, authorization.delivery));

@@ -309,8 +309,7 @@ describe("LangGraph CoordinatorHost", () => {
       providers: { "dsh-headless": provider },
       credentials: { async acquire() { return { material: { apiKey: "test-only" }, async release() {} }; } },
       journal: new FileInvocationJournalStore(path.join(root, "invocation-journals")),
-      validateResult: () => true,
-      authorizeRetirement: () => true,
+      resultValidator: { validate: () => true },
     });
     const custody = new FakeCustody();
     let managedResult: unknown;

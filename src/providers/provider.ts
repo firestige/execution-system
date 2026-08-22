@@ -57,6 +57,38 @@ export interface CredentialLeaseBroker {
   acquire(dispatch: InvocationDispatch): Promise<CredentialLease>;
 }
 
+export type ProviderAdapterKey = "dsh-headless" | "copilot-sdk" | "codex-cli";
+
+export interface ProviderAdapter<Key extends ProviderAdapterKey = ProviderAdapterKey> {
+  readonly key: Key;
+  readonly sessions: NativeProviderSessionFactory;
+  readonly credentials: CredentialLeaseBroker;
+  dispose(): Promise<void>;
+}
+
+export interface ProviderAdapterFactory<Key extends ProviderAdapterKey = ProviderAdapterKey, Configuration = unknown> {
+  readonly key: Key;
+  create(configuration: Configuration): Promise<ProviderAdapter<Key>>;
+}
+
+export class ProviderFactorySelectionError extends Error {
+  readonly code = "PROVIDER_FACTORY_SELECTION_MISMATCH";
+
+  constructor(readonly provider: string) {
+    super(`configured Provider factory does not own '${provider}'`);
+    this.name = "ProviderFactorySelectionError";
+  }
+}
+
+export class ProviderAdapterStartupError extends Error {
+  readonly code = "PROVIDER_ADAPTER_STARTUP_FAILED";
+
+  constructor(readonly provider: string, cause: unknown) {
+    super(`Provider adapter '${provider}' failed during startup`, { cause });
+    this.name = "ProviderAdapterStartupError";
+  }
+}
+
 export interface ProviderNotImplementedError {
   readonly code: "PROVIDER_NOT_IMPLEMENTED";
 }

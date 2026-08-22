@@ -6,7 +6,13 @@ interface ConstructorWithPrototype {
 }
 
 interface ContextConstructor extends ConstructorWithPrototype {
-  new (): { get(name: string): unknown };
+  new (): DshContext;
+}
+
+interface DshContext {
+  get(name: string): unknown;
+  plugin(plugin: ConstructorWithPrototype, config?: Record<string, unknown>): PromiseLike<unknown>;
+  readonly fiber: { dispose(): Promise<void> };
 }
 
 export interface DshPublicClosure {
@@ -25,6 +31,11 @@ export interface DshPublicClosure {
   readonly LlmRuntime: new (context: unknown, config?: Record<string, unknown>) => unknown;
   readonly ToolRuntime: new (context: unknown, config?: Record<string, unknown>) => unknown;
   readonly SystemPrompt: new (context: unknown, config?: Record<string, unknown>) => unknown;
+  readonly AgentLoop: ConstructorWithPrototype;
+  readonly JsonlSessionPersistence: ConstructorWithPrototype;
+  readonly parseCredentialsDocument: (text: string, filename: string) => Readonly<{
+    refs: ReadonlyMap<string, string>;
+  }>;
 }
 
 async function publicModule(anchor: NodeRequire, specifier: string): Promise<Record<string, unknown>> {
@@ -43,7 +54,7 @@ export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
   const dshRequire = createRequire(manifestPath);
   const manifest = dshRequire(manifestPath) as { version?: unknown };
   if (manifest.version !== "0.1.1-rc.2") throw new TypeError("unsupported @deepseek-ai/dsh version");
-  const [agent, session, credentials, localCredentials, llm, tools, deepseek, cordis, systemPrompt] = await Promise.all([
+  const [agent, session, credentials, localCredentials, llm, tools, deepseek, cordis, systemPrompt, agentLoop, persistence] = await Promise.all([
     publicModule(dshRequire, "@deepseek-ai/dsh-agent"),
     publicModule(dshRequire, "@deepseek-ai/dsh-session"),
     publicModule(dshRequire, "@deepseek-ai/dsh-credentials"),
@@ -53,6 +64,8 @@ export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
     publicModule(dshRequire, "@deepseek-ai/dsh-llm-deepseek"),
     publicModule(dshRequire, "@deepseek-ai/cordis"),
     publicModule(dshRequire, "@deepseek-ai/dsh-system-prompt"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-agent-loop"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-session-persistence-jsonl"),
   ]);
   const createUserMessage = llm.createUserMessage;
   if (typeof createUserMessage !== "function") throw new TypeError("DSH public closure is missing createUserMessage");
@@ -61,6 +74,9 @@ export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
   if (typeof agent.installModelSelection !== "function") throw new TypeError("DSH public closure is missing installModelSelection");
   if (typeof deepseek.DeepSeekAdapter !== "function" || typeof deepseek.resolveAdapterOptions !== "function") {
     throw new TypeError("DSH public closure is missing the DeepSeek operation adapter");
+  }
+  if (typeof localCredentials.parseCredentialsDocument !== "function") {
+    throw new TypeError("DSH public closure is missing the configured credential document parser");
   }
   return Object.freeze({
     version: manifest.version,
@@ -78,5 +94,8 @@ export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
     LlmRuntime: constructor(llm, "LlmRuntime") as DshPublicClosure["LlmRuntime"],
     ToolRuntime: constructor(tools, "ToolRuntime") as DshPublicClosure["ToolRuntime"],
     SystemPrompt: constructor(systemPrompt, "SystemPrompt") as DshPublicClosure["SystemPrompt"],
+    AgentLoop: constructor(agentLoop, "AgentLoop"),
+    JsonlSessionPersistence: constructor(persistence, "JsonlSessionPersistence"),
+    parseCredentialsDocument: localCredentials.parseCredentialsDocument as DshPublicClosure["parseCredentialsDocument"],
   });
 }
