@@ -276,14 +276,21 @@ describe("Git custody", () => {
     expect(inspection.value.preservedResult).toEqual({ state: "known", value: preserved.value });
     expect(inspection.value.publication.state).toBe("known");
 
-    const retirement = await custody.retire({
+    const authorization = {
       identity: stable<RetirementAuthorizationId>("retirement-1"),
       delivery: f.delivery,
-    });
+    };
+    const retirement = await custody.retire(authorization);
     expect(retirement.ok).toBe(true);
     if (!retirement.ok) throw new Error("retirement failed");
-    expect(retirement.value.reference.owner).toBe("custody");
-    expect(retirement.value.state).toBe("retired");
+    expect(retirement.value).toEqual({ owner: "custody", authorization, state: "retired" });
+    expect("reference" in retirement.value).toBe(false);
+    expect("identity" in retirement.value).toBe(false);
+    expect(await custody.retire(authorization)).toEqual(retirement);
+    expect(await custody.retire({
+      identity: stable<RetirementAuthorizationId>("different-retirement"),
+      delivery: f.delivery,
+    })).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
   });
 
   it("fails closed for forged handles, mismatched guards, and unknown recovery state", async () => {

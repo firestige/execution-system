@@ -30,7 +30,6 @@ import type {
   HostCustody,
   Knowledge,
   OwnerRetirementDisposition,
-  OwnerRetirementDispositionId,
   PreservedResultRef,
   PublicationDisposition,
   PublicationId,
@@ -471,14 +470,8 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     record.retiredAuthorizationIdentity = authorization.identity;
     this.#store(record);
     return success({
-      reference: {
-        identity: stableId<OwnerRetirementDispositionId>("owner-retirement-disposition", {
-          owner: "custody",
-          authorization,
-        }),
-        owner: "custody",
-        authorization,
-      },
+      owner: "custody",
+      authorization,
       state: "retired",
     });
   }
