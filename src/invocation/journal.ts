@@ -47,6 +47,7 @@ export interface InvocationJournalStore {
   deleteAffinity(affinityIdentity: string): Promise<void>;
   loadRetirement(deliveryIdentity: string): Promise<DurableInvocationRetirementTombstone | undefined>;
   saveRetirement(tombstone: DurableInvocationRetirementTombstone): Promise<DurableInvocationRetirementTombstone>;
+  serializeRetirement<T>(deliveryIdentity: string, operation: () => Promise<T>): Promise<T>;
 }
 
 function safeIdentity(identity: string): string {
@@ -175,11 +176,15 @@ export class FileInvocationJournalStore implements InvocationJournalStore {
 
   async saveRetirement(tombstone: DurableInvocationRetirementTombstone): Promise<DurableInvocationRetirementTombstone> {
     const deliveryIdentity = tombstone.disposition.authorization.delivery.deliveryIdentity;
-    return this.exclusive(`retirement:${deliveryIdentity}`, async () => {
+    return this.exclusive(`retirement-record:${deliveryIdentity}`, async () => {
       const existing = await this.loadRetirement(deliveryIdentity);
       if (existing !== undefined) return existing;
       await this.write(this.retirementFilename(deliveryIdentity), tombstone);
       return tombstone;
     });
+  }
+
+  async serializeRetirement<T>(deliveryIdentity: string, operation: () => Promise<T>): Promise<T> {
+    return this.exclusive(`retirement-operation:${deliveryIdentity}`, operation);
   }
 }

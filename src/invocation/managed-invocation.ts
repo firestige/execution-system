@@ -477,32 +477,34 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
     },
 
     async retire(authorization) {
-      const retired = await options.journal.loadRetirement(authorization.delivery.deliveryIdentity);
-      if (retired !== undefined) {
-        return authorizationMatches(retired.disposition.authorization, authorization)
-          ? ok(retired.disposition)
+      return options.journal.serializeRetirement(authorization.delivery.deliveryIdentity, async () => {
+        const retired = await options.journal.loadRetirement(authorization.delivery.deliveryIdentity);
+        if (retired !== undefined) {
+          return authorizationMatches(retired.disposition.authorization, authorization)
+            ? ok(retired.disposition)
+            : failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
+        }
+        const allJournals = await options.journal.list();
+        const deliveryJournal = allJournals.find((journal) => journal.reference.episode.thread.delivery.deliveryIdentity === authorization.delivery.deliveryIdentity);
+        if (deliveryJournal === undefined || !deliveryMatches(deliveryJournal.reference.episode.thread.delivery, authorization.delivery) || !options.authorizeRetirement(authorization, deliveryJournal.reference.episode.thread.delivery)) {
+          return failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
+        }
+        const journals = allJournals.filter((journal) => deliveryMatches(journal.reference.episode.thread.delivery, authorization.delivery));
+        for (const journal of journals) {
+          if (live.has(journal.reference.episode.invocationIdentity)) return failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
+        }
+        await Promise.all(journals.map((journal) => options.journal.delete(journal.reference.episode.invocationIdentity)));
+        await Promise.all([...new Set(journals.map((journal) => journal.session.affinity.identity))].map((identity) => options.journal.deleteAffinity(identity)));
+        const value: OwnerRetirementDisposition<"invocation"> = {
+          owner: "invocation",
+          authorization,
+          state: "retired",
+        };
+        const tombstone = await options.journal.saveRetirement({ disposition: value });
+        return authorizationMatches(tombstone.disposition.authorization, authorization)
+          ? ok(tombstone.disposition)
           : failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
-      }
-      const allJournals = await options.journal.list();
-      const deliveryJournal = allJournals.find((journal) => journal.reference.episode.thread.delivery.deliveryIdentity === authorization.delivery.deliveryIdentity);
-      if (deliveryJournal === undefined || !deliveryMatches(deliveryJournal.reference.episode.thread.delivery, authorization.delivery) || !options.authorizeRetirement(authorization, deliveryJournal.reference.episode.thread.delivery)) {
-        return failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
-      }
-      const journals = allJournals.filter((journal) => deliveryMatches(journal.reference.episode.thread.delivery, authorization.delivery));
-      for (const journal of journals) {
-        if (live.has(journal.reference.episode.invocationIdentity)) return failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
-      }
-      await Promise.all(journals.map((journal) => options.journal.delete(journal.reference.episode.invocationIdentity)));
-      await Promise.all([...new Set(journals.map((journal) => journal.session.affinity.identity))].map((identity) => options.journal.deleteAffinity(identity)));
-      const value: OwnerRetirementDisposition<"invocation"> = {
-        owner: "invocation",
-        authorization,
-        state: "retired",
-      };
-      const tombstone = await options.journal.saveRetirement({ disposition: value });
-      return authorizationMatches(tombstone.disposition.authorization, authorization)
-        ? ok(tombstone.disposition)
-        : failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
+      });
     },
   };
 
