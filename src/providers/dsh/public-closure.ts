@@ -1,0 +1,60 @@
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+
+interface ConstructorWithPrototype {
+  readonly prototype: Record<string, unknown>;
+}
+
+export interface DshPublicClosure {
+  readonly version: string;
+  readonly AgentRegistry: ConstructorWithPrototype;
+  readonly SessionStore: ConstructorWithPrototype;
+  readonly CredentialProvider: ConstructorWithPrototype;
+  readonly LocalCredentialProvider: ConstructorWithPrototype;
+  readonly createUserMessage: (...args: readonly unknown[]) => unknown;
+  readonly defineTool: (options: Record<string, unknown>) => unknown;
+  readonly SessionId: (value: string) => unknown;
+  readonly installModelSelection: (context: unknown, selection: Record<string, unknown>) => unknown;
+}
+
+async function publicModule(anchor: NodeRequire, specifier: string): Promise<Record<string, unknown>> {
+  return await import(pathToFileURL(anchor.resolve(specifier)).href) as Record<string, unknown>;
+}
+
+function constructor(module: Record<string, unknown>, name: string): ConstructorWithPrototype {
+  const value = module[name];
+  if (typeof value !== "function") throw new TypeError(`DSH public closure is missing ${name}`);
+  return value as unknown as ConstructorWithPrototype;
+}
+
+export async function resolveDshPublicClosure(): Promise<DshPublicClosure> {
+  const localRequire = createRequire(import.meta.url);
+  const manifestPath = localRequire.resolve("@deepseek-ai/dsh/package.json");
+  const dshRequire = createRequire(manifestPath);
+  const manifest = dshRequire(manifestPath) as { version?: unknown };
+  if (manifest.version !== "0.1.1-rc.2") throw new TypeError("unsupported @deepseek-ai/dsh version");
+  const [agent, session, credentials, localCredentials, llm, tools] = await Promise.all([
+    publicModule(dshRequire, "@deepseek-ai/dsh-agent"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-session"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-credentials"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-credentials-local"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-llm"),
+    publicModule(dshRequire, "@deepseek-ai/dsh-tools"),
+  ]);
+  const createUserMessage = llm.createUserMessage;
+  if (typeof createUserMessage !== "function") throw new TypeError("DSH public closure is missing createUserMessage");
+  if (typeof tools.defineTool !== "function") throw new TypeError("DSH public closure is missing defineTool");
+  if (typeof session.SessionId !== "function") throw new TypeError("DSH public closure is missing SessionId");
+  if (typeof agent.installModelSelection !== "function") throw new TypeError("DSH public closure is missing installModelSelection");
+  return Object.freeze({
+    version: manifest.version,
+    AgentRegistry: constructor(agent, "AgentRegistry"),
+    SessionStore: constructor(session, "SessionStore"),
+    CredentialProvider: constructor(credentials, "CredentialProvider"),
+    LocalCredentialProvider: constructor(localCredentials, "LocalCredentialProvider"),
+    createUserMessage: createUserMessage as (...args: readonly unknown[]) => unknown,
+    defineTool: tools.defineTool as (options: Record<string, unknown>) => unknown,
+    SessionId: session.SessionId as (value: string) => unknown,
+    installModelSelection: agent.installModelSelection as (context: unknown, selection: Record<string, unknown>) => unknown,
+  });
+}
