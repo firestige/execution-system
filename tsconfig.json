@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}
