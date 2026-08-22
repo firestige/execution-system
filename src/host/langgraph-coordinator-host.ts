@@ -6,6 +6,7 @@ import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 
 import { canonicalDigest } from "../contracts/compiler.js";
 import { executionSiteKey } from "../contracts/compiled-activation.js";
+import type { HostOperationHandler } from "./workflow-host-adapter-factory.js";
 import type {
   Absent,
   ActionOutputSink,
@@ -54,15 +55,6 @@ import type {
   ThreadRef,
   WorkflowResultId,
 } from "../contracts/index.js";
-
-export interface HostOperationExecution {
-  readonly accepted: boolean;
-  readonly value: FrozenJsonValue;
-}
-
-export interface HostOperationHandler {
-  execute(input: FrozenJsonValue, configuration: Readonly<Record<string, FrozenJsonValue>>): Promise<HostOperationExecution>;
-}
 
 export interface LangGraphCoordinatorHostOptions {
   readonly invocation: HostInvocation;
