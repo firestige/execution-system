@@ -10,6 +10,7 @@ function compilableActivation(mutate: (draft: any) => void = () => {}): RunnerAc
     mutate(draft);
     for (const executor of Object.values(draft.program.execution.agents) as any[]) {
       executor.sessionCompatibilityIdentity = canonicalDigest(executor.session);
+      executor.bindingIdentity = canonicalDigest({ session: executor.session, turn: executor.turn });
     }
   });
 }
@@ -337,5 +338,43 @@ describe("compileRunnerActivation", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "ACTIVATION_INVALID" } });
     expect(Object.isFrozen(result)).toBe(true);
     if (!result.ok) expect(Object.isFrozen(result.error.detail)).toBe(true);
+  });
+
+  it("rejects a parallel selection source whose producing site is outside the static site closure", () => {
+    const activation = compilableActivation((draft) => {
+      draft.program.control.nodes = [{
+        id: "node.parallel",
+        kind: "parallel",
+        branches: [{ id: "branch.review", action: "action.fixture", required: true }],
+        maxConcurrency: 1,
+        selection: {
+          source: {
+            kind: "site-result",
+            site: { kind: "node", nodeIdentity: "node.missing" },
+            slot: { kind: "whole" },
+          },
+        },
+        join: { kind: "collect" },
+      }];
+      draft.program.control.entryNode = "node.parallel";
+      draft.program.control.ordinarySuccessor[0].from = "node.parallel";
+      draft.program.execution.sites[0].site = {
+        kind: "parallel-branch",
+        nodeIdentity: "node.parallel",
+        branchIdentity: "branch.review",
+      };
+    });
+
+    expectCompileError(activation, "DATAFLOW_CLOSURE_INVALID");
+  });
+
+  it("rejects an executor binding identity that does not cover its admitted session and turn", () => {
+    const activation = mutatedRunnerActivation((draft) => {
+      const executor = draft.program.execution.agents["executor.fixture"];
+      executor.sessionCompatibilityIdentity = canonicalDigest(executor.session);
+      executor.bindingIdentity = `sha256:${"0".repeat(64)}`;
+    });
+
+    expectCompileError(activation, "SESSION_BINDING_INVALID");
   });
 });

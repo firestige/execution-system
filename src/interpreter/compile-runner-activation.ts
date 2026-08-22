@@ -110,6 +110,7 @@ function compileExecution(activation: RunnerActivationContext, control: Compiled
   for (const [identity, executor] of Object.entries(admitted.agents)) {
     if (executor.identity !== identity) throw new CompileIssue("EXECUTION_CLOSURE_INVALID", `executor key mismatch at '${identity}'`);
     if (canonicalDigest(executor.session) !== executor.sessionCompatibilityIdentity) throw new CompileIssue("SESSION_BINDING_INVALID", `session compatibility identity mismatch for '${identity}'`);
+    if (canonicalDigest({ session: executor.session, turn: executor.turn }) !== executor.bindingIdentity) throw new CompileIssue("SESSION_BINDING_INVALID", `executor binding identity mismatch for '${identity}'`);
   }
   for (const [identity, operation] of Object.entries(admitted.hostOperations)) if (operation.identity !== identity) throw new CompileIssue("EXECUTION_CLOSURE_INVALID", `Host operation key mismatch at '${identity}'`);
 
@@ -178,6 +179,7 @@ function producerKey(source: SourcePortRef): ProducerKey | undefined {
 
 function compileDataflow(activation: RunnerActivationContext, execution: CompiledExecutorCatalog, control: CompiledControlGraph): CompiledDataflowPlan {
   for (const decision of activation.program.control.decisions) assertSourceClosure(decision.source, execution, control);
+  for (const node of activation.program.control.nodes) if (node.kind === "parallel" && node.selection !== undefined) assertSourceClosure(node.selection.source, execution, control);
   for (const executor of Object.values(activation.program.execution.agents)) if (executor.session.policy.scope.kind === "data-bound") assertSourceClosure(executor.session.policy.scope.source, execution, control);
   const incomingBySite = new Map<string, CompiledDataEdge[]>();
   const incomingByControl = new Map<string, CompiledDataEdge[]>();
