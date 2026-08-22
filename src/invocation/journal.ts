@@ -7,6 +7,7 @@ import type {
   InvocationDispatch,
   InvocationJournalRef,
   ManagedSessionRef,
+  KnownOwnerRetirementDisposition,
 } from "../contracts/index.js";
 
 export type InvocationJournalStatus = "starting" | "running" | "awaiting-input" | "completed" | "failed" | "invalid" | "unknown" | "cancelled";
@@ -30,6 +31,10 @@ export interface DurableSessionAffinityIndex {
   readonly generation: number;
 }
 
+export interface DurableInvocationRetirementTombstone {
+  readonly disposition: KnownOwnerRetirementDisposition<"invocation">;
+}
+
 export interface InvocationJournalStore {
   load(invocationIdentity: string): Promise<DurableInvocationJournal | undefined>;
   create(journal: DurableInvocationJournal): Promise<boolean>;
@@ -40,6 +45,8 @@ export interface InvocationJournalStore {
   loadAffinity(affinityIdentity: string): Promise<DurableSessionAffinityIndex | undefined>;
   bindAffinity(index: DurableSessionAffinityIndex): Promise<void>;
   deleteAffinity(affinityIdentity: string): Promise<void>;
+  loadRetirement(deliveryIdentity: string): Promise<DurableInvocationRetirementTombstone | undefined>;
+  saveRetirement(tombstone: DurableInvocationRetirementTombstone): Promise<DurableInvocationRetirementTombstone>;
 }
 
 function safeIdentity(identity: string): string {
@@ -60,6 +67,11 @@ export class FileInvocationJournalStore implements InvocationJournalStore {
     if (!/^[a-zA-Z0-9._:-]+$/.test(identity)) throw new TypeError("invalid session affinity identity");
     const filename = createHash("sha256").update(identity).digest("hex");
     return join(this.directory, "affinity", `${filename}.json`);
+  }
+
+  private retirementFilename(deliveryIdentity: string): string {
+    const filename = createHash("sha256").update(deliveryIdentity).digest("hex");
+    return join(this.directory, "retirement", `${filename}.json`);
   }
 
   private async exclusive<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -154,6 +166,20 @@ export class FileInvocationJournalStore implements InvocationJournalStore {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
+    });
+  }
+
+  async loadRetirement(deliveryIdentity: string): Promise<DurableInvocationRetirementTombstone | undefined> {
+    return this.read(this.retirementFilename(deliveryIdentity));
+  }
+
+  async saveRetirement(tombstone: DurableInvocationRetirementTombstone): Promise<DurableInvocationRetirementTombstone> {
+    const deliveryIdentity = tombstone.disposition.authorization.delivery.deliveryIdentity;
+    return this.exclusive(`retirement:${deliveryIdentity}`, async () => {
+      const existing = await this.loadRetirement(deliveryIdentity);
+      if (existing !== undefined) return existing;
+      await this.write(this.retirementFilename(deliveryIdentity), tombstone);
+      return tombstone;
     });
   }
 }

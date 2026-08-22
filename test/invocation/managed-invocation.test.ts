@@ -204,6 +204,21 @@ class ScriptedFactory implements NativeProviderSessionFactory {
   }
 }
 
+class CountingJournalStore extends FileInvocationJournalStore {
+  journalDeleteCount = 0;
+  affinityDeleteCount = 0;
+
+  override async delete(identity: string): Promise<void> {
+    this.journalDeleteCount += 1;
+    await super.delete(identity);
+  }
+
+  override async deleteAffinity(identity: string): Promise<void> {
+    this.affinityDeleteCount += 1;
+    await super.deleteAffinity(identity);
+  }
+}
+
 function sink() {
   const frames: unknown[] = [];
   const value: ActionOutputSink = {
@@ -220,7 +235,7 @@ async function harness(turns: readonly (readonly NativeTurnEvent[])[]) {
   temporaryDirectories.push(directory);
   const provider = new ScriptedFactory(new ScriptedSession(turns));
   const credentials = new LeaseBroker();
-  const journal = new FileInvocationJournalStore(directory);
+  const journal = new CountingJournalStore(directory);
   const manager = createManagedInvocation({
     providers: { "dsh-headless": provider },
     credentials,
@@ -563,7 +578,25 @@ describe("managed Invocation", () => {
     expect(await fixture.manager.control.retire(wrong)).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
 
     const authorization = { identity: "retirement-1", delivery: delivery() } as unknown as RetirementAuthorizationRef;
-    expect(await fixture.manager.control.retire(authorization)).toMatchObject({ ok: true, value: { reference: { owner: "invocation" }, state: "retired" } });
+    expect(await fixture.manager.control.retire(authorization)).toEqual({ ok: true, value: { owner: "invocation", authorization, state: "retired" } });
+  });
+
+  it("durably replays the same retirement fact after response loss without repeating cleanup", async () => {
+    const fixture = await harness([[{ kind: "structured-completion", result: { accepted: true } }]]);
+    const activeDispatch = dispatch();
+    await fixture.manager.host.start(activeDispatch, sink().value);
+    const authorization = { identity: "retirement-retry", delivery: delivery() } as unknown as RetirementAuthorizationRef;
+
+    const lostResponse = await fixture.manager.control.retire(authorization);
+    expect(lostResponse).toEqual({ ok: true, value: { owner: "invocation", authorization, state: "retired" } });
+    expect(await fixture.journal.list()).toEqual([]);
+    expect(await fixture.journal.loadAffinity(activeDispatch.session.identity)).toBeUndefined();
+    const cleanupCounts = [fixture.journal.journalDeleteCount, fixture.journal.affinityDeleteCount];
+
+    expect(await fixture.manager.control.retire(authorization)).toEqual(lostResponse);
+    expect([fixture.journal.journalDeleteCount, fixture.journal.affinityDeleteCount]).toEqual(cleanupCounts);
+    const differentAuthorization = { ...authorization, identity: "retirement-different" } as unknown as RetirementAuthorizationRef;
+    expect(await fixture.manager.control.retire(differentAuthorization)).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
   });
 
   it("preserves a terminal journal when cancellation arrives after completion", async () => {
