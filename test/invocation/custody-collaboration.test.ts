@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AbsolutePath, AuthorizedWorkspaceCapability, InvocationDispatch, WorkspaceRelativePath } from "../../src/contracts/index.js";
+import { canonicalDigest, type AbsolutePath, type AuthorizedWorkspaceCapability, type InvocationDispatch, type WorkspaceRelativePath } from "../../src/contracts/index.js";
 import { createGitCustody } from "../../src/custody/git-custody.js";
 import { FileInvocationJournalStore, createManagedInvocation, type NativeProviderSessionFactory } from "../../src/invocation/index.js";
 
@@ -16,27 +16,41 @@ function git(repository: string, ...args: string[]) {
 
 function dispatch(episode: Record<string, unknown>, workspace: AuthorizedWorkspaceCapability, access: readonly { mode: "read" | "write"; path: string }[]): InvocationDispatch {
   const delivery = (episode.thread as { delivery: unknown }).delivery;
+  const action = { identity: "action-1", purpose: "exercise signed custody capability", inputSchema: { kind: "ABSENT" }, resultSchema: { type: "object" }, gate: { kind: "none" } };
+  const session = {
+    roleIdentity: "role-1",
+    routeIdentity: "route-1",
+    agent: { resourceIdentity: "agent-1", contentIdentity: `sha256:${"3".repeat(64)}`, projectionIdentity: `sha256:${"4".repeat(64)}`, localReadOnlyPath: "/admitted/agent.md" },
+    model: { resourceIdentity: "model-1", contentIdentity: `sha256:${"5".repeat(64)}`, projectionIdentity: `sha256:${"6".repeat(64)}`, providerModelIdentity: "deepseek-chat", configuration: {} },
+    driver: { resourceIdentity: "driver-1", projectionIdentity: `sha256:${"7".repeat(64)}`, providerIdentity: "dsh-headless", configuration: { providerRoute: "deepseek", credentialRef: "DEEPSEEK_API_KEY" } },
+    instructions: { resourceIdentity: "instructions-1", contentIdentity: `sha256:${"8".repeat(64)}`, localReadOnlyPath: "/admitted/instructions.md" },
+    tools: [],
+    providedCapabilities: ["structured-completion"],
+    policy: { identity: "policy-1", scope: { kind: "episode" }, isolation: "isolated" },
+  };
+  const sessionCompatibilityIdentity = canonicalDigest(session);
+  const turn = { access };
+  const executorBindingIdentity = canonicalDigest({ session, turn });
+  const scopeValueIdentity = canonicalDigest(episode);
+  const affinityIdentity = canonicalDigest({ deliveryIdentity: (delivery as { deliveryIdentity: string }).deliveryIdentity, sessionCompatibilityIdentity, scopeValueIdentity, isolation: "isolated" });
   return {
     episode,
-    plan: { actionIdentity: "action-1", executorIdentity: "executor-1", bindingIdentity: `sha256:${"a".repeat(64)}` },
-    action: { identity: "action-1", resultSchema: { type: "object" } },
+    plan: { actionIdentity: "action-1", executorIdentity: "executor-1", bindingIdentity: canonicalDigest({ site: episode.site, action, executorBindingIdentity }) },
+    action,
     executor: {
       identity: "executor-1",
-      bindingIdentity: `sha256:${"b".repeat(64)}`,
-      sessionCompatibilityIdentity: `sha256:${"c".repeat(64)}`,
-      session: {
-        driver: { providerIdentity: "dsh-headless", configuration: {} },
-        providedCapabilities: ["structured-completion"],
-      },
-      turn: { access },
+      bindingIdentity: executorBindingIdentity,
+      sessionCompatibilityIdentity,
+      session,
+      turn,
     },
     input: { task: "use signed capability" },
     workspace,
     session: {
-      identity: `affinity-${String(episode.invocationIdentity)}`,
+      identity: affinityIdentity,
       delivery,
-      sessionCompatibilityIdentity: `sha256:${"c".repeat(64)}`,
-      scopeValueIdentity: `sha256:${"d".repeat(64)}`,
+      sessionCompatibilityIdentity,
+      scopeValueIdentity,
       isolation: "isolated",
     },
   } as unknown as InvocationDispatch;

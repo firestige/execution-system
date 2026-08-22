@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { FileInvocationJournalStore, type DurableInvocationJournal } from "../../src/invocation/index.js";
+import { FileInvocationJournalStore, type DurableInvocationJournal, type DurableSessionAffinityIndex } from "../../src/invocation/index.js";
 
 const directories: string[] = [];
 afterEach(async () => Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))));
@@ -46,5 +46,27 @@ describe("FileInvocationJournalStore", () => {
     await writeFile(join(directory, "broken.json"), "not-json", "utf8");
     await expect(store.load("broken")).rejects.toBeInstanceOf(SyntaxError);
     await expect(store.list()).rejects.toBeInstanceOf(SyntaxError);
+  });
+
+  it("persists an exact affinity to opaque-native-session index and uses collision-free atomic writes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "g03-store-"));
+    directories.push(directory);
+    const store = new FileInvocationJournalStore(directory);
+    const affinity = {
+      affinity: { identity: "affinity-1" },
+      opaqueNativeSessionIdentity: "native-1",
+      bindingIdentity: "binding-1",
+      generation: 1,
+    } as unknown as DurableSessionAffinityIndex;
+
+    expect(await store.loadAffinity("affinity-1")).toBeUndefined();
+    await store.bindAffinity(affinity);
+    expect(await store.loadAffinity("affinity-1")).toEqual(affinity);
+    await Promise.all(Array.from({ length: 20 }, () => store.save(journal("same-invocation"))));
+    expect(await store.load("same-invocation")).toMatchObject({ opaqueNativeSessionIdentity: "native-same-invocation" });
+    await store.deleteAffinity("affinity-1");
+    expect(await store.loadAffinity("affinity-1")).toBeUndefined();
+    await store.deleteAffinity("missing-affinity");
+    await expect(store.loadAffinity("../escape")).rejects.toThrow("invalid session affinity identity");
   });
 });

@@ -92,13 +92,29 @@ function validateDispatch(dispatch: InvocationDispatch): InvocationCallError | u
   if (dispatch.plan.actionIdentity !== dispatch.action.identity || dispatch.plan.executorIdentity !== dispatch.executor.identity) {
     return { code: "EXECUTOR_BINDING_MISMATCH" };
   }
+  if (digest(dispatch.executor.session) !== dispatch.executor.sessionCompatibilityIdentity) return { code: "SESSION_AFFINITY_MISMATCH" };
+  if (digest({ session: dispatch.executor.session, turn: dispatch.executor.turn }) !== dispatch.executor.bindingIdentity) return { code: "EXECUTOR_BINDING_MISMATCH" };
+  if (digest({ site: dispatch.episode.site, action: dispatch.action, executorBindingIdentity: dispatch.executor.bindingIdentity }) !== dispatch.plan.bindingIdentity) return { code: "EXECUTOR_BINDING_MISMATCH" };
   if (dispatch.session.sessionCompatibilityIdentity !== dispatch.executor.sessionCompatibilityIdentity) return { code: "SESSION_AFFINITY_MISMATCH" };
+  if (digest({
+    deliveryIdentity: dispatch.session.delivery.deliveryIdentity,
+    sessionCompatibilityIdentity: dispatch.session.sessionCompatibilityIdentity,
+    scopeValueIdentity: dispatch.session.scopeValueIdentity,
+    isolation: dispatch.session.isolation,
+  }) !== dispatch.session.identity) return { code: "SESSION_AFFINITY_MISMATCH" };
   if (!deliveryMatches(dispatch.session.delivery, dispatch.episode.thread.delivery)) return { code: "CORRELATION_MISMATCH" };
   if (dispatch.workspace.kind === "write" && !episodeMatches(dispatch.workspace.handle.episode, dispatch.episode)) return { code: "CAPABILITY_MISMATCH" };
   if (dispatch.workspace.kind === "read" && !episodeMatches(dispatch.workspace.view.episode, dispatch.episode)) return { code: "CAPABILITY_MISMATCH" };
+  if (dispatch.workspace.kind === "write" && dispatch.workspace.handle.accessDigest !== digest(dispatch.executor.turn.access)) return { code: "CAPABILITY_MISMATCH" };
+  if (dispatch.workspace.kind === "read" && dispatch.workspace.view.accessDigest !== digest(dispatch.executor.turn.access)) return { code: "CAPABILITY_MISMATCH" };
   if (dispatch.workspace.kind === "none" && dispatch.executor.turn.access.length > 0) return { code: "CAPABILITY_MISMATCH" };
   if (dispatch.workspace.kind === "read" && dispatch.executor.turn.access.some((access) => access.mode === "write")) return { code: "CAPABILITY_MISMATCH" };
   if (!dispatch.executor.session.providedCapabilities.includes("structured-completion")) return { code: "CAPABILITY_MISMATCH" };
+  if (dispatch.executor.session.model.providerModelIdentity.length === 0) return { code: "MODEL_BINDING_MISMATCH" };
+  if (dispatch.executor.session.driver.providerIdentity === "dsh-headless") {
+    const providerRoute = (dispatch.executor.session.driver.configuration as Record<string, unknown>).providerRoute;
+    if (typeof providerRoute !== "string" || providerRoute.length === 0) return { code: "MODEL_BINDING_MISMATCH" };
+  }
   return undefined;
 }
 
@@ -112,6 +128,22 @@ function failed(error: InvocationCallError): Result<never, InvocationCallError> 
 
 export function createManagedInvocation(options: ManagedInvocationOptions): ManagedInvocation {
   const live = new Map<string, NativeProviderSession>();
+
+  function cancelledDisposition(journal: DurableInvocationJournal): InvocationDisposition {
+    return {
+      kind: "failed",
+      episode: journal.reference.episode,
+      failure: { code: "PROVIDER_CANCELLED", retry: "same-episode", detail: {} },
+      session: { state: "known", value: journal.session },
+      journal: journal.reference,
+    };
+  }
+
+  async function commitUnlessCancelled(next: DurableInvocationJournal): Promise<boolean> {
+    const observed = await options.journal.update(next.reference.episode.invocationIdentity, (current) =>
+      current?.status === "cancelled" ? current : next);
+    return observed?.status !== "cancelled";
+  }
 
   async function consume(
     journal: DurableInvocationJournal,
@@ -168,7 +200,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
     const base = { ...journal, nextOutputSequence: nextSequence, redactedEvents };
     if (providerFailure !== undefined) {
       const saved = { ...base, status: "failed" as const, pendingInput: undefined };
-      await options.journal.save(saved);
+      if (!await commitUnlessCancelled(saved)) return cancelledDisposition(journal);
       return {
         kind: "failed",
         episode: journal.reference.episode,
@@ -178,25 +210,36 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
       };
     }
     if (completions.length > 1) {
-      await options.journal.save({ ...base, status: "invalid", pendingInput: undefined });
+      if (!await commitUnlessCancelled({ ...base, status: "invalid", pendingInput: undefined })) return cancelledDisposition(journal);
       return { kind: "invalid", episode: journal.reference.episode, violation: { code: "DUPLICATE_COMPLETION", detail: {} }, session: journal.session, journal: journal.reference };
     }
     const completion = completions[0];
     if (completion !== undefined && pending !== undefined) {
-      await options.journal.save({ ...base, status: "invalid", pendingInput: pending });
+      if (!await commitUnlessCancelled({ ...base, status: "invalid", pendingInput: pending })) return cancelledDisposition(journal);
       return { kind: "invalid", episode: journal.reference.episode, violation: { code: "PENDING_INPUT_AT_COMPLETION", detail: {} }, session: journal.session, journal: journal.reference };
     }
     if (completion !== undefined) {
       const valid = options.validateResult(journal.dispatch.action.resultSchema, completion);
-      await options.journal.save({ ...base, status: valid ? "completed" : "invalid", pendingInput: undefined });
+      if (!await commitUnlessCancelled({ ...base, status: valid ? "completed" : "invalid", pendingInput: undefined })) return cancelledDisposition(journal);
       if (!valid) return { kind: "invalid", episode: journal.reference.episode, violation: { code: "RESULT_SCHEMA_INVALID", detail: {} }, session: journal.session, journal: journal.reference };
       return { kind: "completed", episode: journal.reference.episode, result: completion, session: journal.session, interactionReceipts: journal.interactionReceipts, journal: journal.reference };
     }
     if (pending !== undefined) {
-      await options.journal.save({ ...base, status: "awaiting-input", pendingInput: pending });
+      if (!journal.dispatch.executor.session.providedCapabilities.includes("action-interaction")) {
+        const denied = { ...base, status: "failed" as const, pendingInput: undefined };
+        if (!await commitUnlessCancelled(denied)) return cancelledDisposition(journal);
+        return {
+          kind: "failed",
+          episode: journal.reference.episode,
+          failure: { code: "PROVIDER_PROTOCOL_ERROR", retry: "never", detail: { reason: "action interaction capability not admitted" } },
+          session: { state: "known", value: journal.session },
+          journal: journal.reference,
+        };
+      }
+      if (!await commitUnlessCancelled({ ...base, status: "awaiting-input", pendingInput: pending })) return cancelledDisposition(journal);
       return { kind: "awaiting-input", episode: journal.reference.episode, request: pending, session: journal.session, journal: journal.reference };
     }
-    await options.journal.save({ ...base, status: "invalid", pendingInput: undefined });
+    if (!await commitUnlessCancelled({ ...base, status: "invalid", pendingInput: undefined })) return cancelledDisposition(journal);
     return { kind: "invalid", episode: journal.reference.episode, violation: { code: "TURN_ENDED_WITHOUT_DISPOSITION", detail: {} }, session: journal.session, journal: journal.reference };
   }
 
@@ -204,43 +247,93 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
     async start(dispatch, output) {
       const validationError = validateDispatch(dispatch);
       if (validationError !== undefined) return failed(validationError);
-      if (await options.journal.load(dispatch.episode.invocationIdentity) !== undefined) return failed({ code: "CORRELATION_MISMATCH" });
       const provider = options.providers[dispatch.executor.session.driver.providerIdentity];
       if (provider === undefined) return failed({ code: "PROVIDER_NOT_IMPLEMENTED" });
+      const affinity = await options.journal.loadAffinity(dispatch.session.identity);
+      if (affinity !== undefined && (
+        affinity.affinity.sessionCompatibilityIdentity !== dispatch.session.sessionCompatibilityIdentity ||
+        affinity.affinity.scopeValueIdentity !== dispatch.session.scopeValueIdentity ||
+        affinity.affinity.isolation !== dispatch.session.isolation ||
+        !deliveryMatches(affinity.affinity.delivery, dispatch.session.delivery)
+      )) return failed({ code: "SESSION_AFFINITY_MISMATCH" });
+      const generation = (affinity?.generation ?? 0) + 1;
+      const reservedSession = affinity === undefined
+        ? managedSession(dispatch, "pending-native-session", generation)
+        : { bindingIdentity: affinity.bindingIdentity, affinity: dispatch.session, generation };
+      const reservation: DurableInvocationJournal = {
+        reference: reference(dispatch),
+        dispatch,
+        session: reservedSession,
+        opaqueNativeSessionIdentity: affinity?.opaqueNativeSessionIdentity ?? "",
+        status: "starting",
+        nextOutputSequence: 0,
+        interactionReceipts: [],
+        redactedEvents: [],
+      };
+      if (!await options.journal.create(reservation)) return failed({ code: "CORRELATION_MISMATCH" });
       let lease;
       try {
         lease = await options.credentials.acquire(dispatch);
       } catch {
+        await options.journal.delete(dispatch.episode.invocationIdentity);
         return failed({ code: "CREDENTIAL_ACQUISITION_FAILED" });
       }
       const controller = new AbortController();
       let session: NativeProviderSession | undefined;
+      let activeJournal: DurableInvocationJournal | undefined;
       try {
-        session = await provider.open({ dispatch, credentials: lease.material, signal: controller.signal });
+        session = affinity === undefined
+          ? await provider.open({ dispatch, credentials: lease.material, signal: controller.signal })
+          : await provider.restore({ opaqueIdentity: affinity.opaqueNativeSessionIdentity, dispatch, credentials: lease.material, signal: controller.signal });
+        if (affinity !== undefined && session.opaqueIdentity !== affinity.opaqueNativeSessionIdentity) throw new Error("provider restored a different native session identity");
         live.set(dispatch.episode.invocationIdentity, session);
         const journal: DurableInvocationJournal = {
-          reference: reference(dispatch),
-          dispatch,
-          session: managedSession(dispatch, session.opaqueIdentity, 1),
+          ...reservation,
+          session: affinity === undefined ? managedSession(dispatch, session.opaqueIdentity, generation) : reservedSession,
           opaqueNativeSessionIdentity: session.opaqueIdentity,
           status: "running",
-          nextOutputSequence: 0,
-          interactionReceipts: [],
-          redactedEvents: [],
         };
-        await options.journal.save(journal);
-        return ok(await consume(journal, session, dispatch.input, output, Object.values(lease.material)));
+        const activated = await options.journal.update(dispatch.episode.invocationIdentity, (current) =>
+          current?.status === "starting" ? journal : current);
+        if (activated?.status === "cancelled") {
+          await session.cancel().catch(() => undefined);
+          return ok(cancelledDisposition({ ...journal, status: "cancelled" }));
+        }
+        if (activated?.status !== "running") throw new Error("invocation start journal state is unavailable");
+        activeJournal = activated;
+        await options.journal.bindAffinity({
+          affinity: dispatch.session,
+          opaqueNativeSessionIdentity: session.opaqueIdentity,
+          bindingIdentity: activated.session.bindingIdentity,
+          generation,
+        });
+        return ok(await consume(activated, session, dispatch.input, output, Object.values(lease.material)));
       } catch (error) {
         if (error !== null && typeof error === "object" && (error as { code?: unknown }).code === "PROVIDER_NOT_IMPLEMENTED") {
+          await options.journal.delete(dispatch.episode.invocationIdentity);
           return failed({ code: "PROVIDER_NOT_IMPLEMENTED" });
         }
         if (session !== undefined) {
+          const lastKnownJournal = activeJournal ?? reservation;
+          const observed = await options.journal.update(dispatch.episode.invocationIdentity, (current) => current?.status === "cancelled" ? current : { ...lastKnownJournal, status: "unknown" });
+          if (observed?.status === "cancelled") return ok(cancelledDisposition(observed));
           return ok({
             kind: "unknown",
             episode: dispatch.episode,
             uncertainty: { state: "unknown", owner: "invocation", reason: "CALL_INTERRUPTED" },
-            session: { state: "known", value: managedSession(dispatch, session.opaqueIdentity, 1) },
+            session: { state: "known", value: lastKnownJournal.session },
             journal: { state: "unknown", owner: "invocation", reason: "CALL_INTERRUPTED" },
+          });
+        }
+        const observed = await options.journal.update(dispatch.episode.invocationIdentity, (current) => current?.status === "cancelled" ? current : { ...reservation, status: "failed" });
+        if (observed?.status === "cancelled") return ok(cancelledDisposition(observed));
+        if (affinity !== undefined) {
+          return ok({
+            kind: "unknown",
+            episode: dispatch.episode,
+            uncertainty: { state: "unknown", owner: "invocation", reason: "CHILD_UNREACHABLE" },
+            session: { state: "known", value: reservedSession },
+            journal: { state: "known", value: reservation.reference },
           });
         }
         return ok({
@@ -263,7 +356,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
         return failed({ code: "CORRELATION_MISMATCH" });
       }
       if (request.response.contentIdentity !== digest(request.response.content) || !options.validateResult(journal.pendingInput.responseSchema, request.response.content)) {
-        await options.journal.save({ ...journal, status: "invalid", pendingInput: undefined });
+        if (!await commitUnlessCancelled({ ...journal, status: "invalid", pendingInput: undefined })) return ok(cancelledDisposition(journal));
         return ok({
           kind: "invalid",
           episode: request.episode,
@@ -289,9 +382,13 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
           credentials: lease.material,
           signal: controller.signal,
         });
+        if (session.opaqueIdentity !== journal.opaqueNativeSessionIdentity) throw new Error("provider restored a different native session identity");
       } catch {
         const unknownJournal = { ...journal, status: "unknown" as const, pendingInput: journal.pendingInput };
-        await options.journal.save(unknownJournal);
+        if (!await commitUnlessCancelled(unknownJournal)) {
+          await lease.release().catch(() => undefined);
+          return ok(cancelledDisposition(journal));
+        }
         await lease.release().catch(() => undefined);
         return ok({
           kind: "unknown",
@@ -314,8 +411,14 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
           pendingInput: undefined,
           interactionReceipts: [...journal.interactionReceipts, receipt],
         };
-        await options.journal.save(resumedJournal);
-        return ok(await consume(resumedJournal, session, { kind: "interaction-response", response: request.response }, output, Object.values(lease.material)));
+        const activated = await options.journal.update(request.episode.invocationIdentity, (current) =>
+          current?.status === "awaiting-input" ? resumedJournal : current);
+        if (activated?.status === "cancelled") {
+          await session.cancel().catch(() => undefined);
+          return ok(cancelledDisposition(journal));
+        }
+        if (activated?.status !== "running") return failed({ code: "SESSION_STATE_UNKNOWN" });
+        return ok(await consume(activated, session, { kind: "interaction-response", response: request.response }, output, Object.values(lease.material)));
       } catch {
         return ok({
           kind: "unknown",
@@ -339,7 +442,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
   const control: CoordinatorInvocationControl = {
     async inspect(delivery) {
       const journals = await journalsFor(delivery);
-      const process = journals.some((journal) => journal.status === "running" || journal.status === "awaiting-input") ? "running" :
+      const process = journals.some((journal) => journal.status === "starting" || journal.status === "running") ? "running" :
         journals.some((journal) => journal.status === "completed" || journal.status === "failed" || journal.status === "invalid") ? "terminal" : "stopped";
       return ok({
         delivery,
@@ -352,11 +455,14 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
     async cancel(request) {
       const journals = await journalsFor(request.delivery);
       for (const journal of journals) {
-        if (journal.status !== "running" && journal.status !== "awaiting-input") continue;
-        await live.get(journal.reference.episode.invocationIdentity)?.cancel().catch(() => undefined);
-        await options.journal.save({ ...journal, status: "cancelled", pendingInput: undefined });
+        if (journal.status !== "starting" && journal.status !== "running" && journal.status !== "awaiting-input") continue;
+        const cancelled = await options.journal.update(journal.reference.episode.invocationIdentity, (current) =>
+          current !== undefined && (current.status === "starting" || current.status === "running" || current.status === "awaiting-input")
+            ? { ...current, status: "cancelled", pendingInput: undefined }
+            : current);
+        if (cancelled?.status === "cancelled") await live.get(journal.reference.episode.invocationIdentity)?.cancel().catch(() => undefined);
       }
-      const process = journals.some((journal) => journal.status === "running" || journal.status === "awaiting-input") ? "stopped" :
+      const process = journals.some((journal) => journal.status === "starting" || journal.status === "running" || journal.status === "awaiting-input") ? "stopped" :
         journals.some((journal) => journal.status === "completed" || journal.status === "failed" || journal.status === "invalid") ? "terminal" : "stopped";
       return ok({
         delivery: request.delivery,
@@ -377,6 +483,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
         if (live.has(journal.reference.episode.invocationIdentity)) return failed({ code: "RETIREMENT_NOT_AUTHORIZED" });
       }
       await Promise.all(journals.map((journal) => options.journal.delete(journal.reference.episode.invocationIdentity)));
+      await Promise.all([...new Set(journals.map((journal) => journal.session.affinity.identity))].map((identity) => options.journal.deleteAffinity(identity)));
       const value: OwnerRetirementDisposition = {
         reference: {
           identity: `invocation-retirement-${digest(authorization).slice("sha256:".length, "sha256:".length + 24)}` as never,

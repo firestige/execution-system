@@ -8,6 +8,7 @@ import type {
   InvocationDispatch,
   RetirementAuthorizationRef,
 } from "../../src/contracts/index.js";
+import { canonicalDigest } from "../../src/contracts/index.js";
 import {
   FileInvocationJournalStore,
   createManagedInvocation,
@@ -46,15 +47,37 @@ function episode() {
   } as const;
 }
 
+function bindDispatch(value: InvocationDispatch): InvocationDispatch {
+  const mutable = value as unknown as {
+    executor: { bindingIdentity: string; sessionCompatibilityIdentity: string; session: unknown; turn: { access: unknown } };
+    plan: { bindingIdentity: string };
+    session: { identity: string; sessionCompatibilityIdentity: string; delivery: { deliveryIdentity: string }; scopeValueIdentity: string; isolation: string };
+    workspace: { kind: string; handle?: { accessDigest: string }; view?: { accessDigest: string } };
+    episode: { site: unknown };
+    action: unknown;
+  };
+  mutable.executor.sessionCompatibilityIdentity = canonicalDigest(mutable.executor.session);
+  mutable.executor.bindingIdentity = canonicalDigest({ session: mutable.executor.session, turn: mutable.executor.turn });
+  mutable.plan.bindingIdentity = canonicalDigest({ site: mutable.episode.site, action: mutable.action, executorBindingIdentity: mutable.executor.bindingIdentity });
+  mutable.session.sessionCompatibilityIdentity = mutable.executor.sessionCompatibilityIdentity;
+  mutable.session.identity = canonicalDigest({
+    deliveryIdentity: mutable.session.delivery.deliveryIdentity,
+    sessionCompatibilityIdentity: mutable.session.sessionCompatibilityIdentity,
+    scopeValueIdentity: mutable.session.scopeValueIdentity,
+    isolation: mutable.session.isolation,
+  });
+  if (mutable.workspace.kind === "write") mutable.workspace.handle!.accessDigest = canonicalDigest(mutable.executor.turn.access);
+  if (mutable.workspace.kind === "read") mutable.workspace.view!.accessDigest = canonicalDigest(mutable.executor.turn.access);
+  return value;
+}
+
 function dispatch(): InvocationDispatch {
-  const sessionCompatibilityIdentity = `sha256:${"c".repeat(64)}` as const;
-  const bindingIdentity = `sha256:${"d".repeat(64)}` as const;
-  return {
+  const value = {
     episode: episode() as InvocationDispatch["episode"],
     plan: {
       actionIdentity: "action-1",
       executorIdentity: "executor-1",
-      bindingIdentity,
+      bindingIdentity: `sha256:${"d".repeat(64)}`,
     } as InvocationDispatch["plan"],
     action: {
       identity: "action-1",
@@ -70,8 +93,8 @@ function dispatch(): InvocationDispatch {
     } as unknown as InvocationDispatch["action"],
     executor: {
       identity: "executor-1",
-      bindingIdentity,
-      sessionCompatibilityIdentity,
+      bindingIdentity: `sha256:${"d".repeat(64)}`,
+      sessionCompatibilityIdentity: `sha256:${"c".repeat(64)}`,
       session: {
         roleIdentity: "role-1",
         routeIdentity: "route-1",
@@ -92,7 +115,7 @@ function dispatch(): InvocationDispatch {
           resourceIdentity: "driver-resource-1",
           projectionIdentity: `sha256:${"3".repeat(64)}`,
           providerIdentity: "dsh-headless",
-          configuration: { credentialRef: "DEEPSEEK_API_KEY" },
+          configuration: { credentialRef: "DEEPSEEK_API_KEY", providerRoute: "deepseek" },
         },
         instructions: {
           resourceIdentity: "instruction-resource-1",
@@ -100,7 +123,7 @@ function dispatch(): InvocationDispatch {
           localReadOnlyPath: "/admitted/instructions.md",
         },
         tools: [],
-        providedCapabilities: ["structured-completion", "interaction"],
+        providedCapabilities: ["structured-completion", "action-interaction"],
         policy: { identity: "session-policy-1", scope: { kind: "episode" }, isolation: "isolated" },
       },
       turn: { access: [{ mode: "write", path: "src/**" }] },
@@ -118,11 +141,12 @@ function dispatch(): InvocationDispatch {
     session: {
       identity: "affinity-1",
       delivery: delivery(),
-      sessionCompatibilityIdentity,
+      sessionCompatibilityIdentity: `sha256:${"c".repeat(64)}`,
       scopeValueIdentity: `sha256:${"6".repeat(64)}`,
       isolation: "isolated",
     } as InvocationDispatch["session"],
-  };
+  } as unknown as InvocationDispatch;
+  return bindDispatch(value);
 }
 
 class LeaseBroker implements CredentialLeaseBroker {
@@ -315,13 +339,23 @@ describe("managed Invocation", () => {
     const cases: InvocationDispatch[] = [];
     const base = dispatch();
     cases.push({ ...base, plan: { ...base.plan, actionIdentity: "wrong-action" as never } });
+    cases.push({ ...base, plan: { ...base.plan, bindingIdentity: `sha256:${"0".repeat(64)}` } });
+    cases.push({ ...base, executor: { ...base.executor, bindingIdentity: `sha256:${"0".repeat(64)}` } });
     cases.push({ ...base, session: { ...base.session, sessionCompatibilityIdentity: `sha256:${"0".repeat(64)}` } });
+    cases.push({ ...base, session: { ...base.session, identity: "stale-affinity" as never } });
     cases.push({ ...base, session: { ...base.session, delivery: { ...base.session.delivery, deliveryIdentity: "wrong-delivery" as never } } });
     cases.push({ ...base, workspace: { kind: "write", handle: { ...base.workspace.kind === "write" ? base.workspace.handle : ({} as never), episode: { ...base.episode, invocationIdentity: "wrong-invocation" as never } } } });
+    cases.push({ ...base, workspace: { kind: "write", handle: { ...base.workspace.kind === "write" ? base.workspace.handle : ({} as never), accessDigest: `sha256:${"0".repeat(64)}` } } });
     cases.push({ ...base, workspace: { kind: "read", view: { viewIdentity: "view-1", episode: { ...base.episode, invocationIdentity: "wrong-invocation" }, source: (base.workspace as never as { handle: { savepoint: unknown } }).handle.savepoint, accessDigest: `sha256:${"5".repeat(64)}` } } as never });
     cases.push({ ...base, workspace: { kind: "none" } });
     cases.push({ ...base, workspace: { kind: "read", view: { viewIdentity: "view-1", episode: base.episode, source: (base.workspace as never as { handle: { savepoint: unknown } }).handle.savepoint, accessDigest: `sha256:${"5".repeat(64)}` } } as never });
     cases.push({ ...base, executor: { ...base.executor, session: { ...base.executor.session, providedCapabilities: [] } } });
+    const emptyModel = structuredClone(base) as InvocationDispatch;
+    (emptyModel.executor.session.model as { providerModelIdentity: string }).providerModelIdentity = "";
+    cases.push(bindDispatch(emptyModel));
+    const missingRoute = structuredClone(base) as InvocationDispatch;
+    (missingRoute.executor.session.driver as { configuration: unknown }).configuration = { credentialRef: "DEEPSEEK_API_KEY" };
+    cases.push(bindDispatch(missingRoute));
 
     for (const candidate of cases) {
       const fixture = await harness([[{ kind: "structured-completion", result: { accepted: true } }]]);
@@ -333,7 +367,9 @@ describe("managed Invocation", () => {
   it("fails start for missing provider, credential acquisition, duplicate episode, and provider open errors", async () => {
     const missing = await harness([]);
     const missingDispatch = dispatch();
-    const absentProvider = { ...missingDispatch, executor: { ...missingDispatch.executor, session: { ...missingDispatch.executor.session, driver: { ...missingDispatch.executor.session.driver, providerIdentity: "codex-cli" as const } } } };
+    const absentProvider = structuredClone(missingDispatch) as InvocationDispatch;
+    (absentProvider.executor.session.driver as { providerIdentity: string }).providerIdentity = "codex-cli";
+    bindDispatch(absentProvider);
     expect(await missing.manager.host.start(absentProvider, sink().value)).toEqual({ ok: false, error: { code: "PROVIDER_NOT_IMPLEMENTED" } });
 
     const noCredentials = await harness([]);
@@ -401,25 +437,83 @@ describe("managed Invocation", () => {
     expect(fixture.provider.restored).toEqual([]);
   });
 
-  it("does not equate invocation-plan binding identity with executor binding identity", async () => {
+  it("rejects a stale invocation-plan binding identity", async () => {
     const fixture = await harness([[{ kind: "structured-completion", result: { accepted: true } }]]);
     const input = dispatch();
     const independentPlan = { ...input, plan: { ...input.plan, bindingIdentity: `sha256:${"9".repeat(64)}` as const } };
 
-    expect(await fixture.manager.host.start(independentPlan, sink().value)).toMatchObject({ ok: true, value: { kind: "completed" } });
+    expect(await fixture.manager.host.start(independentPlan, sink().value)).toEqual({ ok: false, error: { code: "EXECUTOR_BINDING_MISMATCH" } });
+    expect(fixture.provider.openCount).toBe(0);
+  });
+
+  it("durably restores the exact native session for a compatible affinity across episodes", async () => {
+    const fixture = await harness([
+      [{ kind: "structured-completion", result: { accepted: true } }],
+      [{ kind: "structured-completion", result: { accepted: true } }],
+    ]);
+    const first = dispatch();
+    const firstMutable = structuredClone(first) as InvocationDispatch;
+    (firstMutable.executor.session.policy as { scope: unknown; isolation: string }).scope = { kind: "data-bound", source: { nodeIdentity: "node-source", port: "result" } };
+    (firstMutable.executor.session.policy as { scope: unknown; isolation: string }).isolation = "shared";
+    (firstMutable.session as { isolation: string }).isolation = "shared";
+    bindDispatch(firstMutable);
+    await fixture.manager.host.start(firstMutable, sink().value);
+
+    const second = structuredClone(firstMutable) as InvocationDispatch;
+    (second.episode as { invocationIdentity: string; attemptIdentity: string }).invocationIdentity = "invocation-2";
+    (second.episode as { invocationIdentity: string; attemptIdentity: string }).attemptIdentity = "attempt-2";
+    if (second.workspace.kind === "write") (second.workspace.handle as { episode: unknown }).episode = second.episode;
+    bindDispatch(second);
+
+    expect(await fixture.manager.host.start(second, sink().value)).toMatchObject({ ok: true, value: { kind: "completed" } });
+    expect(fixture.provider.openCount).toBe(1);
+    expect(fixture.provider.restored).toEqual(["native-session-1"]);
+  });
+
+  it("keeps awaiting-input quiescent and prevents cancellation from being overwritten by late completion", async () => {
+    const awaiting = await harness([[{ kind: "input-request", requestIdentity: "request-1", prompt: "?", responseSchema: {} }]]);
+    await awaiting.manager.host.start(dispatch(), sink().value);
+    expect(await awaiting.manager.control.inspect(delivery() as never)).toMatchObject({ ok: true, value: { process: { state: "known", value: "stopped" } } });
+
+    const racing = await harness([]);
+    let release!: () => void;
+    const running = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const enteredRun = new Promise<void>((resolve) => { entered = resolve; });
+    racing.provider.session.run = async () => {
+      entered();
+      await running;
+      return [{ kind: "structured-completion", result: { accepted: true } }];
+    };
+    const started = racing.manager.host.start(dispatch(), sink().value);
+    await enteredRun;
+    await racing.manager.control.cancel({ delivery: delivery() as never, reason: "DELIVERY_CANCELLED" });
+    release();
+
+    expect(await started).toMatchObject({ ok: true, value: { kind: "failed", failure: { code: "PROVIDER_CANCELLED" } } });
+    expect(await racing.manager.control.inspect(delivery() as never)).toMatchObject({ ok: true, value: { process: { state: "known", value: "stopped" } } });
+  });
+
+  it("fails closed on input suspension without the admitted action-interaction capability", async () => {
+    const fixture = await harness([[{ kind: "input-request", requestIdentity: "request-1", prompt: "?", responseSchema: {} }]]);
+    const input = dispatch();
+    const withoutInteraction = structuredClone(input) as InvocationDispatch;
+    (withoutInteraction.executor.session as unknown as { providedCapabilities: string[] }).providedCapabilities = ["structured-completion"];
+    bindDispatch(withoutInteraction);
+
+    expect(await fixture.manager.host.start(withoutInteraction, sink().value)).toMatchObject({
+      ok: true,
+      value: { kind: "failed", failure: { code: "PROVIDER_PROTOCOL_ERROR" } },
+    });
   });
 
   it("propagates typed unimplemented Provider errors without falling back", async () => {
     const directory = await mkdtemp(join(tmpdir(), "g03-journal-"));
     temporaryDirectories.push(directory);
     const input = dispatch();
-    const copilot = {
-      ...input,
-      executor: {
-        ...input.executor,
-        session: { ...input.executor.session, driver: { ...input.executor.session.driver, providerIdentity: "copilot-sdk" as const } },
-      },
-    };
+    const copilot = structuredClone(input) as InvocationDispatch;
+    (copilot.executor.session.driver as { providerIdentity: string }).providerIdentity = "copilot-sdk";
+    bindDispatch(copilot);
     const manager = createManagedInvocation({
       providers: { "copilot-sdk": createCopilotProviderShell() },
       credentials: new LeaseBroker(),
@@ -460,7 +554,7 @@ describe("managed Invocation", () => {
     await fixture.manager.host.start(dispatch(), sink().value);
 
     const inspected = await fixture.manager.control.inspect(delivery() as never);
-    expect(inspected).toMatchObject({ ok: true, value: { process: { state: "known", value: "running" } } });
+    expect(inspected).toMatchObject({ ok: true, value: { process: { state: "known", value: "stopped" } } });
 
     const cancelled = await fixture.manager.control.cancel({ delivery: delivery() as never, reason: "DELIVERY_CANCELLED" });
     expect(cancelled).toMatchObject({ ok: true, value: { process: { state: "known", value: "stopped" } } });
