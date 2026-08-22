@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -1090,11 +1091,13 @@ describe("LangGraph CoordinatorHost", () => {
     expect(await replacement.inspect(thread)).toEqual({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
     const afterResponseLoss = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: directory });
     expect(await afterResponseLoss.retire({ thread, authorization })).toEqual(retired);
-    const tombstoneFiles = readdirSync(path.join(directory, "host-retirement"));
-    expect(tombstoneFiles).toHaveLength(1);
-    expect(JSON.parse(readFileSync(path.join(directory, "host-retirement", tombstoneFiles[0]!), "utf8"))).toEqual({
+    const retirementDatabase = new DatabaseSync(path.join(directory, "host-checkpoints.sqlite"), { readOnly: true });
+    const tombstone = retirementDatabase.prepare("SELECT phase, fact, cleanup_count FROM host_retirements").get() as { phase: string; fact: string; cleanup_count: number };
+    retirementDatabase.close();
+    expect({ phase: tombstone.phase, fact: JSON.parse(tombstone.fact), cleanupCount: tombstone.cleanup_count }).toEqual({
       phase: "complete",
       fact: { owner: "host", authorization, state: "retired" },
+      cleanupCount: 1,
     });
     const mismatchedAuthorization = { identity: "retirement.other", delivery: thread.delivery } as never;
     expect(await afterResponseLoss.retire({ thread, authorization: mismatchedAuthorization })).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
@@ -1109,7 +1112,9 @@ describe("LangGraph CoordinatorHost", () => {
       session: { bindingIdentity: "session-binding.concurrent-retirement" as never, affinity: dispatch.session, generation: 1 },
       journal: { identity: "journal.concurrent-retirement" as never, episode: dispatch.episode },
     }));
-    const host = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: checkpointDirectory() });
+    const directory = checkpointDirectory();
+    const host = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: directory });
+    const overlappingHost = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: directory });
     const started = await host.start(actionActivation(), { publish: async () => ({ ok: true, value: undefined }) });
     if (!started.ok || started.value.kind !== "action-input") throw new Error("expected suspension");
     const thread = started.value.wait.checkpoint.thread;
@@ -1117,14 +1122,45 @@ describe("LangGraph CoordinatorHost", () => {
     const mismatchedAuthorization = { identity: "retirement.concurrent-other", delivery: thread.delivery } as never;
 
     const first = host.retire({ thread, authorization });
-    const exactReplay = host.retire({ thread, authorization });
-    const mismatch = host.retire({ thread, authorization: mismatchedAuthorization });
+    const exactReplay = overlappingHost.retire({ thread, authorization });
+    const mismatch = overlappingHost.retire({ thread, authorization: mismatchedAuthorization });
 
     const [firstResult, replayResult, mismatchResult] = await Promise.all([first, exactReplay, mismatch]);
     expect(firstResult).toEqual({ ok: true, value: { owner: "host", authorization, state: "retired" } });
     expect(replayResult).toEqual(firstResult);
     expect(mismatchResult).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
     expect(await host.inspect(thread)).toEqual({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
+    const retirementDatabase = new DatabaseSync(path.join(directory, "host-checkpoints.sqlite"), { readOnly: true });
+    expect(retirementDatabase.prepare("SELECT cleanup_count FROM host_retirements").get()).toEqual({ cleanup_count: 1 });
+    retirementDatabase.close();
+  });
+
+  it("recovers a durable pending retirement claim for the exact thread", async () => {
+    const custody = new FakeCustody();
+    const invocation = new FakeInvocation((dispatch) => ({
+      kind: "awaiting-input",
+      episode: dispatch.episode,
+      request: { identity: "interaction.pending-retirement" as never, episode: dispatch.episode, prompt: "input", responseSchema: {} },
+      session: { bindingIdentity: "session-binding.pending-retirement" as never, affinity: dispatch.session, generation: 1 },
+      journal: { identity: "journal.pending-retirement" as never, episode: dispatch.episode },
+    }));
+    const directory = checkpointDirectory();
+    const host = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: directory });
+    const started = await host.start(actionActivation(), { publish: async () => ({ ok: true, value: undefined }) });
+    if (!started.ok || started.value.kind !== "action-input") throw new Error("expected suspension");
+    const thread = started.value.wait.checkpoint.thread;
+    const authorization = { identity: "retirement.pending", delivery: thread.delivery } as never;
+    const retirementDatabase = new DatabaseSync(path.join(directory, "host-checkpoints.sqlite"));
+    retirementDatabase.prepare("INSERT INTO host_retirements (thread_key, thread_id, authorization, phase, fact, cleanup_count) VALUES (?, ?, ?, 'retiring', NULL, 0)")
+      .run(canonicalDigest(thread), thread.threadIdentity, JSON.stringify(authorization));
+    retirementDatabase.close();
+
+    const recoveringHost = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: directory });
+    expect(await recoveringHost.retire({ thread, authorization })).toEqual({ ok: true, value: { owner: "host", authorization, state: "retired" } });
+    expect(await recoveringHost.inspect(thread)).toEqual({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
+    const verificationDatabase = new DatabaseSync(path.join(directory, "host-checkpoints.sqlite"), { readOnly: true });
+    expect(verificationDatabase.prepare("SELECT phase, cleanup_count FROM host_retirements").get()).toEqual({ phase: "complete", cleanup_count: 1 });
+    verificationDatabase.close();
   });
 
   it("fails closed for unknown inspection/stop and stale recovery facts, and admits explicit intervention", async () => {
