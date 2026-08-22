@@ -1,4 +1,4 @@
-import type { ArtifactId, AuditCorrelationId, CheckpointId, ContractRevision, DeliveryId, DeliveryRef, FrozenJsonValue, GitTreeId, ImplementationId, Knowledge, PreservedResultId, PublicationGuardId, PublicationId, PublicationTargetId, RetirementAuthorizationRef, RuntimeProfileId, SavepointId, SettlementId, Sha256, SnapshotId, StableId, ThreadRef, WorkflowResultId } from "./primitives.js";
+import type { ArtifactId, CheckpointId, ContractRevision, DeliveryId, DeliveryRef, FrozenJsonValue, GitTreeId, ImplementationId, Knowledge, PreservedResultId, PublicationGuardId, PublicationId, PublicationTargetId, RetirementAuthorizationRef, RuntimeProfileId, SavepointId, SettlementId, Sha256, SnapshotId, StableId, ThreadRef, UnknownState, WorkflowResultId } from "./primitives.js";
 
 export interface SavepointRef { readonly deliveryIdentity: DeliveryId; readonly savepointIdentity: SavepointId; readonly gitTree: GitTreeId }
 export interface CheckpointRef { readonly identity: CheckpointId; readonly thread: ThreadRef; readonly stateIdentity: Sha256; readonly savepoint: Knowledge<SavepointRef> }
@@ -12,6 +12,14 @@ export type PublicationDisposition = Readonly<{ kind: "published" | "already-at-
 export type SettledPublicationDisposition = Exclude<PublicationDisposition, { readonly kind: "unknown" }>;
 export type RuntimeTerminalOutcome = "COMPLETED" | "INCOMPLETE" | "FAILED" | "CANCELLED";
 export type TerminalReason = "DECLARED_TERMINAL" | "DECLARED_INCOMPLETE" | "ACTION_FAILED" | "CANCELLED" | "RECOVERY_EXHAUSTED" | "CONTROL_EXPIRED" | "INVARIANT_VIOLATION";
-export interface OwnerRetirementDispositionRef { readonly identity: import("./primitives.js").OwnerRetirementDispositionId; readonly owner: "coordinator" | "host" | "invocation" | "custody"; readonly authorization: RetirementAuthorizationRef }
-export type OwnerRetirementDisposition = Readonly<{ reference: OwnerRetirementDispositionRef; state: "retired" | "retained-for-recovery" }> | Readonly<{ reference: OwnerRetirementDispositionRef; state: "unknown"; uncertainty: import("./primitives.js").UnknownState }>;
-export interface TerminalSettlementRecord { readonly identity: SettlementId; readonly delivery: DeliveryRef; readonly profileIdentity: RuntimeProfileId; readonly contractIdentity: ContractRevision; readonly implementationIdentity: ImplementationId; readonly snapshotIdentity: SnapshotId; readonly outcome: RuntimeTerminalOutcome; readonly reason: TerminalReason; readonly checkpoint: CheckpointRef; readonly result: Knowledge<PreservedResultRef>; readonly publication: SettledPublicationDisposition; readonly retirementAuthorization: RetirementAuthorizationRef; readonly ownerDispositionRefs: readonly OwnerRetirementDispositionRef[]; readonly auditCorrelation: AuditCorrelationId }
+export type RetirementOwner = "coordinator" | "host" | "invocation" | "custody";
+export type KnownOwnerRetirementDisposition<Owner extends RetirementOwner = RetirementOwner> = Readonly<{ readonly owner: Owner; readonly authorization: RetirementAuthorizationRef; readonly state: "retired" | "retained-for-recovery" }>;
+export type UnknownOwnerRetirementDisposition<Owner extends RetirementOwner = RetirementOwner> = Readonly<{ readonly owner: Owner; readonly authorization: RetirementAuthorizationRef; readonly state: "unknown"; readonly uncertainty: UnknownState }>;
+export type OwnerRetirementDisposition<Owner extends RetirementOwner = RetirementOwner> = KnownOwnerRetirementDisposition<Owner> | UnknownOwnerRetirementDisposition<Owner>;
+export type KnownOwnerRetirements = readonly [
+  coordinator: KnownOwnerRetirementDisposition<"coordinator">,
+  host: KnownOwnerRetirementDisposition<"host">,
+  invocation: KnownOwnerRetirementDisposition<"invocation">,
+  custody: KnownOwnerRetirementDisposition<"custody">,
+];
+export interface TerminalSettlementRecord { readonly identity: SettlementId; readonly delivery: DeliveryRef; readonly profileIdentity: RuntimeProfileId; readonly contractIdentity: ContractRevision; readonly implementationIdentity: ImplementationId; readonly snapshotIdentity: SnapshotId; readonly outcome: RuntimeTerminalOutcome; readonly reason: TerminalReason; readonly checkpoint: CheckpointRef; readonly result: Knowledge<PreservedResultRef>; readonly publication: SettledPublicationDisposition; readonly retirementAuthorization: RetirementAuthorizationRef; readonly ownerRetirements: KnownOwnerRetirements }
