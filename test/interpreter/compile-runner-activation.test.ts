@@ -23,6 +23,35 @@ function expectCompileError(
 }
 
 describe("compileRunnerActivation", () => {
+  it("admits a declared ordinary successor that targets a typed decision", () => {
+    const activation = compilableActivation((draft) => {
+      draft.program.control.ordinarySuccessor[0].to = "decision.after-action";
+      draft.program.control.decisions.push({
+        identity: "decision.after-action",
+        source: { kind: "site-result", site: { kind: "node", nodeIdentity: "node.action" }, slot: { kind: "property", name: "status" } },
+        selector: { kind: "case-map", cases: [{ value: "done", target: "terminal.success" }] },
+      });
+    });
+
+    expect(compileRunnerActivation(activation)).toMatchObject({
+      ok: true,
+      value: { plan: { control: {
+        ordinarySuccessor: { "node.action": "decision.after-action" },
+        decisions: { "decision.after-action": {} },
+      } } },
+    });
+  });
+
+  it("rejects a decision-to-decision cycle while admitting successor-to-decision routing", () => {
+    expectCompileError(compilableActivation((draft) => {
+      draft.program.control.decisions.push({
+        identity: "decision.loop",
+        source: { kind: "state", field: "status" },
+        selector: { kind: "case-map", cases: [{ value: "again", target: "decision.loop" }] },
+      });
+    }), "CONTROL_CLOSURE_INVALID");
+  });
+
   it("compiles a fully admitted activation into deterministic frozen lookup indexes", () => {
     const activation = compilableActivation();
 

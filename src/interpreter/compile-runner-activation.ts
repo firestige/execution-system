@@ -45,8 +45,10 @@ function compileControl(activation: RunnerActivationContext): CompiledControlGra
   const admitted = activation.program.control;
   const nodes = uniqueIndex(admitted.nodes, (node) => node.id, "CONTROL_CLOSURE_INVALID", "control node") as CompiledControlGraph["nodes"];
   const terminals = uniqueIndex(admitted.terminals, (terminal) => terminal.id, "CONTROL_CLOSURE_INVALID", "terminal") as CompiledControlGraph["terminals"];
+  const decisions = uniqueIndex(admitted.decisions, (decision) => decision.identity, "CONTROL_CLOSURE_INVALID", "decision") as CompiledControlGraph["decisions"];
   if (nodes[admitted.entryNode] === undefined) throw new CompileIssue("CONTROL_CLOSURE_INVALID", `entry node '${admitted.entryNode}' is unresolved`);
-  const targets = new Set([...Object.keys(nodes), ...Object.keys(terminals)]);
+  const targets = new Set([...Object.keys(nodes), ...Object.keys(decisions), ...Object.keys(terminals)]);
+  const decisionTargets = new Set([...Object.keys(nodes), ...Object.keys(terminals)]);
 
   const ordinaryEntries: Array<readonly [string, string]> = [];
   const ordinarySources = new Set<string>();
@@ -68,13 +70,12 @@ function compileControl(activation: RunnerActivationContext): CompiledControlGra
     eventByNode.set(transition.from, successors);
   }
 
-  const decisions = uniqueIndex(admitted.decisions, (decision) => decision.identity, "CONTROL_CLOSURE_INVALID", "decision") as CompiledControlGraph["decisions"];
   const controls = uniqueIndex(admitted.controls, (control) => control.identity, "CONTROL_CLOSURE_INVALID", "control binding") as CompiledControlGraph["controls"];
   for (const decision of admitted.decisions) {
     if (!("selector" in decision)) continue;
     const allowedTargets = decision.selector.kind === "case-map" ? decision.selector.cases.map((entry) => entry.target) : decision.selector.allowedTargets;
     if (allowedTargets.length === 0) throw new CompileIssue("CONTROL_CLOSURE_INVALID", `decision '${decision.identity}' has no declared target`);
-    for (const target of allowedTargets) assertKnownTarget(target, targets);
+    for (const target of allowedTargets) assertKnownTarget(target, decisionTargets);
     if (decision.selector.kind === "host-operation" && activation.program.execution.hostOperations[decision.selector.operationIdentity] === undefined) {
       throw new CompileIssue("EXECUTION_CLOSURE_INVALID", `decision '${decision.identity}' has unresolved Host operation`);
     }
