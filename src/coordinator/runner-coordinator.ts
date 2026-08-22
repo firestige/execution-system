@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -77,6 +77,14 @@ interface DurableCoordinatorRecord {
   intervention?: HostInterventionRef;
 }
 
+type RuntimeCallResult = Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>;
+
+// The frozen trusted-local current-slot owner excludes concurrent cross-process
+// coordinators. These maps coordinate overlapping instances in this process;
+// collision-free candidates prevent physical temp-name aliasing.
+const TERMINAL_RECONCILIATIONS = new Map<string, Promise<RuntimeCallResult>>();
+const RETIREMENT_RECONCILIATIONS = new Map<string, Promise<RuntimeCallResult>>();
+
 const success = <T>(value: T): Result<T, ExecutionRuntimeAdapterError> => ({ ok: true, value });
 const failure = (code: ExecutionRuntimeAdapterError["code"]): Result<never, ExecutionRuntimeAdapterError> => ({ ok: false, error: { code } });
 const known = <T>(value: T): Knowledge<T> => ({ state: "known", value });
@@ -103,6 +111,14 @@ function deliveryFrom(activation: RunnerActivationContext): DeliveryRef {
     manifestBindingIdentity: activation.correlation.manifestBindingIdentity,
     activationBindingIdentity: activation.bindingIdentity,
   };
+}
+
+function safelyCorrelatedDelivery(activation: RunnerActivationContext): DeliveryRef | undefined {
+  const correlation = activation?.correlation;
+  if (typeof correlation?.deliveryIdentity !== "string" || correlation.deliveryIdentity.length === 0
+    || typeof correlation.manifestBindingIdentity !== "string" || !/^sha256:[a-f0-9]{64}$/.test(correlation.manifestBindingIdentity)
+    || typeof activation?.bindingIdentity !== "string" || !/^sha256:[a-f0-9]{64}$/.test(activation.bindingIdentity)) return undefined;
+  return deliveryFrom(activation);
 }
 
 function unknown(owner: UnknownState["owner"], reason: UnknownState["reason"]): UnknownState {
@@ -132,8 +148,11 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
   async execute(request: ExecutionRuntimeExecuteRequest): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
     if (request.interfaceVersion !== EXECUTION_RUNTIME_ADAPTER_VERSION) return failure("ACTIVATION_REJECTED");
     const compiled = this.#options.compiler(request.activation);
-    if (!compiled.ok) return failure("ACTIVATION_REJECTED");
-    const delivery = deliveryFrom(request.activation);
+    const delivery = safelyCorrelatedDelivery(request.activation);
+    if (!compiled.ok) return delivery === undefined
+      ? failure("ACTIVATION_REJECTED")
+      : success(deepFreeze({ kind: "start-failed", code: "START_FAILED", detail: detail(compiled.error.code) }));
+    if (delivery === undefined) return failure("ACTIVATION_REJECTED");
     let record: DurableCoordinatorRecord | undefined;
     try { record = this.#load(delivery); } catch { return failure("ADAPTER_UNAVAILABLE"); }
     if (record !== undefined && !same(record.delivery, delivery)) return failure("CORRELATION_MISMATCH");
@@ -155,20 +174,15 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     const started = await this.#options.host.start(compiled.value, this.#options.interaction).catch(() => undefined);
     if (started === undefined) {
       record.result = this.#unknownResult(record.delivery, "HOST_START_UNRESOLVED");
-      this.#save(record);
-      return success(record.result);
+      record = this.#save(record);
+      return success(record.result!);
     }
     if (!started.ok) {
-      if (started.error.code !== "ACTIVATION_MISMATCH") {
-        record.result = this.#unknownResult(record.delivery, "HOST_START_DISPOSITION_UNRESOLVED");
-        this.#save(record);
-        return success(record.result);
-      }
-      record.phase = "start-failed";
-      record.result = deepFreeze({ kind: "start-failed", code: "START_FAILED", detail: detail(started.error.code) });
-      this.#save(record);
-      return success(record.result);
+      record.result = this.#unknownResult(record.delivery, "HOST_START_DISPOSITION_UNRESOLVED");
+      record = this.#save(record);
+      return success(record.result!);
     }
+    if (this.#cancelRequested(record.delivery)) return this.#persistUnknown(record, "CANCELLATION_RECONCILIATION_PENDING");
     return this.#drive(record, started.value);
   }
 
@@ -188,10 +202,11 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     try { record = this.#load(delivery); } catch { return failure("ADAPTER_UNAVAILABLE"); }
     if (record === undefined) return failure("ADAPTER_UNAVAILABLE");
     if (!same(record.delivery, delivery)) return failure("CORRELATION_MISMATCH");
-    if (record.phase === "terminal" || record.phase === "start-failed") return success({ delivery, state: known("already-stable") });
+    if (record.phase === "terminal" || record.phase === "start-failed" || record.proposal !== undefined) return success({ delivery, state: known("already-stable") });
     record.cancelRequested = true;
     record.phase = "stable";
-    this.#save(record);
+    record = this.#save(record);
+    if (record.phase === "terminal" || record.phase === "start-failed") return success({ delivery, state: known("already-stable") });
     const invocation = await this.#options.invocation.cancel({ delivery, reason: "DELIVERY_CANCELLED" }).catch(() => undefined);
     const host = record.thread === undefined ? undefined : await this.#options.host.stop({ thread: record.thread, reason: "CANCEL" }).catch(() => undefined);
     const custody = await this.#options.custody.inspect(delivery).catch(() => undefined);
@@ -204,6 +219,10 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
   async #drive(record: DurableCoordinatorRecord, initial: HostDisposition): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
     let disposition = initial;
     while (true) {
+      if (this.#cancelRequested(record.delivery)
+        && (disposition.kind !== "terminal-proposal" || disposition.proposal.proposedOutcome !== "CANCELLED")) {
+        return this.#persistUnknown(record, "CANCELLATION_RECONCILIATION_PENDING");
+      }
       if (disposition.kind === "intervention") {
         if (!same(disposition.intervention.thread.delivery, record.delivery)) return failure("CORRELATION_MISMATCH");
         record.thread = disposition.intervention.thread;
@@ -244,9 +263,20 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
   }
 
   async #terminal(record: DurableCoordinatorRecord, proposal: TerminalProposal): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
+    const key = this.#coordinationKey(record.delivery);
+    const inFlight = TERMINAL_RECONCILIATIONS.get(key);
+    if (inFlight !== undefined) return inFlight;
+    const task = this.#performTerminal(record, proposal).finally(() => TERMINAL_RECONCILIATIONS.delete(key));
+    TERMINAL_RECONCILIATIONS.set(key, task);
+    return task;
+  }
+
+  async #performTerminal(record: DurableCoordinatorRecord, proposal: TerminalProposal): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
     if (!same(proposal.thread.delivery, record.delivery) || !same(proposal.checkpoint.thread, proposal.thread)) return failure("CORRELATION_MISMATCH");
     record.thread = proposal.thread;
     record.proposal = proposal;
+    record.phase = "stable";
+    record = this.#save(record);
     if (proposal.result.state === "unknown") {
       record.phase = "intervention";
       return this.#persistUnknown(record, "TERMINAL_RESULT_UNKNOWN");
@@ -281,13 +311,15 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
 
   async #afterPublication(record: DurableCoordinatorRecord, publication: PublicationDisposition): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
     if (record.preserved === undefined) return failure("CORRELATION_MISMATCH");
-    if (publication.kind === "unknown" || publication.kind === "conflict") {
+    if (publication.kind === "unknown") {
       if (!same(publication.preservedResult, record.preserved)) return failure("CORRELATION_MISMATCH");
       record.publication = publication;
-      record.phase = publication.kind === "unknown" ? "publication-pending" : "intervention";
-      return this.#persistUnknown(record, publication.kind === "conflict" ? "PUBLICATION_CONFLICT" : "PUBLICATION_UNRESOLVED");
+      record.phase = "publication-pending";
+      return this.#persistUnknown(record, "PUBLICATION_UNRESOLVED");
     }
-    if (!same(publication.reference.result, record.preserved)
+    if (publication.kind === "conflict") {
+      if (!same(publication.preservedResult, record.preserved)) return failure("CORRELATION_MISMATCH");
+    } else if (!same(publication.reference.result, record.preserved)
       || !same(publication.reference.target, this.#options.publicationTarget)) return failure("CORRELATION_MISMATCH");
     record.publication = publication;
     record.authorization = {
@@ -306,6 +338,15 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
   }
 
   async #retireAndSettle(record: DurableCoordinatorRecord): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
+    const key = this.#coordinationKey(record.delivery);
+    const inFlight = RETIREMENT_RECONCILIATIONS.get(key);
+    if (inFlight !== undefined) return inFlight;
+    const task = this.#performRetirement(record).finally(() => RETIREMENT_RECONCILIATIONS.delete(key));
+    RETIREMENT_RECONCILIATIONS.set(key, task);
+    return task;
+  }
+
+  async #performRetirement(record: DurableCoordinatorRecord): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
     const authorization = record.authorization;
     const proposal = record.proposal;
     const preserved = record.preserved;
@@ -341,7 +382,12 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     record.result = deepFreeze({ kind: "terminal", outcome: proposal.proposedOutcome, settlement, result: known(preserved) });
     record.phase = "terminal";
     this.#save(record);
-    await this.#options.observation.observe({ kind: "runner-terminal-settled", delivery: record.delivery, settlementIdentity: settlement.identity }).catch(() => undefined);
+    try {
+      void Promise.resolve(this.#options.observation.observe({ kind: "runner-terminal-settled", delivery: record.delivery, settlementIdentity: settlement.identity }))
+        .catch(() => undefined);
+    } catch {
+      // Observation is explicitly non-controlling, including synchronous throw.
+    }
     return success(record.result);
   }
 
@@ -385,8 +431,16 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
 
   #persistUnknown(record: DurableCoordinatorRecord, reason: string): Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError> {
     record.result = this.#unknownResult(record.delivery, reason);
-    this.#save(record);
-    return success(record.result);
+    const saved = this.#save(record);
+    return success(saved.result ?? record.result);
+  }
+
+  #cancelRequested(delivery: DeliveryRef): boolean {
+    return this.#load(delivery)?.cancelRequested === true;
+  }
+
+  #coordinationKey(delivery: DeliveryRef): string {
+    return `${path.resolve(this.#options.stateDirectory)}\0${delivery.deliveryIdentity}`;
   }
 
   #unknownResult(delivery: DeliveryRef, reason: string): ExecutionRuntimeResult {
@@ -403,10 +457,22 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     return JSON.parse(readFileSync(file, "utf8")) as DurableCoordinatorRecord;
   }
 
-  #save(record: DurableCoordinatorRecord): void {
+  #save(record: DurableCoordinatorRecord): DurableCoordinatorRecord {
+    const existing = this.#load(record.delivery);
+    if (existing !== undefined && same(existing.delivery, record.delivery)) {
+      if (existing.phase === "terminal" && record.phase !== "terminal") return existing;
+      record.cancelRequested = existing.cancelRequested === true || record.cancelRequested === true ? true : undefined;
+      if (record.cancelRequested === true && record.phase === "running") record.phase = existing.phase === "running" ? "stable" : existing.phase;
+      for (const owner of ["coordinator", "host", "invocation", "custody"] as const) {
+        const prior = existing.retirements[owner];
+        const next = record.retirements[owner];
+        if (prior !== undefined && (prior.state !== "unknown" || next === undefined)) record.retirements[owner] = prior;
+      }
+    }
     const target = this.#file(record.delivery);
-    const candidate = `${target}.candidate`;
-    writeFileSync(candidate, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    const candidate = `${target}.${process.pid}.${randomUUID()}.candidate`;
+    writeFileSync(candidate, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: "wx" });
     renameSync(candidate, target);
+    return record;
   }
 }

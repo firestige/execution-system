@@ -193,15 +193,17 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(f.custody.publish).toHaveBeenCalledTimes(1);
   });
 
-  it("turns publication conflict into intervention truth and never retires or settles", async () => {
+  it("treats publication conflict as a known disposition and continues retirement and settlement", async () => {
     const value = activation();
     const f = fixture([{ kind: "terminal-proposal", proposal: terminal(value) }]);
     (f.custody.publish as any).mockImplementationOnce(async () => ok({ kind: "conflict", preservedResult: f.preserved }));
 
     const result = await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
 
-    expect(result.ok && result.value.kind).toBe("unknown");
-    expect(f.host.retire).not.toHaveBeenCalled();
+    expect(result.ok && result.value.kind).toBe("terminal");
+    expect(f.host.retire).toHaveBeenCalledOnce();
+    expect(f.invocation.retire).toHaveBeenCalledOnce();
+    expect(f.custody.retire).toHaveBeenCalledOnce();
   });
 
   it("keeps all five result categories distinct, including conclusive START_FAILED", async () => {
@@ -213,9 +215,10 @@ describe("formal G05 Execution Runtime Adapter", () => {
       expect(result.ok && result.value.kind === "terminal" && result.value.outcome).toBe(outcome);
     }
     const f = fixture([]);
-    (f.host.start as any).mockResolvedValueOnce({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
-    const failed = await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+    const rejected = { ...f.value, bindingIdentity: sha("0") } as RunnerActivationContext;
+    const failed = await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: rejected });
     expect(failed).toMatchObject({ ok: true, value: { kind: "start-failed", code: "START_FAILED" } });
+    expect(f.host.start).not.toHaveBeenCalled();
   });
 
   it("isolates Observation throw from immutable settlement and exposes only execute/inspect/cancel", async () => {
@@ -234,10 +237,32 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(Object.keys(f.adapter).sort()).toEqual(["cancel", "execute", "inspect"]);
   });
 
+  it("returns terminal without waiting for a never-settling Observation Promise", async () => {
+    const value = activation();
+    const f = fixture([{ kind: "terminal-proposal", proposal: terminal(value) }]);
+    (f.host.start as any).mockImplementationOnce(async () => ok({ kind: "terminal-proposal", proposal: terminal(f.value) }));
+    f.observe.mockImplementationOnce(() => new Promise<undefined>(() => {}));
+
+    const result = await Promise.race([
+      f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value }),
+      new Promise<"timed-out">((resolve) => setTimeout(() => resolve("timed-out"), 25)),
+    ]);
+
+    expect(result).not.toBe("timed-out");
+    expect(result).toMatchObject({ ok: true, value: { kind: "terminal" } });
+
+    const synchronous = fixture([]);
+    (synchronous.host.start as any).mockResolvedValueOnce(ok({ kind: "terminal-proposal", proposal: terminal(synchronous.value) }));
+    synchronous.observe.mockImplementationOnce(() => { throw new Error("synchronous observation failure"); });
+    expect(await synchronous.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: synchronous.value })).toMatchObject({ ok: true, value: { kind: "terminal" } });
+  });
+
   it("fails closed on invalid activation and same Delivery identity with changed correlation", async () => {
     const f = fixture([]);
     const invalid = { ...f.value, bindingIdentity: sha("0") } as RunnerActivationContext;
-    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: invalid })).toEqual({ ok: false, error: { code: "ACTIVATION_REJECTED" } });
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: invalid })).toMatchObject({ ok: true, value: { kind: "start-failed", code: "START_FAILED" } });
+    const uncorrelatable = { ...invalid, correlation: { ...invalid.correlation, deliveryIdentity: "" } } as RunnerActivationContext;
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: uncorrelatable })).toEqual({ ok: false, error: { code: "ACTIVATION_REJECTED" } });
     (f.host.start as any).mockResolvedValueOnce({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
     await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
     const changed = mutatedRunnerActivation((draft) => {
@@ -248,7 +273,7 @@ describe("formal G05 Execution Runtime Adapter", () => {
         executor.bindingIdentity = canonicalDigest({ session: executor.session, turn: executor.turn });
       }
     });
-    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: changed })).toEqual({ ok: false, error: { code: "CORRELATION_MISMATCH" } });
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: changed })).toEqual({ ok: false, error: { code: "ACTIVATION_REJECTED" } });
   });
 
   it("rejects stale Action and Workflow bridge responses without resuming Host", async () => {
@@ -449,6 +474,12 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(await f.adapter.inspect(f.delivery)).toMatchObject({ ok: true, value: { state: "running", result: { state: "known", value: { kind: "unknown" } } } });
   });
 
+  it("does not call Host ACTIVATION_MISMATCH a conclusive START_FAILED", async () => {
+    const f = fixture([]);
+    (f.host.start as any).mockResolvedValueOnce({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value })).toMatchObject({ ok: true, value: { kind: "unknown" } });
+  });
+
   it("rejects a known publication fact correlated to another target", async () => {
     const value = activation();
     const f = fixture([{ kind: "terminal-proposal", proposal: terminal(value) }]);
@@ -469,6 +500,8 @@ describe("formal G05 Execution Runtime Adapter", () => {
     delete record.proposal;
     writeFileSync(recordPath, JSON.stringify(record));
     expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value })).toEqual({ ok: false, error: { code: "CORRELATION_MISMATCH" } });
+    writeFileSync(recordPath, "not-json");
+    expect(await f.adapter.inspect(f.delivery)).toEqual({ ok: false, error: { code: "ADAPTER_UNAVAILABLE" } });
   });
 
   it("restores the Host checkpoint savepoint before an admitted restart", async () => {
@@ -486,5 +519,58 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value })).toMatchObject({ ok: true, value: { kind: "terminal" } });
     expect(f.custody.recover).toHaveBeenCalledWith({ delivery: f.delivery, directive: "restore-from-savepoint", savepoint: proposal.checkpoint.savepoint });
     expect(f.host.recover).toHaveBeenCalledWith(expect.objectContaining({ directive: "restart-from-savepoint" }));
+  });
+
+  it("does not invoke an Action bridge when durable cancellation precedes recovered pending input", async () => {
+    const value = activation();
+    const proposal = terminal(value);
+    const episode = { thread: proposal.thread, site: { kind: "node", nodeIdentity: "node.action" }, invocationIdentity: "invocation.fixture", attemptIdentity: "attempt.fixture" } as never;
+    const request = { identity: "input.fixture", episode, prompt: "?", responseSchema: {} } as never;
+    const pending = { kind: "action-input", wait: { checkpoint: proposal.checkpoint, episode, request } } as const;
+    const f = fixture([pending]);
+    (f.interaction.requestInput as any).mockResolvedValueOnce({ ok: false, error: { code: "INTERACTION_UNAVAILABLE" } });
+    await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+    await f.adapter.cancel(f.delivery);
+    (f.host.inspect as any).mockResolvedValueOnce(ok({ thread: proposal.thread, checkpoint: { state: "known", value: proposal.checkpoint }, pendingSite: { state: "known", value: (episode as any).site }, disposition: { state: "known", value: pending } }));
+    (f.interaction.requestInput as any).mockClear();
+
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value })).toMatchObject({ ok: true, value: { kind: "unknown" } });
+    expect(f.interaction.requestInput).not.toHaveBeenCalled();
+  });
+
+  it("preserves cancellation across two coordinators sharing one durable state directory", async () => {
+    const f = fixture([]);
+    let releaseStart!: (value: any) => void;
+    (f.host.start as any).mockImplementationOnce(() => new Promise((resolve) => { releaseStart = resolve; }));
+    const peer = createExecutionRuntimeAdapter(f.options);
+    const executing = f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+    await vi.waitFor(() => expect(f.host.start).toHaveBeenCalledOnce());
+
+    await peer.cancel(f.delivery);
+    releaseStart(ok({ kind: "terminal-proposal", proposal: terminal(f.value) }));
+    const result = await executing;
+
+    expect(result).toMatchObject({ ok: true, value: { kind: "unknown" } });
+    expect(f.custody.preserveResult).not.toHaveBeenCalled();
+    expect(readdirSync(f.stateDirectory).filter((name) => name.endsWith(".candidate"))).toEqual([]);
+  });
+
+  it("shares one retirement reconciliation across two coordinators without duplicating known owner progress", async () => {
+    const value = activation();
+    const f = fixture([{ kind: "terminal-proposal", proposal: terminal(value) }]);
+    (f.host.start as any).mockImplementationOnce(async () => ok({ kind: "terminal-proposal", proposal: terminal(f.value) }));
+    let releaseHost!: (value: any) => void;
+    (f.host.retire as any).mockImplementationOnce(() => new Promise((resolve) => { releaseHost = resolve; }));
+    const peer = createExecutionRuntimeAdapter(f.options);
+    const first = f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+    await vi.waitFor(() => expect(f.host.retire).toHaveBeenCalledOnce());
+    const second = peer.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+    releaseHost(ok({ owner: "host", authorization: (f.host.retire as any).mock.calls[0][0].authorization, state: "retired" }));
+
+    expect(await first).toMatchObject({ ok: true, value: { kind: "terminal" } });
+    expect(await second).toMatchObject({ ok: true, value: { kind: "terminal" } });
+    expect(f.host.retire).toHaveBeenCalledTimes(1);
+    expect(f.invocation.retire).toHaveBeenCalledTimes(1);
+    expect(f.custody.retire).toHaveBeenCalledTimes(1);
   });
 });
