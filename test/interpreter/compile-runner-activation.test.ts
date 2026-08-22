@@ -262,6 +262,23 @@ describe("compileRunnerActivation", () => {
     }
   });
 
+  it("uses the dispatch-recomputable ExecutionSiteRef invocation binding formula", () => {
+    const activation = compilableActivation();
+    const result = compileRunnerActivation(activation);
+    const resolvedSite = activation.program.execution.sites[0]!;
+    const executor = activation.program.execution.agents[resolvedSite.executor.identity as keyof typeof activation.program.execution.agents]!;
+    const expected = canonicalDigest({
+      site: resolvedSite.site,
+      action: activation.program.execution.actions[resolvedSite.actionIdentity],
+      executorBindingIdentity: executor.bindingIdentity,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) {
+      expect(Object.values(result.value.plan.execution.agentInvocations)[0]?.bindingIdentity).toBe(expected);
+    }
+  });
+
   it.each([
     ["duplicate terminal", (draft: any) => draft.program.control.terminals.push(structuredClone(draft.program.control.terminals[0]))],
     ["unresolved ordinary source", (draft: any) => { draft.program.control.ordinarySuccessor[0].from = "node.missing"; }],
