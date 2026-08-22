@@ -147,11 +147,7 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
 
   async execute(request: ExecutionRuntimeExecuteRequest): Promise<Result<ExecutionRuntimeResult, ExecutionRuntimeAdapterError>> {
     if (request.interfaceVersion !== EXECUTION_RUNTIME_ADAPTER_VERSION) return failure("ACTIVATION_REJECTED");
-    const compiled = this.#options.compiler(request.activation);
     const delivery = safelyCorrelatedDelivery(request.activation);
-    if (!compiled.ok) return delivery === undefined
-      ? failure("ACTIVATION_REJECTED")
-      : success(deepFreeze({ kind: "start-failed", code: "START_FAILED", detail: detail(compiled.error.code) }));
     if (delivery === undefined) return failure("ACTIVATION_REJECTED");
     let record: DurableCoordinatorRecord | undefined;
     try { record = this.#load(delivery); } catch { return failure("ADAPTER_UNAVAILABLE"); }
@@ -161,6 +157,9 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     if (record?.phase === "publication-pending") return this.#reconcilePublication(record);
     if (record?.phase === "intervention") return this.#persistUnknown(record, "INTERVENTION_REQUIRED");
     if (record?.phase === "stable" || record?.phase === "running") return this.#recover(record);
+
+    const compiled = this.#options.compiler(request.activation);
+    if (!compiled.ok) return success(deepFreeze({ kind: "start-failed", code: "START_FAILED", detail: detail(compiled.error.code) }));
 
     record = {
       delivery,

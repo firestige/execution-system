@@ -265,15 +265,17 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: uncorrelatable })).toEqual({ ok: false, error: { code: "ACTIVATION_REJECTED" } });
     (f.host.start as any).mockResolvedValueOnce({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
     await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
-    const changed = mutatedRunnerActivation((draft) => {
-      draft.correlation.deliveryIdentity = f.delivery.deliveryIdentity;
-      draft.correlation.manifestBindingIdentity = sha("m");
-      for (const executor of Object.values(draft.program.execution.agents) as any[]) {
-        executor.sessionCompatibilityIdentity = canonicalDigest(executor.session);
-        executor.bindingIdentity = canonicalDigest({ session: executor.session, turn: executor.turn });
-      }
-    });
-    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: changed })).toEqual({ ok: false, error: { code: "ACTIVATION_REJECTED" } });
+    const changed = {
+      ...f.value,
+      schemaVersion: "runner.activation@invalid",
+      bindingIdentity: sha("d"),
+      correlation: { ...f.value.correlation, manifestBindingIdentity: sha("c") },
+    } as unknown as RunnerActivationContext;
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: changed })).toEqual({ ok: false, error: { code: "CORRELATION_MISMATCH" } });
+
+    const exactRejected = { ...f.value, schemaVersion: "runner.activation@invalid" } as unknown as RunnerActivationContext;
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: exactRejected })).toMatchObject({ ok: true, value: { kind: "unknown" } });
+    expect(f.host.start).toHaveBeenCalledTimes(1);
   });
 
   it("rejects stale Action and Workflow bridge responses without resuming Host", async () => {
