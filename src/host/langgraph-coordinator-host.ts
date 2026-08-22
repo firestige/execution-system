@@ -42,7 +42,6 @@ import type {
   Knowledge,
   NodeId,
   OwnerRetirementDisposition,
-  OwnerRetirementDispositionId,
   Result,
   RetirementAuthorizationRef,
   SavepointRef,
@@ -111,12 +110,10 @@ interface HostThreadRecord {
   stopped: boolean;
 }
 
-interface HostRetirementTombstone {
-  readonly thread: ThreadRef;
-  readonly authorization: RetirementAuthorizationRef;
-  readonly disposition: OwnerRetirementDisposition;
-  readonly state: "retiring" | "retired";
-}
+type HostRetirementFact = OwnerRetirementDisposition<"host">;
+type HostRetirementTombstone =
+  | Readonly<{ phase: "retiring"; authorization: RetirementAuthorizationRef }>
+  | Readonly<{ phase: "complete"; fact: HostRetirementFact }>;
 
 interface ProjectedCommit {
   readonly state: Record<string, FrozenJsonValue>;
@@ -367,6 +364,7 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
   readonly #operations: LangGraphCoordinatorHostOptions["hostOperations"];
   readonly #checkpointer: SqliteSaver;
   readonly #retirementDirectory: string;
+  readonly #retirementOperations = new Map<string, Promise<Result<OwnerRetirementDisposition, HostError>>>();
   readonly #graph;
 
   constructor(options: LangGraphCoordinatorHostOptions) {
@@ -498,16 +496,33 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
   }
 
   async retire(request: Parameters<CoordinatorHost["retire"]>[0]): Promise<Result<OwnerRetirementDisposition, HostError>> {
+    const operationKey = this.#retirementTombstonePath(request.thread);
+    const active = this.#retirementOperations.get(operationKey);
+    if (active !== undefined) {
+      await active;
+      return this.retire(request);
+    }
+    const operation = this.#retireOnce(request);
+    this.#retirementOperations.set(operationKey, operation);
+    try {
+      return await operation;
+    } finally {
+      if (this.#retirementOperations.get(operationKey) === operation) this.#retirementOperations.delete(operationKey);
+    }
+  }
+
+  async #retireOnce(request: Parameters<CoordinatorHost["retire"]>[0]): Promise<Result<OwnerRetirementDisposition, HostError>> {
     const tombstone = this.#readRetirementTombstone(request.thread);
     if (tombstone !== undefined) {
-      if (!same(tombstone.thread, request.thread) || !same(tombstone.authorization, request.authorization)) {
-        return failure("RETIREMENT_NOT_AUTHORIZED");
-      }
-      if (tombstone.state === "retiring") {
+      const authorization = tombstone.phase === "retiring" ? tombstone.authorization : tombstone.fact.authorization;
+      if (!same(authorization, request.authorization)) return failure("RETIREMENT_NOT_AUTHORIZED");
+      if (tombstone.phase === "retiring") {
         await this.#checkpointer.deleteThread(request.thread.threadIdentity);
-        this.#writeRetirementTombstone({ ...tombstone, state: "retired" });
+        const fact: HostRetirementFact = { owner: "host", authorization: request.authorization, state: "retired" };
+        this.#writeRetirementTombstone(request.thread, { phase: "complete", fact });
+        return success(fact);
       }
-      return success(tombstone.disposition);
+      return success(tombstone.fact);
     }
     const record = await this.#load(request.thread);
     if (record === undefined
@@ -515,24 +530,11 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
       || !same(request.authorization.delivery, record.thread.delivery)) {
       return failure("RETIREMENT_NOT_AUTHORIZED");
     }
-    const disposition: OwnerRetirementDisposition = {
-      reference: {
-        identity: stableId<OwnerRetirementDispositionId>("owner-retirement-disposition", { owner: "host", authorization: request.authorization }),
-        owner: "host",
-        authorization: request.authorization,
-      },
-      state: "retired",
-    };
-    const retiring: HostRetirementTombstone = {
-      thread: record.thread,
-      authorization: request.authorization,
-      disposition,
-      state: "retiring",
-    };
-    this.#writeRetirementTombstone(retiring);
+    const fact: HostRetirementFact = { owner: "host", authorization: request.authorization, state: "retired" };
+    this.#writeRetirementTombstone(record.thread, { phase: "retiring", authorization: request.authorization });
     await this.#checkpointer.deleteThread(record.thread.threadIdentity);
-    this.#writeRetirementTombstone({ ...retiring, state: "retired" });
-    return success(disposition);
+    this.#writeRetirementTombstone(record.thread, { phase: "complete", fact });
+    return success(fact);
   }
 
   #retirementTombstonePath(thread: ThreadRef): string {
@@ -544,11 +546,12 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
     if (!existsSync(tombstonePath)) return undefined;
     try {
       const candidate = JSON.parse(readFileSync(tombstonePath, "utf8")) as HostRetirementTombstone;
-      return isObject(candidate)
-        && (candidate.state === "retiring" || candidate.state === "retired")
-        && isObject(candidate.thread)
-        && isObject(candidate.authorization)
-        && isObject(candidate.disposition)
+      if (!isObject(candidate)) return undefined;
+      if (candidate.phase === "retiring") return isObject(candidate.authorization) ? candidate : undefined;
+      if (candidate.phase !== "complete" || !isObject(candidate.fact)) return undefined;
+      return candidate.fact.owner === "host"
+        && candidate.fact.state === "retired"
+        && isObject(candidate.fact.authorization)
         ? candidate
         : undefined;
     } catch {
@@ -556,8 +559,8 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
     }
   }
 
-  #writeRetirementTombstone(tombstone: HostRetirementTombstone): void {
-    const tombstonePath = this.#retirementTombstonePath(tombstone.thread);
+  #writeRetirementTombstone(thread: ThreadRef, tombstone: HostRetirementTombstone): void {
+    const tombstonePath = this.#retirementTombstonePath(thread);
     const temporaryPath = `${tombstonePath}.${process.pid}.tmp`;
     writeFileSync(temporaryPath, JSON.stringify(tombstone), { encoding: "utf8", mode: 0o600 });
     renameSync(temporaryPath, tombstonePath);

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -1086,11 +1086,45 @@ describe("LangGraph CoordinatorHost", () => {
     expect(await replacement.retire({ thread, authorization: wrongAuthorization })).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
     const authorization = { identity: "retirement.fixture", delivery: thread.delivery } as never;
     const retired = await replacement.retire({ thread, authorization });
-    expect(retired).toMatchObject({ ok: true, value: { reference: { owner: "host", authorization }, state: "retired" } });
+    expect(retired).toEqual({ ok: true, value: { owner: "host", authorization, state: "retired" } });
     expect(await replacement.inspect(thread)).toEqual({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
-    expect(await replacement.retire({ thread, authorization })).toEqual(retired);
+    const afterResponseLoss = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: directory });
+    expect(await afterResponseLoss.retire({ thread, authorization })).toEqual(retired);
+    const tombstoneFiles = readdirSync(path.join(directory, "host-retirement"));
+    expect(tombstoneFiles).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path.join(directory, "host-retirement", tombstoneFiles[0]!), "utf8"))).toEqual({
+      phase: "complete",
+      fact: { owner: "host", authorization, state: "retired" },
+    });
     const mismatchedAuthorization = { identity: "retirement.other", delivery: thread.delivery } as never;
-    expect(await replacement.retire({ thread, authorization: mismatchedAuthorization })).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
+    expect(await afterResponseLoss.retire({ thread, authorization: mismatchedAuthorization })).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
+  });
+
+  it("serializes concurrent retirement and replays one exact Host fact", async () => {
+    const custody = new FakeCustody();
+    const invocation = new FakeInvocation((dispatch) => ({
+      kind: "awaiting-input",
+      episode: dispatch.episode,
+      request: { identity: "interaction.concurrent-retirement" as never, episode: dispatch.episode, prompt: "input", responseSchema: {} },
+      session: { bindingIdentity: "session-binding.concurrent-retirement" as never, affinity: dispatch.session, generation: 1 },
+      journal: { identity: "journal.concurrent-retirement" as never, episode: dispatch.episode },
+    }));
+    const host = createLangGraphCoordinatorHost({ invocation, custody, checkpointDirectory: checkpointDirectory() });
+    const started = await host.start(actionActivation(), { publish: async () => ({ ok: true, value: undefined }) });
+    if (!started.ok || started.value.kind !== "action-input") throw new Error("expected suspension");
+    const thread = started.value.wait.checkpoint.thread;
+    const authorization = { identity: "retirement.concurrent", delivery: thread.delivery } as never;
+    const mismatchedAuthorization = { identity: "retirement.concurrent-other", delivery: thread.delivery } as never;
+
+    const first = host.retire({ thread, authorization });
+    const exactReplay = host.retire({ thread, authorization });
+    const mismatch = host.retire({ thread, authorization: mismatchedAuthorization });
+
+    const [firstResult, replayResult, mismatchResult] = await Promise.all([first, exactReplay, mismatch]);
+    expect(firstResult).toEqual({ ok: true, value: { owner: "host", authorization, state: "retired" } });
+    expect(replayResult).toEqual(firstResult);
+    expect(mismatchResult).toEqual({ ok: false, error: { code: "RETIREMENT_NOT_AUTHORIZED" } });
+    expect(await host.inspect(thread)).toEqual({ ok: false, error: { code: "ACTIVATION_MISMATCH" } });
   });
 
   it("fails closed for unknown inspection/stop and stale recovery facts, and admits explicit intervention", async () => {
