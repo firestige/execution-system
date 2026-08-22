@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
@@ -42,7 +42,6 @@ import type {
   Knowledge,
   NodeId,
   OwnerRetirementDisposition,
-  OwnerRetirementDispositionId,
   Result,
   RetirementAuthorizationRef,
   SavepointRef,
@@ -111,11 +110,14 @@ interface HostThreadRecord {
   stopped: boolean;
 }
 
-interface HostRetirementTombstone {
-  readonly thread: ThreadRef;
-  readonly authorization: RetirementAuthorizationRef;
-  readonly disposition: OwnerRetirementDisposition;
-  readonly state: "retiring" | "retired";
+type HostRetirementFact = OwnerRetirementDisposition<"host">;
+interface HostRetirementRow {
+  readonly thread_key: string;
+  readonly thread_id: string;
+  readonly authorization: string;
+  readonly phase: "retiring" | "complete";
+  readonly fact: string | null;
+  readonly cleanup_count: number;
 }
 
 interface ProjectedCommit {
@@ -366,7 +368,6 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
   readonly #custody: HostCustody;
   readonly #operations: LangGraphCoordinatorHostOptions["hostOperations"];
   readonly #checkpointer: SqliteSaver;
-  readonly #retirementDirectory: string;
   readonly #graph;
 
   constructor(options: LangGraphCoordinatorHostOptions) {
@@ -374,9 +375,18 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
     this.#custody = options.custody;
     this.#operations = options.hostOperations ?? {};
     mkdirSync(options.checkpointDirectory, { recursive: true });
-    this.#retirementDirectory = path.join(options.checkpointDirectory, "host-retirement");
-    mkdirSync(this.#retirementDirectory, { recursive: true });
     const checkpointer = SqliteSaver.fromConnString(path.join(options.checkpointDirectory, "host-checkpoints.sqlite"));
+    checkpointer.db.pragma("busy_timeout = 5000");
+    checkpointer.db.exec(`
+      CREATE TABLE IF NOT EXISTS host_retirements (
+        thread_key TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        authorization TEXT NOT NULL,
+        phase TEXT NOT NULL CHECK (phase IN ('retiring', 'complete')),
+        fact TEXT,
+        cleanup_count INTEGER NOT NULL DEFAULT 0
+      )
+    `);
     this.#checkpointer = checkpointer;
     this.#graph = new StateGraph(HostCheckpointState)
       .addNode("checkpoint", (state) => ({ record: state.record }))
@@ -498,69 +508,72 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
   }
 
   async retire(request: Parameters<CoordinatorHost["retire"]>[0]): Promise<Result<OwnerRetirementDisposition, HostError>> {
-    const tombstone = this.#readRetirementTombstone(request.thread);
-    if (tombstone !== undefined) {
-      if (!same(tombstone.thread, request.thread) || !same(tombstone.authorization, request.authorization)) {
-        return failure("RETIREMENT_NOT_AUTHORIZED");
-      }
-      if (tombstone.state === "retiring") {
-        await this.#checkpointer.deleteThread(request.thread.threadIdentity);
-        this.#writeRetirementTombstone({ ...tombstone, state: "retired" });
-      }
-      return success(tombstone.disposition);
-    }
-    const record = await this.#load(request.thread);
-    if (record === undefined
+    const existing = this.#readRetirementRow(request.thread);
+    const record = existing === undefined ? await this.#load(request.thread) : undefined;
+    if (existing === undefined && (record === undefined
       || !same(record.thread, request.thread)
-      || !same(request.authorization.delivery, record.thread.delivery)) {
+      || !same(request.authorization.delivery, record.thread.delivery))) {
       return failure("RETIREMENT_NOT_AUTHORIZED");
     }
-    const disposition: OwnerRetirementDisposition = {
-      reference: {
-        identity: stableId<OwnerRetirementDispositionId>("owner-retirement-disposition", { owner: "host", authorization: request.authorization }),
-        owner: "host",
-        authorization: request.authorization,
-      },
-      state: "retired",
-    };
-    const retiring: HostRetirementTombstone = {
-      thread: record.thread,
-      authorization: request.authorization,
-      disposition,
-      state: "retiring",
-    };
-    this.#writeRetirementTombstone(retiring);
-    await this.#checkpointer.deleteThread(record.thread.threadIdentity);
-    this.#writeRetirementTombstone({ ...retiring, state: "retired" });
-    return success(disposition);
+    return this.#retirementTransaction(request, record);
   }
 
-  #retirementTombstonePath(thread: ThreadRef): string {
-    return path.join(this.#retirementDirectory, `${canonicalDigest(thread).slice("sha256:".length)}.json`);
+  #retirementKey(thread: ThreadRef): string {
+    return canonicalDigest(thread);
   }
 
-  #readRetirementTombstone(thread: ThreadRef): HostRetirementTombstone | undefined {
-    const tombstonePath = this.#retirementTombstonePath(thread);
-    if (!existsSync(tombstonePath)) return undefined;
+  #readRetirementRow(thread: ThreadRef): HostRetirementRow | undefined {
+    return this.#checkpointer.db.prepare("SELECT thread_key, thread_id, authorization, phase, fact, cleanup_count FROM host_retirements WHERE thread_key = ?")
+      .get(this.#retirementKey(thread)) as HostRetirementRow | undefined;
+  }
+
+  #retirementTransaction(
+    request: Parameters<CoordinatorHost["retire"]>[0],
+    admittedRecord: HostThreadRecord | undefined,
+  ): Result<OwnerRetirementDisposition, HostError> {
+    const threadKey = this.#retirementKey(request.thread);
+    const transaction = this.#checkpointer.db.transaction((): Result<OwnerRetirementDisposition, HostError> => {
+      let row = this.#readRetirementRow(request.thread);
+      if (row === undefined) {
+        if (admittedRecord === undefined) return failure("RETIREMENT_NOT_AUTHORIZED");
+        this.#checkpointer.db.prepare("INSERT INTO host_retirements (thread_key, thread_id, authorization, phase, fact, cleanup_count) VALUES (?, ?, ?, 'retiring', NULL, 0)")
+          .run(threadKey, request.thread.threadIdentity, JSON.stringify(request.authorization));
+        row = this.#readRetirementRow(request.thread);
+      }
+      if (row === undefined || row.thread_id !== request.thread.threadIdentity) return failure("RETIREMENT_NOT_AUTHORIZED");
+      let authorization: RetirementAuthorizationRef;
+      try {
+        authorization = JSON.parse(row.authorization) as RetirementAuthorizationRef;
+      } catch {
+        return failure("RETIREMENT_NOT_AUTHORIZED");
+      }
+      if (!isObject(authorization) || !same(authorization, request.authorization)) return failure("RETIREMENT_NOT_AUTHORIZED");
+      if (row.phase === "complete") {
+        if (row.fact === null) return failure("RETIREMENT_NOT_AUTHORIZED");
+        try {
+          const fact = JSON.parse(row.fact) as HostRetirementFact;
+          return isObject(fact)
+            && fact.owner === "host"
+            && fact.state === "retired"
+            && same(fact.authorization, request.authorization)
+            ? success(fact)
+            : failure("RETIREMENT_NOT_AUTHORIZED");
+        } catch {
+          return failure("RETIREMENT_NOT_AUTHORIZED");
+        }
+      }
+      this.#checkpointer.db.prepare("DELETE FROM checkpoints WHERE thread_id = ?").run(request.thread.threadIdentity);
+      this.#checkpointer.db.prepare("DELETE FROM writes WHERE thread_id = ?").run(request.thread.threadIdentity);
+      const fact: HostRetirementFact = { owner: "host", authorization: request.authorization, state: "retired" };
+      this.#checkpointer.db.prepare("UPDATE host_retirements SET phase = 'complete', fact = ?, cleanup_count = cleanup_count + 1 WHERE thread_key = ? AND phase = 'retiring'")
+        .run(JSON.stringify(fact), threadKey);
+      return success(fact);
+    });
     try {
-      const candidate = JSON.parse(readFileSync(tombstonePath, "utf8")) as HostRetirementTombstone;
-      return isObject(candidate)
-        && (candidate.state === "retiring" || candidate.state === "retired")
-        && isObject(candidate.thread)
-        && isObject(candidate.authorization)
-        && isObject(candidate.disposition)
-        ? candidate
-        : undefined;
+      return transaction();
     } catch {
-      return undefined;
+      return failure("CHECKPOINT_ORDER_VIOLATION");
     }
-  }
-
-  #writeRetirementTombstone(tombstone: HostRetirementTombstone): void {
-    const tombstonePath = this.#retirementTombstonePath(tombstone.thread);
-    const temporaryPath = `${tombstonePath}.${process.pid}.tmp`;
-    writeFileSync(temporaryPath, JSON.stringify(tombstone), { encoding: "utf8", mode: 0o600 });
-    renameSync(temporaryPath, tombstonePath);
   }
 
   async #drive(record: HostThreadRecord, output: ActionOutputSink): Promise<Result<HostDisposition, HostError>> {
