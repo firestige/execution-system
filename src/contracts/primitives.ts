@@ -50,7 +50,6 @@ export type InvocationId = StableId<"invocation">;
 export type InvocationJournalId = StableId<"invocation-journal">;
 export type ModelResourceId = StableId<"model-resource">;
 export type NodeId = StableId<"node">;
-export type OwnerRetirementDispositionId = StableId<"owner-retirement-disposition">;
 export type PackageId = StableId<"package">;
 export type PreservedResultId = StableId<"preserved-result">;
 export type PublicationGuardId = StableId<"publication-guard">;
