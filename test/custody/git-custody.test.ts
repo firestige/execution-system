@@ -46,8 +46,10 @@ function fixture() {
   git(repository, "config", "user.name", "Custody Test");
   mkdirSync(path.join(repository, "allowed"));
   mkdirSync(path.join(repository, "blocked"));
+  writeFileSync(path.join(repository, ".gitignore"), "ignored.log\n");
   writeFileSync(path.join(repository, "allowed", "value.txt"), "baseline\n");
   writeFileSync(path.join(repository, "blocked", "secret.txt"), "baseline\n");
+  writeFileSync(path.join(repository, "ignored.log"), "ignored baseline\n");
   git(repository, "add", ".");
   git(repository, "commit", "-qm", "baseline");
   const tree = git(repository, "rev-parse", "HEAD^{tree}") as GitTreeId;
@@ -617,5 +619,107 @@ describe("Git custody", () => {
     if (recordName === undefined) throw new Error("record missing");
     writeFileSync(path.join(f.records, recordName), "not-json");
     expect(await custody.inspect(f.delivery)).toEqual({ ok: false, error: { code: "BASELINE_MISSING" } });
+  });
+
+  it("detects and restores ignored content that is outside a write capability", async () => {
+    const f = fixture();
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
+    if (!baseline.ok) throw new Error("baseline was not established");
+    const handle = await custody.acquireWriteHandle({
+      episode: f.episode,
+      savepoint: baseline.value,
+      access: [{ mode: "write", path: "allowed" as WorkspaceRelativePath }],
+    });
+    if (!handle.ok) throw new Error("handle was not issued");
+    writeFileSync(path.join(f.repository, "ignored.log"), "ignored mutation\n");
+
+    const disposition = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "write", handle: handle.value },
+      hostDecision: "accept",
+    });
+    expect(disposition.ok && disposition.value.kind).toBe("scope-violation-restored");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored baseline\n");
+  });
+
+  it("performs independent write-scope validation before classifying a Host rejection", async () => {
+    const f = fixture();
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
+    if (!baseline.ok) throw new Error("baseline was not established");
+    const handle = await custody.acquireWriteHandle({
+      episode: f.episode,
+      savepoint: baseline.value,
+      access: [{ mode: "write", path: "allowed" as WorkspaceRelativePath }],
+    });
+    if (!handle.ok) throw new Error("handle was not issued");
+    writeFileSync(path.join(f.repository, "blocked", "secret.txt"), "scope violation\n");
+    writeFileSync(path.join(f.repository, "ignored.log"), "ignored scope violation\n");
+
+    const disposition = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "write", handle: handle.value },
+      hostDecision: "reject",
+    });
+    expect(disposition.ok && disposition.value.kind).toBe("scope-violation-restored");
+    expect(readFileSync(path.join(f.repository, "blocked", "secret.txt"), "utf8")).toBe("baseline\n");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored baseline\n");
+  });
+
+  it("performs independent read-view mutation validation before classifying a Host rejection", async () => {
+    const f = fixture();
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
+    if (!baseline.ok) throw new Error("baseline was not established");
+    const view = await custody.openReadView({
+      episode: f.episode,
+      source: baseline.value,
+      access: [{ mode: "read", path: "allowed" as WorkspaceRelativePath }],
+    });
+    if (!view.ok) throw new Error("view was not opened");
+    writeFileSync(path.join(f.repository, "ignored.log"), "read mutation\n");
+
+    const disposition = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "read", view: view.value },
+      hostDecision: "reject",
+    });
+    expect(disposition.ok && disposition.value.kind).toBe("scope-violation-restored");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored baseline\n");
+  });
+
+  it("advances and durably restores an authorized ignored-only savepoint", async () => {
+    const f = fixture();
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
+    if (!baseline.ok) throw new Error("baseline was not established");
+    const handle = await custody.acquireWriteHandle({
+      episode: f.episode,
+      savepoint: baseline.value,
+      access: [{ mode: "write", path: "ignored.log" as WorkspaceRelativePath }],
+    });
+    if (!handle.ok) throw new Error("handle was not issued");
+    writeFileSync(path.join(f.repository, "ignored.log"), "authorized ignored value\n");
+    const accepted = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "write", handle: handle.value },
+      hostDecision: "accept",
+    });
+    if (!accepted.ok || accepted.value.kind !== "accepted" || accepted.value.nextSavepoint.state !== "known"
+      || "kind" in accepted.value.nextSavepoint.value) throw new Error("ignored savepoint was not accepted");
+    expect(accepted.value.nextSavepoint.value.gitTree).toBe(baseline.value.gitTree);
+    expect(accepted.value.nextSavepoint.value.savepointIdentity).not.toBe(baseline.value.savepointIdentity);
+    expect(git(f.repository, "for-each-ref", "--format=%(objecttype)", "refs/agentops/custody").split("\n"))
+      .toEqual(["tree", "tree", "tree", "tree"]);
+
+    writeFileSync(path.join(f.repository, "ignored.log"), "later rejected value\n");
+    const restored = await custody.recover({
+      delivery: f.delivery,
+      directive: "restore-from-savepoint",
+      savepoint: { state: "known", value: accepted.value.nextSavepoint.value },
+    });
+    expect(restored.ok && restored.value.kind).toBe("restored");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("authorized ignored value\n");
   });
 });
