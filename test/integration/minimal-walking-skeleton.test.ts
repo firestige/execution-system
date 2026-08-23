@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RunnerFactory, type RunnerFactoryConfig, type RunnerFactoryDependencies } from "../../src/index.js";
+import { createRunnerOwnerFactPort, type RunnerSettlementOwnerFact } from "../../src/observation/index.js";
 import { EXECUTION_RUNTIME_ADAPTER_VERSION } from "../../src/execution/runtime-adapter.js";
 import { buildMinimalRunnerActivation } from "../support/wave4/minimal-admitted-activation.js";
 import {
@@ -95,11 +96,15 @@ const dependencies = Object.freeze({
     async requestInput() { throw new Error("success path does not request Action input"); },
   }),
   workflow: Object.freeze({ async request() { throw new Error("success path does not enter Workflow Wait"); } }),
+  observation: Object.freeze({ async observe() {} }),
   hostOperations: Object.freeze({}),
 });
 
-function creationDependencies(hostOperations: RunnerFactoryDependencies["hostOperations"]): RunnerFactoryDependencies {
-  return Object.freeze({ ...dependencies, hostOperations });
+function creationDependencies(
+  hostOperations: RunnerFactoryDependencies["hostOperations"],
+  observation: RunnerFactoryDependencies["observation"] = dependencies.observation,
+): RunnerFactoryDependencies {
+  return Object.freeze({ ...dependencies, hostOperations, observation });
 }
 
 describe("Wave 4 real minimal walking skeleton", () => {
@@ -114,8 +119,10 @@ describe("Wave 4 real minimal walking skeleton", () => {
       correlation: activation.correlation,
       expectations: minimalValidationExpectations(),
     });
+    const observed: unknown[] = [];
     const factory = new RunnerFactory();
-    const adapter = await factory.create(fixture.config, creationDependencies(validation.hostOperations));
+    const adapter = await factory.create(fixture.config, creationDependencies(validation.hostOperations,
+      createRunnerOwnerFactPort(Object.freeze({ emit(fact: RunnerSettlementOwnerFact) { observed.push(fact); } }))));
     try {
       const executed = await adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation });
       expect(executed).toMatchObject({ ok: true, value: {
@@ -133,6 +140,7 @@ describe("Wave 4 real minimal walking skeleton", () => {
       } });
       expect(fixture.authorization).toEqual(Array(4).fill("Bearer synthetic-secret"));
       expect(fixture.remaining).toEqual([]);
+      expect(observed).toEqual([expect.objectContaining({ owner: "M02", phase: "RUNNER_TERMINAL_SETTLED" })]);
       expect(validation.remaining()).toEqual([]);
       expect(validation.records()).toEqual([
         expect.objectContaining({ validatorIdentity: "validator.intake-checks", actionIdentity: "action.intake", disposition: { kind: "accepted" } }),

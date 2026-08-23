@@ -144,6 +144,7 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
         const adapter = await runnerFactory.create(runtimeConfig, Object.freeze({
           interaction: Object.freeze({ publish: async () => ({ ok: true as const, value: undefined }), requestInput: async () => { throw new Error("not requested"); } }),
           workflow: Object.freeze({ request: async () => { throw new Error("not requested"); } }),
+          observation: Object.freeze({ async observe() {} }),
           hostOperations: Object.freeze({ "validator.intake-checks": Object.freeze({ execute: async () => Object.freeze({ accepted: true, value: null }) }) }),
         }));
         adapters.push(adapter);
