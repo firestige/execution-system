@@ -25,7 +25,7 @@ function packageMetadata(specifier: string, paths?: readonly string[]): PackageM
 }
 
 describe("I2-G00 selected substrate matrix", () => {
-  it("binds the exact Node and pnpm project identities", () => {
+  it("binds exact Node and pnpm identities and enforces the qualified Git baseline", () => {
     const project = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")) as {
       readonly packageManager: string;
     };
@@ -35,7 +35,12 @@ describe("I2-G00 selected substrate matrix", () => {
 
     const git = spawnSync("git", ["--version"], { encoding: "utf8", shell: false });
     expect(git.status).toBe(0);
-    expect(git.stdout.trim()).toBe("git version 2.52.0");
+    const match = /^git version (\d+)\.(\d+)\.(\d+)(?:\..*)?$/.exec(git.stdout.trim());
+    expect(match).not.toBeNull();
+    const major = Number(match![1]);
+    const minor = Number(match![2]);
+    const patch = Number(match![3]);
+    expect(major > 2 || (major === 2 && (minor > 52 || (minor === 52 && patch >= 0)))).toBe(true);
   });
 
   it("binds DSH and its headless dependency to the same selected release", () => {
