@@ -10,6 +10,7 @@ export interface ExecutionRequest {
 export type ExecutionErrorCode =
   | "APPLICATION_NOT_READY"
   | "APPLICATION_CLOSING"
+  | "EXECUTION_BUSY"
   | "INVALID_EXECUTION_REQUEST"
   | "INVALID_WORKTREE"
   | "WORKTREE_OUT_OF_SCOPE"

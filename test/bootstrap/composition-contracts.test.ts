@@ -7,6 +7,7 @@ import {
   DisabledOwnerFactSink,
   DeliveryCompositionGate,
   InstallationCompositionGate,
+  ImmediateConcurrencyController,
   HostOperationFactoryRegistry,
   LifecycleResourceStack,
   SourceFactoryRegistry,
@@ -87,8 +88,18 @@ describe("Wave 1 composition contracts", () => {
     const registry = new HostOperationFactoryRegistry(Object.freeze({ shell: operation }));
     expect(registry.select("shell")).toBe(operation);
     expect(() => registry.select("Shell")).toThrow();
-    expect(registry.create("shell", { mode: "safe" })).toHaveProperty("execute");
-    expect(() => registry.create("shell", { mode: "ambient" })).toThrow();
+    expect(registry.createDeclared([{ key: "shell", configuration: { mode: "safe" } }])).toHaveProperty("shell.execute");
+    expect(() => registry.createDeclared([{ key: "shell", configuration: { mode: "ambient" } }])).toThrow();
+    operation.create.mockClear();
+    expect(() => registry.createDeclared([
+      { key: "shell", configuration: { mode: "safe" } },
+      { key: "missing", configuration: {} },
+    ])).toThrow();
+    expect(operation.create).not.toHaveBeenCalled();
+    expect(() => registry.createDeclared([
+      { key: "shell", configuration: { mode: "safe" } },
+      { key: "shell", configuration: { mode: "safe" } },
+    ])).toThrow();
     const sink = new DisabledOwnerFactSink();
     expect(sink.kind).toBe("disabled");
     expect(() => sink.emit({ owner: "M01", name: "delivery.bound", occurredAt: 1 })).not.toThrow();
@@ -132,6 +143,17 @@ describe("Wave 1 composition contracts", () => {
     gate.createDefinitions();
     gate.createApplication();
     expect(gate.status()).toEqual({ state: "APPLICATION_CREATED" });
+  });
+
+  it("returns typed BUSY immediately at the installation concurrency bound without a queue", () => {
+    const concurrency = new ImmediateConcurrencyController(1);
+    const first = concurrency.tryAcquire();
+    expect(first.kind).toBe("ACQUIRED");
+    expect(concurrency.tryAcquire()).toEqual({ kind: "BUSY" });
+    if (first.kind === "ACQUIRED") first.release();
+    expect(concurrency.tryAcquire().kind).toBe("ACQUIRED");
+    expect(concurrency).not.toHaveProperty("wait");
+    expect(concurrency).not.toHaveProperty("enqueue");
   });
 
   it("disposes partial construction and normal ownership in exact reverse order, once", async () => {

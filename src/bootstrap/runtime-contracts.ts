@@ -136,9 +136,21 @@ export class HostOperationFactoryRegistry {
     if (selected === undefined) throw new SourceFactorySelectionError(key);
     return selected;
   }
-  create(key: string, candidate: unknown) {
-    const factory = this.select(key);
-    return factory.create(factory.admitConfiguration(candidate));
+  createDeclared(declarations: readonly Readonly<{ key: string; configuration: unknown }>[]): Readonly<Record<string, ReturnType<HostOperationFactory["create"]>>> {
+    const keys = declarations.map((declaration) => declaration.key);
+    if (new Set(keys).size !== keys.length) throw new HostOperationSelectionError("HOST_OPERATION_DECLARATION_DUPLICATE");
+    const admitted = declarations.map((declaration) => {
+      const factory = this.select(declaration.key);
+      return Object.freeze({ key: declaration.key, factory, configuration: factory.admitConfiguration(declaration.configuration) });
+    });
+    return Object.freeze(Object.fromEntries(admitted.map((entry) => [entry.key, entry.factory.create(entry.configuration)])));
+  }
+}
+
+export class HostOperationSelectionError extends Error {
+  constructor(readonly code: "HOST_OPERATION_DECLARATION_DUPLICATE") {
+    super(code);
+    this.name = "HostOperationSelectionError";
   }
 }
 
@@ -197,4 +209,33 @@ export function createBoundedBootstrapDiagnostic(
     accepted.push(fieldPath);
   }
   return Object.freeze({ code, fieldPaths: Object.freeze(accepted), truncated });
+}
+
+export type ConcurrencyAdmission =
+  | Readonly<{ kind: "ACQUIRED"; release(): void }>
+  | Readonly<{ kind: "BUSY" }>;
+
+const BUSY: ConcurrencyAdmission = Object.freeze({ kind: "BUSY" });
+
+/** Installation-wide immediate admission; deliberately has no queue or waiter surface. */
+export class ImmediateConcurrencyController {
+  #active = 0;
+  constructor(readonly maximum: number) {
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 32) {
+      throw new BootstrapContractError("BOOTSTRAP_DEPENDENCIES_INVALID");
+    }
+  }
+  tryAcquire(): ConcurrencyAdmission {
+    if (this.#active >= this.maximum) return BUSY;
+    this.#active += 1;
+    let released = false;
+    return Object.freeze({
+      kind: "ACQUIRED" as const,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.#active -= 1;
+      },
+    });
+  }
 }
