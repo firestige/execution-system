@@ -72,6 +72,11 @@ export function boundaryViolations(sources: readonly SourceImport[]): string[] {
         violations.push(`${source.from} cannot import fixtures`);
         continue;
       }
+      if (/(?:^|\/)src\/composition(?:\/|$)/.test(target)
+        && (owner !== undefined || isProviderAdapter || /(?:^|\/)src\/(?:contracts|shared)(?:\/|$)/.test(source.from))) {
+        violations.push(`${source.from} cannot import composition`);
+        continue;
+      }
 
       const dependency = runtimeModule(target);
       if (dependency === undefined || dependency === owner) continue;
@@ -87,9 +92,8 @@ export function boundaryViolations(sources: readonly SourceImport[]): string[] {
         violations.push(`${source.from} cannot import runtime/${dependency}`);
         continue;
       }
-      if (source.from.includes("/composition/") && !new Set(["interpreter", "coordinator"]).has(dependency)) {
-        violations.push(`${source.from} cannot import runtime/${dependency}`);
-      }
+      // Runner composition is the only root that assembles all owning lanes.
+      // Runtime lanes remain acyclic and cannot import composition (checked above).
     }
   }
   return violations;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
 
 import {
   boundaryViolations,
@@ -15,6 +16,17 @@ function source(from: string, ...imports: string[]): SourceImport {
 }
 
 describe("static dependency boundary", () => {
+  it("G06 production composition does not import the raw minimal corpus or test-side admission builder", () => {
+    const sourceRoot = path.join(projectRoot, "src");
+    const files = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const child = path.join(directory, entry.name);
+      return entry.isDirectory() ? files(child) : entry.name.endsWith(".ts") ? [child] : [];
+    });
+    const production = files(sourceRoot).map((filename) => readFileSync(filename, "utf8")).join("\n");
+    expect(production).not.toContain("workflow-dsl/examples/minimal");
+    expect(production).not.toContain("test/support/wave4");
+  });
+
   it("G00-R4-ALLOW accepts the frozen acyclic caller direction", () => {
     expect(boundaryViolations([
       source("src/coordinator/run.ts", "../host/run.js", "../invocation/cancel.js", "../custody/retire.js"),
@@ -23,6 +35,29 @@ describe("static dependency boundary", () => {
       source("src/interpreter/compile.ts", "../contracts/constructed-activation.js"),
       source("src/composition/root.ts", "../interpreter/compile.js", "../coordinator/run.js"),
     ])).toEqual([]);
+  });
+
+  it("G06-STATIC-COMPOSITION permits only the RunnerFactory root to assemble every owning lane", () => {
+    expect(boundaryViolations([
+      source(
+        "src/composition/runner-factory.ts",
+        "../interpreter/compile-runner-activation.js",
+        "../coordinator/runner-coordinator.js",
+        "../host/index.js",
+        "../invocation/index.js",
+        "../custody/git-custody.js",
+      ),
+    ])).toEqual([]);
+
+    expect(boundaryViolations([
+      source("src/host/run.ts", "../composition/runner-factory.js"),
+      source("src/invocation/run.ts", "../composition/runner-factory.js"),
+      source("src/custody/run.ts", "../composition/runner-factory.js"),
+    ])).toEqual([
+      "src/host/run.ts cannot import composition",
+      "src/invocation/run.ts cannot import composition",
+      "src/custody/run.ts cannot import composition",
+    ]);
   });
 
   it("G00-R4-REVERSE rejects Host to Interpreter and Invocation to Host imports", () => {
