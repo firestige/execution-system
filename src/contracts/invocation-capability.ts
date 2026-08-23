@@ -10,7 +10,12 @@ export interface InvocationDispatch { readonly episode: EpisodeRef; readonly pla
 export interface AgentOutputFrame { readonly episode: EpisodeRef; readonly sequence: number; readonly content: FrozenJsonValue }
 export interface ActionOutputSink { publish(frame: AgentOutputFrame): Promise<Result<void, InteractionError>> }
 export interface ActionInputRequest { readonly identity: import("./primitives.js").InteractionRequestId; readonly episode: EpisodeRef; readonly prompt: FrozenJsonValue; readonly responseSchema: FrozenJsonSchema }
-export interface ActionInputResponse { readonly requestIdentity: import("./primitives.js").InteractionRequestId; readonly content: FrozenJsonValue; readonly contentIdentity: Sha256 }
+export type ActionInputResponse = Readonly<{
+  readonly kind: "ANSWER" | "ACTION_FINISH_REQUESTED";
+  readonly requestIdentity: import("./primitives.js").InteractionRequestId;
+  readonly content: FrozenJsonValue;
+  readonly contentIdentity: Sha256;
+}>;
 export interface ContinueInvocationRequest { readonly episode: EpisodeRef; readonly response: ActionInputResponse }
 export interface InteractionReceiptRef { readonly identity: InteractionReceiptId; readonly requestIdentity: import("./primitives.js").InteractionRequestId; readonly responseIdentity: Sha256 }
 export interface InvocationJournalRef { readonly identity: import("./primitives.js").InvocationJournalId; readonly episode: EpisodeRef }

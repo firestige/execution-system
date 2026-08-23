@@ -817,6 +817,7 @@ describe("LangGraph CoordinatorHost", () => {
       thread: started.value.wait.checkpoint.thread,
       episode: started.value.wait.episode,
       response: {
+        kind: "ANSWER",
         requestIdentity: started.value.wait.request.identity,
         content: { approved: true },
         contentIdentity: canonicalDigest({ approved: true }),
@@ -857,6 +858,7 @@ describe("LangGraph CoordinatorHost", () => {
       thread: started.value.wait.checkpoint.thread,
       episode: started.value.wait.episode,
       response: {
+        kind: "ANSWER",
         requestIdentity: started.value.wait.request.identity,
         content: response,
         contentIdentity: canonicalDigest(response),
