@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,8 +18,39 @@ const rendered = template
   .replace("{{HOST_CAPABILITIES}}", union(host));
 const output = path.join(root, "src/contracts/generated/workflow-contract.ts");
 
+const frozenWorkflowDslFiles = [
+  "schemas/actions.schema.json",
+  "schemas/agentops.meta.schema.json",
+  "schemas/artifacts.schema.json",
+  "schemas/package-snapshot.schema.json",
+  "schemas/package.schema.json",
+  "schemas/roles.schema.json",
+  "schemas/routes.schema.json",
+  "schemas/validation.schema.json",
+  "schemas/workflow-definition.schema.json",
+  "tools/canonicalize.cjs",
+  "tools/check-example.cjs",
+] as const;
+const generatedWorkflowDslRoot = path.join(root, "config/workflow-dsl");
+
+function synchronizeFrozenWorkflowDsl(check: boolean): void {
+  for (const relative of frozenWorkflowDslFiles) {
+    const source = path.resolve(contractRoot, "..", relative);
+    const destination = path.join(generatedWorkflowDslRoot, relative);
+    const bytes = readFileSync(source);
+    if (check) {
+      if (!readFileSync(destination).equals(bytes)) throw new Error(`generated Workflow DSL validator is stale: ${relative}`);
+    } else {
+      mkdirSync(path.dirname(destination), { recursive: true });
+      writeFileSync(destination, bytes);
+    }
+  }
+}
+
 if (process.argv.includes("--check")) {
   if (readFileSync(output, "utf8") !== rendered) throw new Error("generated Workflow Contract projection is stale");
+  synchronizeFrozenWorkflowDsl(true);
 } else {
   writeFileSync(output, rendered);
+  synchronizeFrozenWorkflowDsl(false);
 }

@@ -36,6 +36,8 @@
     "@langchain/core": "1.2.9",
     "@langchain/langgraph": "1.4.12",
     "@langchain/langgraph-checkpoint-sqlite": "1.0.4",
+    "ajv": "8.20.0",
+    "tar": "7.5.11",
     "yaml": "2.9.0",
     "zod": "4.2.0"
   },

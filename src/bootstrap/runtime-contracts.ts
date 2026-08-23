@@ -99,7 +99,22 @@ export class LifecycleResourceStack {
   }
 }
 
-export interface WorkflowPackageSource { fetch(selector: string): Promise<Uint8Array> }
+export interface WorkflowPackageSourceRequest {
+  readonly name: string;
+  readonly version: Readonly<{ kind: "LATEST" }> | Readonly<{ kind: "EXACT"; value: string }>;
+}
+export interface WorkflowPackageCandidate {
+  readonly name: string;
+  readonly exactVersion: string;
+  readonly archiveDigest: string;
+  readonly archive: Uint8Array;
+}
+export type WorkflowPackageSourceResult =
+  | Readonly<{ kind: "FOUND"; candidate: WorkflowPackageCandidate }>
+  | Readonly<{ kind: "NOT_FOUND" }>
+  | Readonly<{ kind: "UNAVAILABLE" }>
+  | Readonly<{ kind: "INVALID" }>;
+export interface WorkflowPackageSource { fetch(request: WorkflowPackageSourceRequest): Promise<WorkflowPackageSourceResult> }
 export interface WorkflowPackageSourceFactory { create(): Promise<WorkflowPackageSource> }
 export type SourceFactory = WorkflowPackageSourceFactory;
 export class SourceFactorySelectionError extends Error {
