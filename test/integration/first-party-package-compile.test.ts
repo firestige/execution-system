@@ -30,7 +30,7 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recur
 describe("Wave 4 first-party Package Runner projection", () => {
   it.each([
     ["System Design", path.join(repositoryRoot, "workflow-package/system-design/definition")],
-    ["Implementation", path.join(repositoryRoot, "tmp/20260821/iter2-runner-implementation/worktrees/formal-wave4/implementation-package-dsl11/implementation/definition")],
+    ["Implementation", path.join(repositoryRoot, "workflow-package/implementation/definition")],
   ])("projects and compiles the qualified %s Package without passing raw documents to Runner", async (_name, definitionDirectory) => {
     const worktree = await workspace();
     const workflow = JSON.parse(await readFile(path.join(definitionDirectory, "workflow.json"), "utf8"));
