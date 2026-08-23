@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -17,6 +18,10 @@ import {
 
 const roots: string[] = [];
 const servers: Server[] = [];
+const minimalCorpus = path.join(
+  path.dirname(fileURLToPath(new URL("../..", import.meta.url))),
+  "system-contracts/workflow-dsl/examples/minimal",
+);
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -101,7 +106,7 @@ describe("Wave 4 real minimal walking skeleton", () => {
   it("executes admitted minimal topology through real DSH, Host, Custody and Coordinator", async () => {
     const fixture = await environment();
     const activation = await buildMinimalRunnerActivation({
-      corpusDirectory: "/Users/firestige/Projects/workflow-self-recursive/system-contracts/workflow-dsl/examples/minimal",
+      corpusDirectory: minimalCorpus,
       workspaceDirectory: fixture.workspace,
       baseURL: fixture.baseURL,
     });
@@ -157,7 +162,7 @@ describe("Wave 4 real minimal walking skeleton", () => {
   ] as const)("fails closed when the validation action is %s", async (behavior, expected) => {
     const fixture = await environment();
     const activation = await buildMinimalRunnerActivation({
-      corpusDirectory: "/Users/firestige/Projects/workflow-self-recursive/system-contracts/workflow-dsl/examples/minimal",
+      corpusDirectory: minimalCorpus,
       workspaceDirectory: fixture.workspace,
       baseURL: fixture.baseURL,
       deliveryIdentity: `delivery.validation-${behavior}`,
@@ -184,7 +189,7 @@ describe("Wave 4 real minimal walking skeleton", () => {
   it("fails closed when a declared validator is not registered", async () => {
     const fixture = await environment();
     const activation = await buildMinimalRunnerActivation({
-      corpusDirectory: "/Users/firestige/Projects/workflow-self-recursive/system-contracts/workflow-dsl/examples/minimal",
+      corpusDirectory: minimalCorpus,
       workspaceDirectory: fixture.workspace,
       baseURL: fixture.baseURL,
       deliveryIdentity: "delivery.validation-unregistered",

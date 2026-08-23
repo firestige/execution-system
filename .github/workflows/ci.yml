@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: execution-system-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout execution-system
+        uses: actions/checkout@v6
+        with:
+          path: execution-system
+
+      - name: Checkout frozen Workflow Contract
+        uses: actions/checkout@v6
+        with:
+          repository: firestige/system-contracts
+          ref: 6d3a0b74c8de594020747022447aab5df1058570
+          path: system-contracts
+
+      - name: Checkout canonical workflow-package
+        uses: actions/checkout@v6
+        with:
+          repository: firestige/workflow-package
+          ref: ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb
+          path: workflow-package
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: execution-system/.node-version
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+
+      - name: Install dependencies
+        working-directory: execution-system
+        run: pnpm install --frozen-lockfile
+
+      - name: Run full regression
+        working-directory: execution-system
+        run: pnpm test
+
+      - name: Run coverage gate
+        working-directory: execution-system
+        run: pnpm test:coverage
+
+      - name: Run static, generated, and build gates
+        working-directory: execution-system
+        run: |
+          pnpm typecheck
+          pnpm build
+          pnpm check:generated
+          pnpm harness static
+          pnpm harness feasibility

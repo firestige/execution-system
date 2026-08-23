@@ -2,13 +2,14 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { compileRunnerActivation } from "../../src/interpreter/compile-runner-activation.js";
 import { buildFirstPartyCompileActivation } from "../support/wave4/first-party-package-activation.js";
 
-const repositoryRoot = "/Users/firestige/Projects/workflow-self-recursive";
+const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
 const roots: string[] = [];
 
 async function workspace(): Promise<string> {

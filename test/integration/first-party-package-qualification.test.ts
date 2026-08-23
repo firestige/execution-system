@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-const repositoryRoot = "/Users/firestige/Projects/workflow-self-recursive";
+const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
 const contractRoot = path.join(repositoryRoot, "system-contracts/workflow-dsl");
-const workflowPackageCommit = "2e0a0ea9d2e5ed704cb6ca2dde1e7624935e288a";
+const workflowPackageCommit = "ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb";
 
 function qualify(definition: string, root = repositoryRoot) {
   return spawnSync(process.execPath, [

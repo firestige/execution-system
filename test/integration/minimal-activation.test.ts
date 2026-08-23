@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -9,6 +10,10 @@ import { compileRunnerActivation } from "../../src/interpreter/compile-runner-ac
 import { buildMinimalRunnerActivation } from "../support/wave4/minimal-admitted-activation.js";
 
 const roots: string[] = [];
+const minimalCorpus = path.join(
+  path.dirname(fileURLToPath(new URL("../..", import.meta.url))),
+  "system-contracts/workflow-dsl/examples/minimal",
+);
 
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
@@ -29,7 +34,7 @@ async function workspace(): Promise<string> {
 describe("Wave 4 minimal admitted activation", () => {
   it("projects the upstream raw corpus into a deeply frozen G00 shape and compiles its routing topology", async () => {
     const activation = await buildMinimalRunnerActivation({
-      corpusDirectory: "/Users/firestige/Projects/workflow-self-recursive/system-contracts/workflow-dsl/examples/minimal",
+      corpusDirectory: minimalCorpus,
       workspaceDirectory: await workspace(),
       baseURL: "http://127.0.0.1:1",
     });

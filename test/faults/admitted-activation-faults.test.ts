@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -11,6 +12,10 @@ import { buildMinimalRunnerActivation } from "../support/wave4/minimal-admitted-
 
 let root = "";
 let activation: RunnerActivationContext;
+const minimalCorpus = path.join(
+  path.dirname(fileURLToPath(new URL("../..", import.meta.url))),
+  "system-contracts/workflow-dsl/examples/minimal",
+);
 
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
@@ -42,7 +47,7 @@ beforeEach(async () => {
   execFileSync("git", ["add", "README.md"], { cwd: workspace });
   execFileSync("git", ["commit", "-qm", "baseline"], { cwd: workspace });
   activation = await buildMinimalRunnerActivation({
-    corpusDirectory: "/Users/firestige/Projects/workflow-self-recursive/system-contracts/workflow-dsl/examples/minimal",
+    corpusDirectory: minimalCorpus,
     workspaceDirectory: workspace,
     baseURL: "http://127.0.0.1:1",
   });
