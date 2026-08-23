@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workflow-self-recursive.dev/schema/execution.config@1.0.0.json",
+  "title": "ExecutionInstallationConfig input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "paths", "workflowSource", "runner", "observation", "controls", "intake"],
+  "properties": {
+    "schemaVersion": { "const": "execution.config@1.0.0" },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryRoot", "workspaceRoot", "allowedWorktreeRoots", "stateRoot", "credentialStorePath"],
+      "properties": {
+        "repositoryRoot": { "$ref": "#/$defs/inputString" },
+        "workspaceRoot": { "$ref": "#/$defs/inputString" },
+        "allowedWorktreeRoots": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/inputString" } },
+        "stateRoot": { "$ref": "#/$defs/inputString" },
+        "credentialStorePath": { "$ref": "#/$defs/inputString" }
+      }
+    },
+    "workflowSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "repository", "releasesBaseUrl", "assetPattern"],
+          "properties": {
+            "kind": { "const": "github" },
+            "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+            "releasesBaseUrl": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "assetPattern": { "const": "workflow-package-{name}-{version}.tar.gz" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "adapterKey", "adapterConfigFile"],
+          "properties": {
+            "kind": { "const": "adapter" },
+            "adapterKey": { "$ref": "#/$defs/inputString" },
+            "adapterConfigFile": { "$ref": "#/$defs/inputString" }
+          }
+        }
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementationKey", "host", "provider"],
+      "properties": {
+        "implementationKey": { "const": "runner.v1" },
+        "host": {
+          "type": "object", "additionalProperties": false, "required": ["engine"],
+          "properties": { "engine": { "const": "langgraph" } }
+        },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "route", "modelId", "baseUrl", "credentialRef", "maxParallelToolCalls"],
+          "properties": {
+            "key": { "const": "dsh" },
+            "route": { "$ref": "#/$defs/inputString" },
+            "modelId": { "$ref": "#/$defs/inputString" },
+            "baseUrl": { "$ref": "#/$defs/inputString" },
+            "credentialRef": { "$ref": "#/$defs/inputString" },
+            "maxParallelToolCalls": { "type": "integer", "minimum": 1, "maximum": 32 }
+          }
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "timeoutMs", "maxBatchRecords", "maxBatchBytes", "flushIntervalMs", "shutdownFlushMs", "serviceName"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "endpoint": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "maxBatchRecords": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "maxBatchBytes": { "type": "integer", "minimum": 1024, "maximum": 4194304 },
+        "flushIntervalMs": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "shutdownFlushMs": { "type": "integer", "minimum": 100, "maximum": 10000 },
+        "serviceName": { "$ref": "#/$defs/inputString" }
+      },
+      "allOf": [
+        { "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] }, "then": { "required": ["endpoint"] } },
+        { "if": { "properties": { "enabled": { "const": false } }, "required": ["enabled"] }, "then": { "not": { "required": ["endpoint"] } } }
+      ]
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startupTimeoutMs", "executionTimeoutMs", "shutdownTimeoutMs", "maxConcurrentDeliveries", "allowExplicitRefresh", "diagnosticMaxBytes"],
+      "properties": {
+        "startupTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 120000 },
+        "executionTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 86400000 },
+        "shutdownTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 120000 },
+        "maxConcurrentDeliveries": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "allowExplicitRefresh": { "type": "boolean" },
+        "diagnosticMaxBytes": { "type": "integer", "minimum": 256, "maximum": 16384 }
+      }
+    },
+    "intake": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxCorrelationBytes", "maxOutputBytes"],
+      "properties": {
+        "maxCorrelationBytes": { "type": "integer", "minimum": 16, "maximum": 1024 },
+        "maxOutputBytes": { "type": "integer", "minimum": 256, "maximum": 65536 }
+      }
+    }
+  },
+  "$defs": {
+    "inputString": { "type": "string", "minLength": 1, "maxLength": 1024 }
+  }
+}

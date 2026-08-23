@@ -116,6 +116,18 @@ describe("static dependency boundary", () => {
     ]);
   });
 
+  it("I3-W1-HOST-NEUTRAL rejects native and Provider-private dependencies from configuration/bootstrap", () => {
+    expect(boundaryViolations([
+      source("src/configuration/loader.ts", "@deepseek-ai/dsh", "../providers/dsh/adapter.js"),
+      source("src/bootstrap/execution-bootstrap.ts", "@deepseek-ai/cordis", "../providers/dsh/native-session.js"),
+    ])).toEqual([
+      "src/configuration/loader.ts cannot import host-native dependency @deepseek-ai/dsh",
+      "src/configuration/loader.ts cannot import host-native dependency src/providers/dsh/adapter.js",
+      "src/bootstrap/execution-bootstrap.ts cannot import host-native dependency @deepseek-ai/cordis",
+      "src/bootstrap/execution-bootstrap.ts cannot import host-native dependency src/providers/dsh/native-session.js",
+    ]);
+  });
+
   it("G00-R4-CLI typechecks and scans the current source tree", () => {
     expect(staticBoundaryMain(projectRoot)).toBe(0);
   });
