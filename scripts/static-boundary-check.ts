@@ -58,7 +58,7 @@ export function boundaryViolations(sources: readonly SourceImport[]): string[] {
     const contractOwner = contractModule(source.from);
     const isProviderAdapter = /(?:^|\/)src\/providers(?:\/|$)/.test(source.from);
     const isPublicApplicationContract = /(?:^|\/)src\/application\/execution-application\.[cm]?[jt]s$/.test(source.from);
-    const isHostNeutralSupport = /(?:^|\/)src\/(?:configuration|bootstrap)(?:\/|$)/.test(source.from);
+    const isHostNeutralSupport = /(?:^|\/)src\/(?:configuration|bootstrap|core|delivery)(?:\/|$)/.test(source.from);
     for (const imported of source.imports) {
       const target = normalizedTarget(source, imported);
       const contractDependency = contractModule(target);

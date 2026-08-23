@@ -1,8 +1,22 @@
+export interface TaskPromptAttachment {
+  readonly identity: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly byteLength: number;
+  readonly digest: string;
+  readonly contentRef: string;
+}
+
+export interface TaskPrompt {
+  readonly text: string;
+  readonly attachments: readonly TaskPromptAttachment[];
+}
+
 /** Host-neutral request accepted by every Execution Intake Adapter. */
 export interface ExecutionRequest {
   readonly worktree: string;
   readonly selector: string;
-  readonly taskIntent: string;
+  readonly prompt: TaskPrompt;
   readonly refresh?: boolean;
   readonly intakeCorrelation?: string;
 }
@@ -38,14 +52,20 @@ export interface ExecutionFailure {
 export interface ExecutionContended {
   readonly kind: "CONTENDED";
   readonly worktree: string;
-  readonly deliveryId: string;
+  readonly admissionId: string;
 }
 
 export interface ExecutionRecovery {
   readonly kind: "RECOVERY";
   readonly worktree: string;
   readonly deliveryId: string;
-  readonly state: "BOUND" | "START_UNCERTAIN" | "RUNNING_CORRELATED" | "RESULT_UNRESOLVED";
+  readonly state: "BOUND" | "START_UNCERTAIN" | "RUNNING_CORRELATED" | "START_FAILED" | "RESULT_UNRESOLVED" | "TERMINAL_HANDLING";
+}
+
+export interface ExecutionPreDeliveryCancelled {
+  readonly kind: "PRE_DELIVERY_CANCELLED";
+  readonly worktree: string;
+  readonly admissionId: string;
 }
 
 export interface ExecutionStarted {
@@ -73,6 +93,7 @@ export type ExecutionResult =
   | ExecutionFailure
   | ExecutionContended
   | ExecutionRecovery
+  | ExecutionPreDeliveryCancelled
   | ExecutionStarted
   | ExecutionTerminal
   | ExecutionUnknown;

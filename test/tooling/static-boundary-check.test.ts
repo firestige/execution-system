@@ -128,6 +128,18 @@ describe("static dependency boundary", () => {
     ]);
   });
 
+  it("I3-W2-HOST-NEUTRAL rejects native Intake, DSH session, and Provider dependencies from Core/M01", () => {
+    expect(boundaryViolations([
+      source("src/core/request.ts", "@deepseek-ai/cordis", "../providers/dsh/native-session.js"),
+      source("src/delivery/admission.ts", "@deepseek-ai/dsh-session", "../providers/provider.js"),
+    ])).toEqual([
+      "src/core/request.ts cannot import host-native dependency @deepseek-ai/cordis",
+      "src/core/request.ts cannot import host-native dependency src/providers/dsh/native-session.js",
+      "src/delivery/admission.ts cannot import host-native dependency @deepseek-ai/dsh-session",
+      "src/delivery/admission.ts cannot import host-native dependency src/providers/provider.js",
+    ]);
+  });
+
   it("G00-R4-CLI typechecks and scans the current source tree", () => {
     expect(staticBoundaryMain(projectRoot)).toBe(0);
   });

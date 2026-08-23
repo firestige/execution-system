@@ -4,6 +4,7 @@ import type {
   ExecutionApplication,
   ExecutionRequest,
   ExecutionResult,
+  TaskPrompt,
 } from "../../src/application/execution-application.js";
 
 describe("host-neutral Execution application contract", () => {
@@ -11,19 +12,23 @@ describe("host-neutral Execution application contract", () => {
     const request: ExecutionRequest = {
       worktree: "/workspace/repository-worktree",
       selector: "implementation@latest",
-      taskIntent: "implement the approved change",
+      prompt: {
+        text: "implement the approved change",
+        attachments: [],
+      },
       refresh: false,
       intakeCorrelation: "command:42",
     };
 
     expect(Object.keys(request).sort()).toEqual([
       "intakeCorrelation",
+      "prompt",
       "refresh",
       "selector",
-      "taskIntent",
       "worktree",
     ]);
     expectTypeOf<ExecutionApplication["execute"]>().parameter(0).toEqualTypeOf<ExecutionRequest>();
+    expectTypeOf<ExecutionRequest["prompt"]>().toEqualTypeOf<TaskPrompt>();
     expectTypeOf<Awaited<ReturnType<ExecutionApplication["execute"]>>>().toEqualTypeOf<ExecutionResult>();
   });
 
