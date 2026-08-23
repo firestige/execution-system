@@ -41,6 +41,7 @@ export type ExecutionErrorCode =
   | "DELIVERY_CREATE_FAILED"
   | "RUNNER_START_FAILED"
   | "RUNNER_RESULT_INVALID"
+  | "ACTION_NOT_AWAITING_INPUT"
   | "DELIVERY_UNKNOWN";
 
 export interface ExecutionFailure {
@@ -108,6 +109,11 @@ export type ExecutionApplicationState =
 
 export interface ExecutionApplicationStatus {
   readonly state: ExecutionApplicationState;
+  readonly diagnostic?: Readonly<{
+    readonly code: string;
+    readonly phase: "STARTING" | "RECOVERING" | "CLOSING";
+    readonly installationIdentity: string;
+  }>;
 }
 
 /** Public product surface. No host, Provider, Cordis, or DSH-native value crosses it. */

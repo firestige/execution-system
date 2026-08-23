@@ -5,6 +5,7 @@ export * from "./configuration/index.js";
 export * from "./core/index.js";
 export * from "./delivery/index.js";
 export * from "./execution/runtime-adapter.js";
+export * from "./intake/index.js";
 export {
   RunnerFactory,
   RunnerFactoryConfigurationError,

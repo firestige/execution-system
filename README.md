@@ -10,11 +10,23 @@ Three modules carry this responsibility:
 - **Runtime Interaction** owns canonical worktree exclusivity, the current Delivery slot, Manifest persistence, Runtime invocation, recovery, and final handling.
 - **Delivery Observation** maps outbound bounded facts to a one-way, best-effort OTLP profile without controlling execution.
 
-Runtimes are replaceable adapters behind a Core-owned seam: [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is the first, and a first-party LangGraph adapter is planned.
+The public `ExecutionApplication` is host-neutral and can be embedded without a DSH Intake plugin. The separately packaged DSH Intake adapter is the first product entry; every admitted Workflow Action runs in a Runner-owned, isolated DSH execution context.
 
 ## Developer preview
 
-This repository is part of workflow-self-recursive's architecture-first developer preview for trusted local use by individuals and small teams. It publishes the Execution design and component boundaries; it does not yet provide a runnable end-user release. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+This repository is part of workflow-self-recursive's architecture-first developer preview for trusted local use by individuals and small teams. Version `0.1.0` is an MVP release and may make compatibility-breaking changes.
+
+## Release quickstart
+
+1. Download the `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake` `0.1.0` artifacts.
+2. Copy `config/defaults/execution.default.yaml`, replace each `__REQUIRED__` value, and provision the referenced API key in the external DSH credential file (`version: 1`, `refs: ...`).
+3. In a DSH profile with an interactive app (the shipped `web` profile is the reference), first run `dsh plugin --profile web add --workspace-root <absolute-execution-system-tarball>`, then run the same command with `<absolute-dsh-intake-tarball>`. The flag is required by the workspace created by the current DSH preview.
+4. Set the plugin row's absolute `configFile` and `bindingFile`, then verify it with `dsh --profile web --dump-config` and `dsh --profile web --help`.
+5. Start `dsh --profile web` from the target worktree. Use `/wsr create implementation-workflow@0.3.0`, `/wsr list`, and `/wsr status`. Restarting the Intake preserves Manifest/current-slot and private binding state for recovery.
+
+The default Source is the configured `firestige/workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
+
+See [the DSH Intake reference](packages/dsh-intake/README.md) for exact commands and multi-turn Action behavior.
 
 ## Get the source
 

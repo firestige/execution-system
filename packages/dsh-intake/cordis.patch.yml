@@ -1,0 +1,15 @@
+- insert:
+    - id: workflow-execution
+      name: '@workflow-self-recursive/dsh-intake'
+      config:
+        configFile: /__REQUIRED__/execution-config.yaml
+        bindingFile: /__REQUIRED__/dsh-intake-bindings.json
+- id: skill-filesystem
+  disabled: false
+  config:
+    includeDefaultRoots: true
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+    watch: false
+- id: tool-skill
+  disabled: false

@@ -47,7 +47,12 @@ export interface PersistedDeliveryBinding {
   readonly projection: DeliveryConfigProjection;
 }
 
-export interface OwnerFact { readonly owner: "M01" | "M02"; readonly name: string; readonly occurredAt: number }
+export interface OwnerFact {
+  readonly owner: "M01" | "M02";
+  readonly name: string;
+  readonly occurredAt: number;
+  readonly outcome?: "COMPLETED" | "FAILED" | "INCOMPLETE" | "CANCELLED" | "START_FAILED";
+}
 export interface OwnerFactIngress { emit(fact: OwnerFact): void }
 
 export interface InstallationFactoryContext {
