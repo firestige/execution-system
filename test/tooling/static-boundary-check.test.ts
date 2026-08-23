@@ -99,6 +99,23 @@ describe("static dependency boundary", () => {
     ]);
   });
 
+  it("I3-W0-HOST-NEUTRAL rejects native dependencies from the public application contract", () => {
+    expect(boundaryViolations([
+      source(
+        "src/application/execution-application.ts",
+        "@deepseek-ai/cordis",
+        "@deepseek-ai/dsh-session",
+        "../providers/dsh/native-session.js",
+        "../composition/runner-factory.js",
+      ),
+    ])).toEqual([
+      "src/application/execution-application.ts cannot import host-native dependency @deepseek-ai/cordis",
+      "src/application/execution-application.ts cannot import host-native dependency @deepseek-ai/dsh-session",
+      "src/application/execution-application.ts cannot import host-native dependency src/providers/dsh/native-session.js",
+      "src/application/execution-application.ts cannot import composition",
+    ]);
+  });
+
   it("G00-R4-CLI typechecks and scans the current source tree", () => {
     expect(staticBoundaryMain(projectRoot)).toBe(0);
   });

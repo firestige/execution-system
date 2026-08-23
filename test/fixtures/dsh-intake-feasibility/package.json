@@ -1,0 +1,11 @@
+{
+  "name": "@workflow-self-recursive/dsh-intake-feasibility",
+  "version": "0.0.0-feasibility",
+  "private": true,
+  "type": "module",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

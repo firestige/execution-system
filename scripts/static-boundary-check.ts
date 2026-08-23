@@ -57,9 +57,18 @@ export function boundaryViolations(sources: readonly SourceImport[]): string[] {
     const owner = runtimeModule(source.from);
     const contractOwner = contractModule(source.from);
     const isProviderAdapter = /(?:^|\/)src\/providers(?:\/|$)/.test(source.from);
+    const isPublicApplicationContract = /(?:^|\/)src\/application\/execution-application\.[cm]?[jt]s$/.test(source.from);
     for (const imported of source.imports) {
       const target = normalizedTarget(source, imported);
       const contractDependency = contractModule(target);
+      if (isPublicApplicationContract && (
+        imported === "@deepseek-ai/cordis"
+        || imported.startsWith("@deepseek-ai/dsh")
+        || /(?:^|\/)src\/providers(?:\/|$)/.test(target)
+      )) {
+        violations.push(`${source.from} cannot import host-native dependency ${target}`);
+        continue;
+      }
       if (contractOwner !== undefined && contractOwner !== "index" && contractDependency !== undefined && contractDependency !== contractOwner && !ALLOWED_CONTRACT_IMPORTS[contractOwner]?.has(contractDependency)) {
         violations.push(`${source.from} cannot import contract/${contractDependency}`);
         continue;
@@ -74,6 +83,10 @@ export function boundaryViolations(sources: readonly SourceImport[]): string[] {
       }
       if (/(?:^|\/)src\/composition(?:\/|$)/.test(target)
         && (owner !== undefined || isProviderAdapter || /(?:^|\/)src\/(?:contracts|shared)(?:\/|$)/.test(source.from))) {
+        violations.push(`${source.from} cannot import composition`);
+        continue;
+      }
+      if (isPublicApplicationContract && /(?:^|\/)src\/composition(?:\/|$)/.test(target)) {
         violations.push(`${source.from} cannot import composition`);
         continue;
       }

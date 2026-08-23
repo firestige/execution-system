@@ -1,4 +1,5 @@
 export * from "./contracts/index.js";
+export * from "./application/execution-application.js";
 export * from "./execution/runtime-adapter.js";
 export {
   RunnerFactory,
