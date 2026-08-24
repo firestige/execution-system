@@ -490,7 +490,7 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       child.kill("SIGTERM");
       await new Promise<void>((resolve) => child!.once("exit", () => resolve()));
     }
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 
