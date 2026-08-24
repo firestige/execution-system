@@ -154,22 +154,21 @@ function dispositionSetup(
     if (dispatch.executor.session.providedCapabilities.includes("action-interaction")) {
       tools.register(closure.defineTool({
         name: "workflow_request_input",
-        description: "Request external Action input while keeping this exact episode and session.",
+        description: "Request one natural-language external Action answer while keeping this exact episode and session.",
         parameters: {
           requestIdentity: { type: "string", required: true },
           prompt: { type: "json", required: true },
-          responseSchema: { type: "json", required: true },
         },
         output: {
           schema: { type: "object", properties: { suspended: { type: "boolean" } }, additionalProperties: false },
           render: () => outputText("input request persisted"),
         },
-        async execute(args: { requestIdentity: string; prompt: unknown; responseSchema: unknown }, execution: { concludeTurn(): void }) {
+        async execute(args: { requestIdentity: string; prompt: unknown }, execution: { concludeTurn(): void }) {
           dispositions.push({
             kind: "input-request",
             requestIdentity: args.requestIdentity,
             prompt: args.prompt as never,
-            responseSchema: args.responseSchema as never,
+            responseSchema: { type: "string" },
           });
           execution.concludeTurn();
           return { suspended: true };

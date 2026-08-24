@@ -1,5 +1,6 @@
 import type { ExecutionApplication } from "../application/execution-application.js";
 import type { DeliveryConfigProjection, ExecutionInstallationConfig } from "../configuration/index.js";
+import type { IntakePresentation } from "../intake/presentation.js";
 
 export type FactoryScope = "INSTALLATION" | "DELIVERY" | "INTAKE_PRESENTATION";
 
@@ -14,7 +15,7 @@ export interface FilesystemPort {
 }
 export interface NetworkResponse { readonly status: number; readonly body: Uint8Array }
 export interface NetworkPort { request(url: string): Promise<NetworkResponse> }
-export interface IntakePresentationPort { publish(message: Readonly<{ correlation: string; text: string }>): Promise<void> }
+export interface IntakePresentationPort { publish(event: IntakePresentation): Promise<void> }
 
 /** Opaque Intake references are dereferenced only by M01 after NEW admission. */
 export interface AttachmentContentPort { read(contentRef: string, maxBytes: number): Promise<Uint8Array> }

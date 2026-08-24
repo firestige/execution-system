@@ -1,4 +1,5 @@
 import { cp, readFile, mkdtemp, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,11 +32,13 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
   it.each([
     ["implementation", path.join(repositoryRoot, "workflow-package", "implementation", "definition")],
     ["system-design", path.join(repositoryRoot, "workflow-package", "system-design", "definition")],
+    ["hello-world", path.join(repositoryRoot, "workflow-package", "hello-world-workflow", "definition")],
     ["contributed", path.join(repositoryRoot, "system-contracts", "workflow-dsl", "examples", "minimal")],
   ])("projects the exact %s Package and persisted Manifest without raw admission inputs", async (name, definition) => {
     const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
     const workflowDocument = JSON.parse(await readFile(path.join(definition, "workflow.json"), "utf8"));
     const snapshotDocument = JSON.parse(await readFile(path.join(definition, "snapshot.json"), "utf8"));
+    const routesDocument = JSON.parse(await readFile(path.join(definition, "routes.json"), "utf8"));
     const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-"));
     const snapshot = await captureTaskPromptSnapshot({
       root: path.join(root, "snapshots"),
@@ -75,7 +78,14 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
       admission: { deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0" },
     });
     expect(compileRunnerActivation(activation).ok).toBe(true);
+    for (const agent of Object.values(activation.program.execution.agents)) {
+      const route = routesDocument.routes.find((candidate: any) => candidate.id === agent.session.routeIdentity);
+      const modes = [...new Set((route?.access ?? []).map((entry: any) => entry.mode).filter((mode: string) => mode === "read" || mode === "write"))];
+      expect(agent.turn.access).toEqual(modes.map((mode) => ({ mode, path: "**" })));
+    }
     const serialized = JSON.stringify(activation);
+    expect(serialized).not.toContain('"path":"README.md"');
+    expect(serialized).not.toContain('"path":"run"');
     expect(serialized).not.toMatch(/"contentRef"|"workflowSource"|"packageStore"|"credentialStore"|"nativeSession"|"checkpointIdentity"/);
     expect(serialized).not.toContain('"schemaVersion":"agentops.workflow-dsl@1.1.0","package"');
   });
@@ -97,18 +107,24 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
         count: { type: "integer" },
         items: { type: "array" },
         metadata: { type: "object" },
+        prompt: { type: "object" },
       },
-      required: ["request", "repository", "label", "accepted", "count", "items", "metadata"],
+      required: ["request", "repository", "label", "accepted", "count", "items", "metadata", "prompt"],
     };
     await writeFile(actionsPath, `${JSON.stringify(actionsDocument, null, 2)}\n`, "utf8");
 
     const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
     const workflowDocument = JSON.parse(await readFile(path.join(definition, "workflow.json"), "utf8"));
+    const attachmentBytes = Buffer.from("ordered attachment");
+    const attachmentDigest = `sha256:${createHash("sha256").update(attachmentBytes).digest("hex")}`;
     const promptSnapshot = await captureTaskPromptSnapshot({
       root: path.join(root, "snapshots"),
       deliveryId: "delivery-formats",
-      prompt: Object.freeze({ text: "format-only prompt", attachments: Object.freeze([]) }),
-      attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }),
+      prompt: Object.freeze({ text: "format-only prompt", attachments: Object.freeze([Object.freeze({
+        identity: "attachment-1", filename: "input.txt", mediaType: "text/plain",
+        byteLength: attachmentBytes.byteLength, digest: attachmentDigest, contentRef: "opaque:1",
+      })]) }),
+      attachments: Object.freeze({ read: async () => attachmentBytes }),
     });
     const manifest = createDeliveryManifest({
       deliveryId: "delivery-formats",
@@ -135,6 +151,14 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
       count: 0,
       items: [],
       metadata: {},
+      prompt: {
+        text: "format-only prompt",
+        attachments: [{
+          identity: "attachment-1", filename: "input.txt", mediaType: "text/plain",
+          byteLength: attachmentBytes.byteLength, digest: attachmentDigest,
+          content: { encoding: "base64", data: attachmentBytes.toString("base64") },
+        }],
+      },
     });
     expect(compileRunnerActivation(activation).ok).toBe(true);
   });

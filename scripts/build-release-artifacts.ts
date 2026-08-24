@@ -8,9 +8,21 @@ import { verifyDshIntakeDistribution } from "./verify-dsh-intake-distribution.js
 
 const repository = path.resolve(import.meta.dirname, "..");
 const destination = path.resolve(process.argv[2] ?? path.join(repository, "tmp/release"));
+const coreManifest = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")) as { readonly version: string };
+const pluginManifest = JSON.parse(await readFile(path.join(repository, "packages/dsh-intake/package.json"), "utf8")) as {
+  readonly version: string;
+  readonly dsh?: { readonly compatibility?: { readonly executionSystem?: string } };
+};
+if (coreManifest.version !== pluginManifest.version
+  || pluginManifest.dsh?.compatibility?.executionSystem !== coreManifest.version) {
+  throw new Error("RELEASE_PACKAGE_VERSION_MISMATCH");
+}
+const version = coreManifest.version;
+const coreArchiveName = `workflow-self-recursive-execution-system-${version}.tgz`;
+const pluginArchiveName = `workflow-self-recursive-dsh-intake-${version}.tgz`;
 const packageNames = Object.freeze<Record<string, string>>({
-  "workflow-self-recursive-execution-system-0.1.0.tgz": "@workflow-self-recursive/execution-system",
-  "workflow-self-recursive-dsh-intake-0.1.0.tgz": "@workflow-self-recursive/dsh-intake",
+  [coreArchiveName]: "@workflow-self-recursive/execution-system",
+  [pluginArchiveName]: "@workflow-self-recursive/dsh-intake",
 });
 
 function sha256(bytes: Uint8Array): string {
@@ -24,8 +36,8 @@ function pack(directory: string): void {
 await mkdir(destination, { recursive: true });
 await verifyDshIntakeDistribution(path.join(repository, "packages/dsh-intake"));
 await Promise.all([
-  "workflow-self-recursive-execution-system-0.1.0.tgz",
-  "workflow-self-recursive-dsh-intake-0.1.0.tgz",
+  coreArchiveName,
+  pluginArchiveName,
 ].map((name) => rm(path.join(destination, name), { force: true })));
 execFileSync("pnpm", ["build"], { cwd: repository, stdio: "inherit" });
 pack(repository);
@@ -41,7 +53,7 @@ for (const name of archives) {
 }
 const metadata = Object.freeze({
   schemaVersion: "execution.release@1.0.0",
-  version: "0.1.0",
+  version,
   compatibility: Object.freeze({
     node: ">=24.12.0 <25",
     dsh: "0.1.1-rc.2",

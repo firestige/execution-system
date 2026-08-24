@@ -25,6 +25,8 @@ export class DocumentationVerificationError extends Error {
 const GUIDE_FILES = Object.freeze([
   "docs/guides/dsh-execution-quickstart.md",
   "docs/guides/dsh-execution-quickstart.zh-CN.md",
+  "docs/guides/dsh-execution-local-e2e.md",
+  "docs/guides/dsh-execution-local-e2e.zh-CN.md",
   "docs/reference/execution-configuration.md",
   "docs/reference/execution-configuration.zh-CN.md",
 ]);
@@ -97,14 +99,40 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     verifyRelativeLinks(path.join(options.executionRoot, "packages/dsh-intake/README.md"), packageReadme),
   ]);
 
-  for (const guide of guideValues.slice(0, 2)) {
+  for (const guide of guideValues.slice(0, 4)) {
     includesAll(guide.value, [...IDENTITIES, ...COMMANDS], guide.relative);
-    includesAll(guide.value, ["execution-config init", "execution-config validate", "execution-config dump-effective", "--dump-config", "dsh --help", "plugin --profile workflow-execution add", "plugin --profile workflow-execution update", "plugin --profile workflow-execution remove"], guide.relative);
-    if (guide.value.includes("dsh --profile workflow-execution --help")) {
+    includesAll(guide.value, ["sidebar tabs", "compatibility/automation", "chat timeline"], guide.relative);
+    includesAll(guide.value, ["node --version", "pnpm --version", "npm install --global pnpm", "dsh --version", "@deepseek-ai/dsh@0.1.1-rc.2", "--dump-config", "dsh --help", "dsh web", "plugin --profile web add", "plugin --profile web update", "plugin --profile web remove", "allowBuilds", "better-sqlite3", "webserver", "ui-conversation", "ui-commands"], guide.relative);
+    if (guide.value.includes("dsh --profile web --help")) {
       throw new DocumentationVerificationError("DOCUMENTATION_IDENTITY_MISMATCH", `${guide.relative}: interactive profile help must not be used as launcher help`);
     }
+    const pnpmProbe = guide.value.indexOf("pnpm --version");
+    const pnpmInstall = guide.value.indexOf("npm install --global pnpm");
+    const dshProbe = guide.value.indexOf("dsh --version");
+    const dshInstall = guide.value.indexOf("npm install --global @deepseek-ai/dsh@0.1.1-rc.2");
+    if (pnpmInstall < pnpmProbe || dshInstall < dshProbe) {
+      throw new DocumentationVerificationError("DOCUMENTATION_PREREQUISITE_INSTALL_INVALID", guide.relative);
+    }
+    if (/\bif\s|command -v|\|\||&&/u.test(guide.value.slice(0, guide.value.indexOf("## 1.")))) {
+      throw new DocumentationVerificationError("DOCUMENTATION_PREREQUISITE_CHECK_NOT_MANUAL", guide.relative);
+    }
   }
-  for (const guide of guideValues.slice(2)) {
+  for (const guide of guideValues.slice(0, 2)) {
+    includesAll(guide.value, ["gh release download", "firestige/execution-system", "execution-config init", "execution-config validate", "execution-config dump-effective"], guide.relative);
+    if (guide.value.includes("quickstart:prepare") || guide.value.includes("release:artifacts")) {
+      throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
+    }
+  }
+  for (const guide of guideValues.slice(2, 4)) {
+    includesAll(guide.value, ["quickstart:prepare", "tmp/local-e2e/release", "wsr-local/execution.json", "corepack install --global pnpm@11.23.0", "prebuild-install@7.1.3", "no dsh.bundle", "fresh profile", "existing profile", "cordis.patch.yml", "remove Intake", "remove Core"], guide.relative);
+    if (guide.value.includes("gh release download") || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
+      throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
+    }
+    if (/^(?:Edit|编辑)\s+[^\n]*\$DSH_HOME\/profiles\/web\/cordis\.patch\.yml/imu.test(guide.value)) {
+      throw new DocumentationVerificationError("DOCUMENTATION_LOCAL_E2E_RECONCILIATION_INVALID", guide.relative);
+    }
+  }
+  for (const guide of guideValues.slice(4)) {
     includesAll(guide.value, ["execution.config@1.0.0", "credentialStorePath", "credentialRef", "modelId", "baseUrl", "workflowSource", "observation", "controls", "READY", "CLOSED"], guide.relative);
   }
   includesAll(packageReadme, [
@@ -114,6 +142,11 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     "workflow_execution_intake",
     "/workflow-execution",
     ...COMMANDS,
+    "sidebar tabs",
+    "compatibility/automation",
+    "chat timeline",
+    "allowBuilds",
+    "better-sqlite3",
   ], "packages/dsh-intake/README.md");
   includesAll(skill, ["workflow_execution_intake", "action-finish"], "packages/dsh-intake/skills/workflow-execution/SKILL.md");
   includesAll(defaultYaml, schema.required ?? [], "config/defaults/execution.default.yaml");

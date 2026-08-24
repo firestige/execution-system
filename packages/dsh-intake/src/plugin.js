@@ -69,18 +69,39 @@ function turnFromAgent(agent) {
   return Object.freeze({ text: textOf(message?.content), images: Object.freeze((message?.content ?? []).filter((block) => block?.type === "image")) });
 }
 
-export function presentToDshSession(agent, text, createId = () => `cmd-workflow-execution-${randomUUID()}`) {
+const PRESENTATION_VERSION = "wsr.presentation@1.0.0";
+const PRESENTATION_KINDS = new Set(["command-accepted", "delivery-running", "delivery-list", "delivery-status", "action-output", "action-input-request", "terminal-result", "error"]);
+
+function boundedPresentation(presentation) {
+  const valid = presentation !== null && typeof presentation === "object" && !Array.isArray(presentation)
+    && presentation.schemaVersion === PRESENTATION_VERSION
+    && typeof presentation.correlation === "string" && presentation.correlation.length > 0
+    && PRESENTATION_KINDS.has(presentation.kind)
+    && presentation.data !== null && typeof presentation.data === "object" && !Array.isArray(presentation.data);
+  const safe = valid ? presentation : Object.freeze({
+    schemaVersion: PRESENTATION_VERSION,
+    correlation: "presentation-invalid",
+    kind: "error",
+    data: Object.freeze({ code: "WSR_PRESENTATION_INVALID", message: "WSR_PRESENTATION_INVALID" }),
+  });
+  const text = JSON.stringify(safe);
+  if (Buffer.byteLength(text, "utf8") <= 4096) return text;
+  return JSON.stringify({ schemaVersion: PRESENTATION_VERSION, correlation: safe.correlation, kind: "error", data: { code: "OUTPUT_TRUNCATED", message: "OUTPUT_TRUNCATED" } });
+}
+
+export function presentToDshSession(agent, presentation, createId = () => `cmd-workflow-execution-${randomUUID()}`) {
   if (agent === null || typeof agent !== "object" || typeof agent.session?.append !== "function"
-    || typeof text !== "string" || text.length === 0 || typeof createId !== "function") {
+    || typeof createId !== "function") {
     throw new TypeError("DSH_INTAKE_PRESENTATION_INVALID");
   }
+  const text = boundedPresentation(presentation);
   const commandId = createId();
   agent.session.append("command/run", {
     commandId,
     name: "wsr",
     source: { kind: "plugin", plugin: "workflow-execution" },
   });
-  agent.session.append("command/done", { commandId, kind: "success", text });
+  agent.session.append("command/done", { commandId, kind: presentation?.kind === "error" ? "error" : "success", text });
 }
 
 export async function createPluginRuntime(config, options = {}) {
@@ -90,9 +111,9 @@ export async function createPluginRuntime(config, options = {}) {
   const bindings = options.bindings ?? new IntakeSessionBindingRepository(admitted.bindingFile);
   await bindings.start();
   const sessionByCorrelation = new Map();
-  const present = async (message) => {
-    const sessionKey = sessionByCorrelation.get(message.correlation);
-    if (sessionKey !== undefined) await options.present?.(Object.freeze({ sessionKey, text: message.text }));
+  const present = async (presentation) => {
+    const sessionKey = sessionByCorrelation.get(presentation.correlation);
+    if (sessionKey !== undefined) await options.present?.(Object.freeze({ sessionKey, presentation }));
   };
   const dependencies = options.dependencies ?? defaultDependencies(attachmentBytes, present);
   const factory = options.factory ?? new api.DefaultExecutionApplicationFactory();
@@ -169,7 +190,10 @@ export async function createPluginRuntime(config, options = {}) {
       }
       await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: delivery.deliveryId, worktree: delivery.worktree }));
       void track(execution.then(async (result) => {
-        try { await options.present?.(Object.freeze({ sessionKey: input.sessionKey, text: api.renderIntakeResult(result, 4096) })); }
+        try { await options.present?.(Object.freeze({
+          sessionKey: input.sessionKey,
+          presentation: api.presentationForIntakeResult(correlation, result, 4096),
+        })); }
         catch { /* presentation is not Delivery control */ }
         if (result.kind === "TERMINAL" || result.kind === "ERROR") {
           await bindings.detach(delivery.deliveryId);
@@ -256,10 +280,10 @@ export function mapIntakeToolOperation(args) {
 }
 
 export async function apply(ctx, config) {
-  const runtime = await createPluginRuntime(config, { present: async ({ sessionKey, text }) => {
+  const runtime = await createPluginRuntime(config, { present: async ({ sessionKey, presentation }) => {
     const agent = ctx.agents.get(sessionKey);
     if (agent === undefined) throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
-    presentToDshSession(agent, text);
+    presentToDshSession(agent, presentation);
   }, sessionAvailable: (sessionKey) => ctx.agents.get(sessionKey) !== undefined });
   const active = new Set();
   const attachmentStore = ctx.attachments;
@@ -272,14 +296,31 @@ export async function apply(ctx, config) {
     recordInput: false,
     async handler(invocation) {
       return run((async () => {
+        let query = false;
         try {
           const operation = parseWsrCommand(invocation.rawInput);
-          if (invocation.attachments.length > 0 && !["create", "action-finish"].includes(operation.operation)) return { kind: "error", text: "WSR_COMMAND_INVALID" };
+          query = operation.operation === "list" || operation.operation === "status";
+          const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+          if (!query) presentToDshSession(invocation.agent, createIntakePresentation(
+            String(invocation.commandId), "command-accepted", {},
+          ));
+          if (invocation.attachments.length > 0 && !["create", "action-finish"].includes(operation.operation)) {
+            const presentation = createIntakePresentation(
+              `presentation-${randomUUID()}`, "error", { code: "WSR_COMMAND_INVALID", message: "WSR_COMMAND_INVALID" },
+            );
+            if (!query) presentToDshSession(invocation.agent, presentation);
+            return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
+          }
           const result = await runtime.invokeForSession({ sessionKey: String(invocation.agent.id), worktree: worktree(), operation, turnText: commandTurn(invocation.rawInput), images: invocation.attachments, attachmentStore, signal: invocation.signal });
-          const { renderIntakeResult } = await import("@workflow-self-recursive/execution-system");
-          return { kind: result.kind === "ERROR" ? "error" : "success", text: renderIntakeResult(result, 4096) };
+          const presentation = presentationForIntakeResult(`presentation-${randomUUID()}`, result, 4096);
+          if (!query) presentToDshSession(invocation.agent, presentation);
+          return { kind: result.kind === "ERROR" ? "error" : "success", text: serializeIntakePresentation(presentation, 4096) };
         } catch (cause) {
-          return { kind: "error", text: typeof cause?.code === "string" ? cause.code : cause instanceof Error ? cause.message : "DSH_INTAKE_FAILED" };
+          const { createIntakePresentation, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+          const code = typeof cause?.code === "string" ? cause.code : "DSH_INTAKE_FAILED";
+          const presentation = createIntakePresentation(`presentation-${randomUUID()}`, "error", { code, message: code });
+          if (!query) presentToDshSession(invocation.agent, presentation);
+          return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
         }
       })());
     },
@@ -296,8 +337,8 @@ export async function apply(ctx, config) {
         const turn = turnFromAgent(agent);
         const operation = mapIntakeToolOperation(args);
         const result = await runtime.invokeForSession({ sessionKey: String(agent.id), worktree: worktree(), operation, turnText: turn.text, images: turn.images, attachmentStore, signal: execution.signal });
-        const { renderIntakeResult } = await import("@workflow-self-recursive/execution-system");
-        return { result: renderIntakeResult(result, 4096) };
+        const { presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+        return { result: serializeIntakePresentation(presentationForIntakeResult(`presentation-${randomUUID()}`, result, 4096), 4096) };
       },
     }));
   const preStep = ctx.on?.("agent/pre-step", async (payload, next) => {

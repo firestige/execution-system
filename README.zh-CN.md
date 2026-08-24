@@ -14,19 +14,21 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 
 ## Developer preview
 
-本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。`0.1.0` 是 MVP 发行版，后续可能有破坏兼容性的变更。
+本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。`0.1.1` 是 MVP candidate，后续可能有破坏兼容性的变更。
 
 ## Release 快速开始
 
-1. 下载 `@workflow-self-recursive/execution-system` 与 `@workflow-self-recursive/dsh-intake` 的 `0.1.0` artifact。
+1. 发布前运行 `pnpm quickstart:prepare`，一次完成两个 `0.1.1` artifact 的构建、验证和本地 E2E 配置初始化。
 2. 复制 `config/defaults/execution.default.yaml`，替换全部 `__REQUIRED__` 值，并在外置 DSH credential 文件中 provision 所引用的 API key（格式为 `version: 1`、`refs: ...`）。
-3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，再以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志。
+3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先把 `better-sqlite3: true` 合入 pnpm 11 `allowBuilds`，再执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，随后以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志；`pnpm quickstart:prepare` 会自动完成 policy merge。
 4. 为 plugin row 填写 absolute `configFile` 与 `bindingFile`，再执行 `dsh --profile web --dump-config` 和 `dsh --profile web --help` 验证。
-5. 从目标 worktree 启动 `dsh --profile web`，使用 `/wsr create implementation-workflow@0.3.0`、`/wsr list` 与 `/wsr status`。重启 Intake 时会保留 Manifest/current-slot 与 private binding state 以供恢复。
+5. 从目标 worktree 启动 `dsh --profile web`。只读查询使用 sidebar 的 Deliveries 与 Current status tabs；chat 用于 `/wsr create implementation-workflow@0.3.0`、普通 Action 答复与 `/wsr action finish`。`/wsr list` 和 `/wsr status` operation 继续保留给 compatibility 与 automation。重启 Intake 时会保留 Manifest/current-slot 与 private binding state 以供恢复。
 
 默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 
-完整步骤见 repository-owned [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。GitHub Release 直接附带同一份 quickstart/reference bytes，不维护第二份 release-only manual。
+Workflow Package Release 以单 Package 为范围：tag 为 `workflow-package/<name>/v<version>`，且只包含 archive、对应的 package-release descriptor 与 SHA-256 checksum。exact 与 latest selector 枚举同一个 configured Release 集合；latest 只在目标 Package 内按 SemVer 排序并排除 GitHub/SemVer prerelease，exact 则可以选择 prerelease。不可变的 initial `0.3.0` cohort descriptor 也由同一枚举算法解释。本地 READY 与 sticky-latest 在任何 Source 请求之前保持优先。使用 `pnpm release:workflow-assets <package-directory> <destination> <40-character-revision>` 构建单个 Release。
+
+完整步骤见 repository-owned [本地发布前 E2E 指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.zh-CN.md)、final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。Release automation 与用户安装保持为不同 surface。
 
 Host-neutral embedding 从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。Observation 默认关闭；将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
 

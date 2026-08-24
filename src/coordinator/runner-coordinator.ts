@@ -45,6 +45,18 @@ export interface RunnerObservationPort {
   observe(event: Readonly<{ kind: "runner-terminal-settled"; delivery: DeliveryRef; settlementIdentity: SettlementId }>): Promise<void>;
 }
 
+export interface RunnerStartCorrelationFact {
+  readonly schemaVersion: "runner.start-correlation@1.0.0";
+  readonly delivery: DeliveryRef;
+}
+
+export interface RunnerStartCorrelationPort {
+  acknowledge(fact: RunnerStartCorrelationFact): Promise<
+    | Readonly<{ ok: true; value: undefined }>
+    | Readonly<{ ok: false; error: Readonly<{ code: "CORRELATION_MISMATCH" }> }>
+  >;
+}
+
 export interface RunnerCoordinatorOptions {
   readonly stateDirectory: string;
   readonly compiler: CompileRunnerActivation;
@@ -54,17 +66,19 @@ export interface RunnerCoordinatorOptions {
   readonly interaction: ActionInteractionBridge;
   readonly workflow: WorkflowControlBridge;
   readonly observation: RunnerObservationPort;
+  readonly startCorrelation: RunnerStartCorrelationPort;
   readonly publicationTarget: PublicationTargetRef;
   readonly implementationIdentity: ImplementationId;
 }
 
-type Phase = "running" | "stable" | "publication-pending" | "intervention" | "retiring" | "terminal" | "start-failed";
+type Phase = "start-pending" | "start-acknowledged" | "running" | "stable" | "publication-pending" | "intervention" | "retiring" | "terminal" | "start-failed";
 
 interface DurableCoordinatorRecord {
   readonly delivery: DeliveryRef;
   readonly profileIdentity: RunnerActivationContext["correlation"]["runtimeProfileIdentity"];
   readonly snapshotIdentity: RunnerActivationContext["correlation"]["snapshotIdentity"];
   readonly contractIdentity: RunnerActivationContext["admission"]["contractRevision"];
+  readonly startCorrelation: RunnerStartCorrelationFact;
   phase: Phase;
   thread?: ThreadRef;
   proposal?: TerminalProposal;
@@ -113,6 +127,10 @@ function deliveryFrom(activation: RunnerActivationContext): DeliveryRef {
   };
 }
 
+function startCorrelationFact(delivery: DeliveryRef): RunnerStartCorrelationFact {
+  return deepFreeze({ schemaVersion: "runner.start-correlation@1.0.0", delivery });
+}
+
 function safelyCorrelatedDelivery(activation: RunnerActivationContext): DeliveryRef | undefined {
   const correlation = activation?.correlation;
   if (typeof correlation?.deliveryIdentity !== "string" || correlation.deliveryIdentity.length === 0
@@ -156,6 +174,11 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     if (record?.phase === "retiring") return this.#retireAndSettle(record);
     if (record?.phase === "publication-pending") return this.#reconcilePublication(record);
     if (record?.phase === "intervention") return this.#persistUnknown(record, "INTERVENTION_REQUIRED");
+    if (record?.phase === "start-pending" || record?.phase === "start-acknowledged") {
+      const compiled = this.#options.compiler(request.activation);
+      if (!compiled.ok) return failure("ACTIVATION_REJECTED");
+      return this.#acknowledgeAndStart(record, compiled.value);
+    }
     if (record?.phase === "stable" || record?.phase === "running") return this.#recover(record);
 
     const compiled = this.#options.compiler(request.activation);
@@ -166,17 +189,31 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
       profileIdentity: request.activation.correlation.runtimeProfileIdentity,
       snapshotIdentity: request.activation.correlation.snapshotIdentity,
       contractIdentity: request.activation.admission.contractRevision,
-      phase: "running",
+      startCorrelation: startCorrelationFact(delivery),
+      phase: "start-pending",
       retirements: {},
     };
     this.#save(record);
-    const started = await this.#options.host.start(compiled.value, this.#options.interaction).catch(() => undefined);
+    return this.#acknowledgeAndStart(record, compiled.value);
+  }
+
+  async #acknowledgeAndStart(record: DurableCoordinatorRecord, compiled: Parameters<CoordinatorHost["start"]>[0]): Promise<RuntimeCallResult> {
+    if (record.phase === "start-pending") {
+      const acknowledged = await this.#options.startCorrelation.acknowledge(record.startCorrelation).catch(() => undefined);
+      if (acknowledged === undefined) return failure("ADAPTER_UNAVAILABLE");
+      if (!acknowledged.ok) return failure("CORRELATION_MISMATCH");
+      record.phase = "start-acknowledged";
+      try { record = this.#save(record); } catch { return failure("ADAPTER_UNAVAILABLE"); }
+    }
+    const started = await this.#options.host.start(compiled, this.#options.interaction).catch(() => undefined);
     if (started === undefined) {
+      record.phase = "running";
       record.result = this.#unknownResult(record.delivery, "HOST_START_UNRESOLVED");
       record = this.#save(record);
       return success(record.result!);
     }
     if (!started.ok) {
+      record.phase = "running";
       record.result = this.#unknownResult(record.delivery, "HOST_START_DISPOSITION_UNRESOLVED");
       record = this.#save(record);
       return success(record.result!);

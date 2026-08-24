@@ -1,0 +1,159 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: RC tag matching the stable package version, for example 0.1.1-rc.1
+        required: true
+        type: string
+      local_manual_e2e_evidence:
+        description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      candidate_tag:
+        description: RC tag matching the stable package version, for example 0.1.1-rc.1
+        required: true
+        type: string
+      local_manual_e2e_evidence:
+        description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: execution-release-candidate
+  cancel-in-progress: false
+
+jobs:
+  qualify-and-publish-prerelease:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout super-project qualification authority workspace
+        uses: actions/checkout@v6
+        with:
+          repository: firestige/workflow-self-recursive
+          ref: fix/iter3-interactive-intake-e2e
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Verify exact Execution candidate pin
+        run: test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: execution-system/.node-version
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.23.0
+
+      - name: Install exact dependencies
+        working-directory: execution-system
+        run: pnpm install --frozen-lockfile
+
+      - name: Install frozen contract checker dependencies
+        run: |
+          npm --prefix system-contracts/workflow-dsl ci
+          npm --prefix system-contracts/observation ci
+
+      - name: Validate candidate coordinates and local evidence reference
+        working-directory: execution-system
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          LOCAL_E2E: ${{ inputs.local_manual_e2e_evidence }}
+        run: |
+          PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
+          pnpm release:policy candidate "$CANDIDATE_TAG" "$PACKAGE_VERSION"
+          case "$LOCAL_E2E" in
+            https://github.com/firestige/*/issues/*) ;;
+            *) echo "local_manual_e2e_evidence must be a firestige GitHub issue/comment URL" >&2; exit 1 ;;
+          esac
+          if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
+            echo "candidate tag already exists" >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" >/dev/null 2>&1; then
+            echo "candidate git tag already exists" >&2
+            exit 1
+          fi
+
+      - name: Run full component gates
+        working-directory: execution-system
+        run: |
+          pnpm test:full
+          pnpm test:coverage
+          pnpm typecheck
+          pnpm build
+          pnpm check:generated
+          pnpm harness static
+          pnpm harness feasibility
+          pnpm verify:dsh-intake
+
+      - name: Build and verify current-checkout artifacts
+        working-directory: execution-system
+        run: |
+          pnpm release:artifacts "$RUNNER_TEMP/local-release"
+          pnpm release:verify "$RUNNER_TEMP/local-release"
+
+      - name: Run local artifact-install DSH Web E2E
+        working-directory: execution-system
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          pnpm qualify:dsh-interactive \
+            "$RUNNER_TEMP/local-release/workflow-self-recursive-execution-system-$VERSION.tgz" \
+            "$RUNNER_TEMP/local-release/workflow-self-recursive-dsh-intake-$VERSION.tgz" \
+            "$GITHUB_WORKSPACE/execution-system"
+
+      - name: Create RC prerelease after local qualification
+        working-directory: execution-system
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          gh release create "$CANDIDATE_TAG" "$RUNNER_TEMP/local-release/"* \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Execution System $CANDIDATE_TAG" \
+            --notes "Release candidate. Not a final release; remote-install qualification is pending."
+
+      - name: Redownload exact prerelease assets
+        working-directory: execution-system
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          mkdir "$RUNNER_TEMP/remote-release"
+          gh release download "$CANDIDATE_TAG" --dir "$RUNNER_TEMP/remote-release"
+          pnpm release:verify "$RUNNER_TEMP/remote-release"
+          cmp "$RUNNER_TEMP/local-release/release-metadata.json" "$RUNNER_TEMP/remote-release/release-metadata.json"
+
+      - name: Run clean remote-prerelease install DSH Web E2E
+        working-directory: execution-system
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          pnpm qualify:dsh-interactive \
+            "$RUNNER_TEMP/remote-release/workflow-self-recursive-execution-system-$VERSION.tgz" \
+            "$RUNNER_TEMP/remote-release/workflow-self-recursive-dsh-intake-$VERSION.tgz" \
+            "$GITHUB_WORKSPACE/execution-system"
+
+      - name: Publish immutable qualification evidence to the prerelease
+        working-directory: execution-system
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          LOCAL_E2E: ${{ inputs.local_manual_e2e_evidence }}
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          METADATA_SHA="sha256:$(sha256sum "$RUNNER_TEMP/remote-release/release-metadata.json" | cut -d' ' -f1)"
+          export VERSION METADATA_SHA
+          node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({schemaVersion:"execution.release-qualification@1.0.0",packageVersion:process.env.VERSION,candidateTag:process.env.CANDIDATE_TAG,commit:process.env.GITHUB_SHA,artifactMetadataSha256:process.env.METADATA_SHA,localE2E:{status:"PASS",manualEvidence:process.env.LOCAL_E2E},remotePrereleaseE2E:{status:"PASS"}},null,2)+"\n")' \
+            "$RUNNER_TEMP/release-qualification.json"
+          gh release upload "$CANDIDATE_TAG" "$RUNNER_TEMP/release-qualification.json"

@@ -33,7 +33,7 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
     await expect(verifyIteration3Documentation({ superRoot: repositorySuperRoot, executionRoot: repositoryExecutionRoot })).resolves.toEqual({
       commands: 6,
       configExamples: 4,
-      guides: 4,
+      guides: 6,
     });
   });
 
@@ -41,10 +41,54 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
     const roots = await fixture();
     const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
     const value = await readFile(file, "utf8");
-    await writeFile(file, value.replace("dsh --help", "dsh --profile workflow-execution --help"));
+    await writeFile(file, value.replace("dsh --help", "dsh --profile web --help"));
 
     await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
       code: "DOCUMENTATION_IDENTITY_MISMATCH",
+    });
+  });
+
+  it("rejects a pre-release E2E guide that installs Execution from a GitHub Release", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-local-e2e.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, `${value}\ncurl https://github.com/firestige/execution-system/releases/download/0.1.1/plugin.tgz\n`);
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_INSTALL_SOURCE_INVALID",
+    });
+  });
+
+  it("rejects manual profile-patch editing in the automated local E2E guide", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-local-e2e.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, `${value}\nEdit $DSH_HOME/profiles/web/cordis.patch.yml by hand.\n`);
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_LOCAL_E2E_RECONCILIATION_INVALID",
+    });
+  });
+
+  it("rejects host prerequisites that are installed before checking whether they already exist", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, value.replace("```sh\n", "```sh\nnpm install --global pnpm @deepseek-ai/dsh@0.1.1-rc.2\n"));
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_PREREQUISITE_INSTALL_INVALID",
+    });
+  });
+
+  it("rejects shell control flow in the human-operated quickstart prerequisite check", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, value.replace("node --version", "if ! command -v pnpm; then pnpm --version; fi\nnode --version"));
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_PREREQUISITE_CHECK_NOT_MANUAL",
     });
   });
 });

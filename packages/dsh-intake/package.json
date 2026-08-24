@@ -1,17 +1,19 @@
 {
   "name": "@workflow-self-recursive/dsh-intake",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./src/plugin.js",
   "types": "./src/index.d.ts",
   "exports": {
     ".": "./src/plugin.js",
+    "./client": "./lib/client.js",
     "./binding-repository": "./src/binding-repository.js",
     "./command": "./src/command.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
+    "lib/client.js",
     "skills",
     "cordis.patch.yml",
     "README.md"
@@ -20,8 +22,16 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    },
     "compatibility": {
-      "executionSystem": "0.1.0",
+      "executionSystem": "0.1.1",
       "dsh": "0.1.1-rc.2",
       "agents": "0.1.1-rc.2",
       "commands": "0.1.1-rc.2",

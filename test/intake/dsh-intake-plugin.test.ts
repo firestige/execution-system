@@ -11,7 +11,23 @@ import {
   parseWsrCommand,
   presentToDshSession,
 } from "../../packages/dsh-intake/src/index.js";
-import { WorkflowIntakeService, renderIntakeResult } from "../../src/index.js";
+import {
+  WorkflowIntakeService,
+  actionOutputPresentation,
+  createIntakePresentation,
+  presentationForIntakeResult,
+  renderIntakeResult,
+  serializeIntakePresentation,
+} from "../../src/index.js";
+
+const coreApi = Object.freeze({
+  WorkflowIntakeService,
+  actionOutputPresentation,
+  createIntakePresentation,
+  presentationForIntakeResult,
+  renderIntakeResult,
+  serializeIntakePresentation,
+});
 
 const roots: string[] = [];
 
@@ -23,7 +39,7 @@ describe("Wave 6 DSH Intake plugin", () => {
   it("rejects invalid profile config before binding, bootstrap, or startup activation effects", async () => {
     let factoryCalls = 0;
     const options = {
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { factoryCalls += 1; throw new Error("must not run"); } }),
     } as any;
     for (const config of [
@@ -40,14 +56,16 @@ describe("Wave 6 DSH Intake plugin", () => {
     const patch = await readFile(path.join(packageRoot, "cordis.patch.yml"), "utf8");
     const skill = await readFile(path.join(packageRoot, "skills/workflow-execution/SKILL.md"), "utf8");
     const source = await readFile(path.join(packageRoot, "src/plugin.js"), "utf8");
+    const client = await readFile(path.join(packageRoot, "lib/client.js"), "utf8");
 
     expect(manifest).toMatchObject({
       name: "@workflow-self-recursive/dsh-intake",
-      version: "0.1.0",
+      version: "0.1.1",
+      exports: { "./client": "./lib/client.js" },
       dsh: { bundle: { patch: "./cordis.patch.yml" }, compatibility: {
-        executionSystem: "0.1.0", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
+        executionSystem: "0.1.1", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
         agents: "0.1.1-rc.2", skillFilesystem: "0.1.1-rc.2", toolSkill: "0.1.1-rc.2", tools: "0.1.1-rc.2",
-      } },
+      }, client: { inject: ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar"], platform: "web" } },
     });
     expect(manifest.peerDependencies).toBeUndefined();
     expect(patch).toContain("id: workflow-execution");
@@ -60,6 +78,10 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(skill).toContain("exactly once");
     expect(skill).toContain("/wsr action finish");
     expect(source).toContain('import("@workflow-self-recursive/execution-system")');
+    expect(client).toContain('conversation.chat.commandview');
+    expect(client).toContain('sidebar.footer.action');
+    expect(client).toContain('key: "wsr"');
+    expect(client).toContain('data-wsr-presentation');
     expect(source).not.toMatch(/(?:src\/(?:delivery|observation|providers|host|coordinator|invocation)|RunnerFactory|DSH-E|ctx\.sessions)/u);
     expect(JSON.stringify(manifest) + patch + skill + source).not.toContain("implementation-workflow@0.3.0");
     expect(JSON.stringify(manifest) + patch + skill + source).not.toContain("system-design-workflow@0.3.0");
@@ -117,7 +139,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       bindings: repository,
       factory: Object.freeze({ async create() { return application; } }),
       control,
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       sessionAvailable: () => false,
     } as any);
     expect(await runtime.bindings.byDelivery("delivery-1")).toMatchObject({ state: "DETACHED" });
@@ -180,7 +202,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json"),
     }, {
       bindings, control,
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }),
       sessionAvailable: () => true,
     } as any);
@@ -228,10 +250,12 @@ describe("Wave 6 DSH Intake plugin", () => {
       session: Object.freeze({ append(type: string, data: unknown) { events.push([type, data]); } }),
       send() { throw new Error("DSH-I AgentLoop must stay unused"); },
     });
-    await presentToDshSession(agent, "Question from DSH-E", () => "cmd-presentation-1");
+    await presentToDshSession(agent, actionOutputPresentation("intake-1", { text: "Question from DSH-E" }), () => "cmd-presentation-1");
     expect(events).toEqual([
       ["command/run", { commandId: "cmd-presentation-1", name: "wsr", source: { kind: "plugin", plugin: "workflow-execution" } }],
-      ["command/done", { commandId: "cmd-presentation-1", kind: "success", text: "Question from DSH-E" }],
+      ["command/done", { commandId: "cmd-presentation-1", kind: "success", text: JSON.stringify({
+        schemaVersion: "wsr.presentation@1.0.0", correlation: "intake-1", kind: "action-output", data: { content: { text: "Question from DSH-E" } },
+      }) }],
     ]);
   });
 
@@ -252,7 +276,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       async start() {},
       async execute(request: any) {
         requests.push(request);
-        await capturedDependencies.intake.publish({ correlation: request.intakeCorrelation, text: "Question from DSH-E" });
+        await capturedDependencies.intake.publish(actionOutputPresentation(request.intakeCorrelation, { text: "Question from DSH-E" }));
         return execution;
       },
       async inspect() { return { kind: "RECOVERY", worktree, deliveryId: "delivery-1", state: "RUNNING_CORRELATED" }; },
@@ -271,7 +295,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     });
     const factory = Object.freeze({ async create(_file: string, dependencies: any) { capturedDependencies = dependencies; return application; } });
     const runtime: any = await createPluginRuntime({ configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json") }, {
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }), factory, control,
+      moduleLoader: async () => coreApi, factory, control,
       present: async (presentation: any) => { presentations.push(presentation); },
     } as any);
     const attachmentStore = Object.freeze({ async readImage() { return { ref: { name: "proof.png", mediaType: "image/png" }, data: Uint8Array.from([1, 2, 3]) }; } });
@@ -289,7 +313,10 @@ describe("Wave 6 DSH Intake plugin", () => {
       prompt: { text: "use attached evidence", attachments: [{ filename: "proof.png", byteLength: 3, digest: `sha256:${"039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"}` }] },
     });
     expect(JSON.stringify(requests[0])).not.toContain("native-session-private");
-    expect(presentations).toEqual([{ sessionKey: "native-session-private", text: "Question from DSH-E" }]);
+    expect(presentations).toEqual([{ sessionKey: "native-session-private", presentation: {
+      schemaVersion: "wsr.presentation@1.0.0", correlation: requests[0].intakeCorrelation,
+      kind: "action-output", data: { content: { text: "Question from DSH-E" } },
+    } }]);
     expect(await capturedDependencies.attachments.read(requests[0].prompt.attachments[0].contentRef)).toEqual(Uint8Array.from([1, 2, 3]));
     expect(await runtime.bindings.bySession("native-session-private")).toMatchObject({ deliveryId: "delivery-1", worktree });
 
@@ -301,7 +328,10 @@ describe("Wave 6 DSH Intake plugin", () => {
     await expect.poll(async () => runtime.bindings.bySession("native-session-private")).toBeUndefined();
     await expect.poll(() => presentations).toContainEqual({
       sessionKey: "native-session-private",
-      text: JSON.stringify({ kind: "TERMINAL", worktree, deliveryId: "delivery-1", outcome: "SUCCEEDED" }),
+      presentation: {
+        schemaVersion: "wsr.presentation@1.0.0", correlation: requests[0].intakeCorrelation,
+        kind: "terminal-result", data: { worktree, deliveryId: "delivery-1", outcome: "SUCCEEDED" },
+      },
     });
     await runtime.close();
   });
@@ -323,7 +353,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); }, async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
     });
     const runtime: any = await createPluginRuntime({ configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json") }, {
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }), control, quiesceTimeoutMs: 1_000,
     } as any);
     await runtime.invokeForSession({ sessionKey: "session-close", worktree, operation: parseWsrCommand("create fixture@1.0.0\nwait"), turnText: "/wsr create fixture@1.0.0\nwait", images: [] });
@@ -358,7 +388,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     const runtime: any = await createPluginRuntime({
       configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json"),
     }, {
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }), control, quiesceTimeoutMs: 5,
     } as any);
     await runtime.invokeForSession({
@@ -392,7 +422,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
     });
     await expect(createPluginRuntime(config, {
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return failedApplication; } }), control,
     } as any)).rejects.toThrow("startup failed");
     expect(failedCloseCalls).toBe(1);
@@ -406,7 +436,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       async close() { closeCalls += 1; await closeBoundary; },
     });
     const runtime: any = await createPluginRuntime(config, {
-      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }), control,
     } as any);
     const first = runtime.close();

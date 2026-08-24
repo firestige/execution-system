@@ -55,7 +55,7 @@ describe("DSH native session adapter", () => {
   it("maps only registered structured disposition tools to completion or awaiting input", async () => {
     const agent = nativeAgent("native-created");
     let setup: ((context: unknown) => unknown) | undefined;
-    const definitions: Array<{ name: string; output: { render(args: unknown, value: unknown): unknown }; execute(args: unknown, exec: { concludeTurn(): void }): Promise<unknown> }> = [];
+    const definitions: Array<{ name: string; description: string; parameters: Record<string, unknown>; output: { render(args: unknown, value: unknown): unknown }; execute(args: unknown, exec: { concludeTurn(): void }): Promise<unknown> }> = [];
     const restrictions: unknown[] = [];
     const sections: unknown[] = [];
     const factory = await createDshNativeSessionFactory({
@@ -94,10 +94,12 @@ describe("DSH native session adapter", () => {
 
     const requestInput = definitions.find((definition) => definition.name === "workflow_request_input")!;
     expect(requestInput.output.render({}, {})).toEqual([{ type: "text", text: "input request persisted" }]);
+    expect(requestInput.description).toContain("natural-language");
+    expect(requestInput.parameters).not.toHaveProperty("responseSchema");
     agent.whenIdle = async () => {
-      await requestInput.execute({ requestIdentity: "request-1", prompt: "?", responseSchema: { type: "boolean" } }, { concludeTurn() {} });
+      await requestInput.execute({ requestIdentity: "request-1", prompt: "?" }, { concludeTurn() {} });
     };
-    expect(await session.run("answer")).toEqual([{ kind: "input-request", requestIdentity: "request-1", prompt: "?", responseSchema: { type: "boolean" } }]);
+    expect(await session.run("answer")).toEqual([{ kind: "input-request", requestIdentity: "request-1", prompt: "?", responseSchema: { type: "string" } }]);
   });
 
   it("forwards assistant frames but maps idle turn-end only to a non-completion event", async () => {

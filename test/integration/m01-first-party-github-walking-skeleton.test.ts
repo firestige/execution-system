@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cp, chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -64,6 +65,9 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
     const archive = await readFile(archivePath);
     const sourceCalls: string[] = [];
     const assetUrl = "https://github.example.test/releases/download/0.3.0/workflow-package-implementation-workflow-0.3.0.tar.gz";
+    const descriptorUrl = "https://github.example.test/releases/download/scoped/workflow-package-implementation-workflow-0.3.0.json";
+    const checksumUrl = `${assetUrl}.sha256`;
+    const archiveDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
     const source = new GitHubWorkflowPackageSource({
       kind: "github",
       repository: "firestige/workflow-package",
@@ -71,9 +75,23 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     }, Object.freeze({ request: async (url: string) => {
       sourceCalls.push(url);
-      return url === assetUrl
-        ? { status: 200, body: Uint8Array.from(archive) }
-        : { status: 200, body: Buffer.from(JSON.stringify({ tag_name: "0.3.0", assets: [{ name: path.basename(archivePath), browser_download_url: assetUrl }] })) };
+      if (url.includes("/releases?per_page=100&page=1")) return { status: 200, body: Buffer.from(JSON.stringify([{
+        tag_name: "workflow-package/implementation-workflow/v0.3.0", draft: false, prerelease: false,
+        assets: [
+          { name: path.basename(archivePath), browser_download_url: assetUrl },
+          { name: "workflow-package-implementation-workflow-0.3.0.json", browser_download_url: descriptorUrl },
+          { name: "workflow-package-implementation-workflow-0.3.0.tar.gz.sha256", browser_download_url: checksumUrl },
+        ],
+      }])) };
+      if (url === descriptorUrl) return { status: 200, body: Buffer.from(JSON.stringify({
+        schemaVersion: "workflow-package.package-release@1.0.0", revision: "a".repeat(40),
+        tag: "workflow-package/implementation-workflow/v0.3.0",
+        package: { name: "implementation-workflow", version: "0.3.0", digest: `sha256:${"b".repeat(64)}` },
+        archive: { name: path.basename(archivePath), sha256: archiveDigest, bytes: archive.byteLength },
+        checksum: { name: "workflow-package-implementation-workflow-0.3.0.tar.gz.sha256" },
+      })) };
+      if (url === checksumUrl) return { status: 200, body: Buffer.from(`${archiveDigest.slice(7)}  workflow-package-implementation-workflow-0.3.0.tar.gz\n`) };
+      return url === assetUrl ? { status: 200, body: Uint8Array.from(archive) } : { status: 404, body: new Uint8Array() };
     } }));
     const store = new WorkflowPackageStore({ readyRoot: path.join(root, "package-store"), stagingRoot: path.join(root, "staging") });
     const compatibility: WorkflowPackageCompatibilityTarget = Object.freeze({
@@ -139,12 +157,13 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
       snapshotRoot: path.join(root, "prompt-snapshots"),
       attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }),
       projector: new DeliveryAdmissionProjector(),
-      runtime: Object.freeze({ create: async ({ ownerFacts }: DeliveryRuntimeFactoryInput) => {
+      runtime: Object.freeze({ create: async ({ ownerFacts, startCorrelation }: DeliveryRuntimeFactoryInput) => {
         ownerFacts.emit(Object.freeze({ owner: "M02", name: "runner-composed", occurredAt: 0 }));
         const adapter = await runnerFactory.create(runtimeConfig, Object.freeze({
           interaction: Object.freeze({ publish: async () => ({ ok: true as const, value: undefined }), requestInput: async () => { throw new Error("not requested"); } }),
           workflow: Object.freeze({ request: async () => { throw new Error("not requested"); } }),
           observation: Object.freeze({ async observe() {} }),
+          startCorrelation,
           hostOperations: Object.freeze({ "validator.intake-checks": Object.freeze({ execute: async () => Object.freeze({ accepted: true, value: null }) }) }),
         }));
         adapters.push(adapter);
@@ -161,7 +180,9 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
       expect(result).toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-first-party", outcome: "FAILED" });
       expect(await slots.read(workspace)).toEqual({ state: "EMPTY", worktree: workspace });
       expect(sourceCalls).toEqual([
-        "https://api.github.example.test/repos/firestige/workflow-package/releases/tags/0.3.0",
+        "https://api.github.example.test/repos/firestige/workflow-package/releases?per_page=100&page=1",
+        descriptorUrl,
+        checksumUrl,
         assetUrl,
       ]);
       expect(authorization).toEqual(["Bearer synthetic-secret"]);

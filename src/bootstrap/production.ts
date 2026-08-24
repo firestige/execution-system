@@ -199,7 +199,7 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
     return deliveryOwnerFactIngress(manifest, activation, this.observation);
   }
 
-  async create({ manifest, activation }: Parameters<DeliveryRuntimeFactory["create"]>[0]): Promise<ExecutionRuntimeAdapter> {
+  async create({ manifest, activation, startCorrelation }: Parameters<DeliveryRuntimeFactory["create"]>[0]): Promise<ExecutionRuntimeAdapter> {
     const deliveryRoot = segment(manifest.deliveryId);
     const runnerRoot = path.join(this.config.paths.runner.root, deliveryRoot);
     const config: RunnerFactoryConfig = Object.freeze({
@@ -235,6 +235,7 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
       interaction,
       workflow,
       observation,
+      startCorrelation,
       hostOperations: createProductionHostOperationHandlers(activation, this.hostOperationFactories),
     }));
     this.#live.add(adapter);
@@ -322,7 +323,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     );
     const observation = createDeliveryObservationEmitter({
       config: config.observation,
-      serviceVersion: "0.1.0",
+      serviceVersion: "0.1.1",
       diagnostic() {},
     });
     const ownerFacts: OwnerFactIngress = Object.freeze({

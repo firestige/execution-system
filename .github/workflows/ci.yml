@@ -3,9 +3,20 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
+    inputs:
+      release_candidate:
+        description: Run the release-candidate publisher from the selected ref
+        required: false
+        default: false
+        type: boolean
+      candidate_tag:
+        description: RC tag matching the stable package version
+        required: false
+        type: string
+      local_manual_e2e_evidence:
+        description: GitHub issue/comment URL recording credentialed local DSH Web E2E
+        required: false
+        type: string
 
 concurrency:
   group: execution-system-${{ github.workflow }}-${{ github.ref }}
@@ -13,32 +24,28 @@ concurrency:
 
 jobs:
   verify:
+    if: ${{ github.event_name == 'pull_request' || inputs.release_candidate != true }}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout superproject authority workspace
         uses: actions/checkout@v6
         with:
           repository: firestige/workflow-self-recursive
-          ref: main
+          ref: ${{ github.head_ref == 'fix/iter3-interactive-intake' && 'fix/iter3-interactive-intake-e2e' || 'main' }}
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Checkout execution-system
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           path: execution-system
 
-      - name: Checkout frozen Workflow Contract
-        uses: actions/checkout@v6
-        with:
-          repository: firestige/system-contracts
-          ref: c8e090f80073e3a4a37063d2d0165f190f2ec7f1
-          path: system-contracts
-
-      - name: Checkout canonical workflow-package
-        uses: actions/checkout@v6
-        with:
-          repository: firestige/workflow-package
-          ref: ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb
-          path: workflow-package
+      - name: Verify exact pull request candidate checkout
+        if: ${{ github.event_name == 'pull_request' }}
+        run: test "$(git -C execution-system rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -48,7 +55,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 9.15.0
+          version: 11.23.0
 
       - name: Install dependencies
         working-directory: execution-system
@@ -75,3 +82,12 @@ jobs:
           pnpm check:generated
           pnpm harness static
           pnpm harness feasibility
+
+  release-candidate:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate == true }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-candidate.yml
+    with:
+      candidate_tag: ${{ inputs.candidate_tag }}
+      local_manual_e2e_evidence: ${{ inputs.local_manual_e2e_evidence }}

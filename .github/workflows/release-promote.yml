@@ -1,0 +1,98 @@
+name: Promote qualified release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Qualified RC tag, for example 0.1.1-rc.1
+        required: true
+        type: string
+      final_tag:
+        description: Stable final tag, for example 0.1.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: execution-release-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve candidate commit
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          test "$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = true
+          SHA="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the qualified candidate commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.23.0
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download and verify the qualified prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          mkdir "$RUNNER_TEMP/qualified-release"
+          gh release download "$CANDIDATE_TAG" --dir "$RUNNER_TEMP/qualified-release"
+          pnpm release:verify "$RUNNER_TEMP/qualified-release"
+
+      - name: Enforce final-tag eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_TAG: ${{ inputs.final_tag }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ steps.candidate.outputs.sha }}"
+          pnpm release:policy promote "$FINAL_TAG" "$RUNNER_TEMP/qualified-release/release-qualification.json" "$(git rev-parse HEAD)" "$CANDIDATE_TAG"
+          if gh release view "$FINAL_TAG" >/dev/null 2>&1; then
+            echo "final tag already exists" >&2
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$FINAL_TAG" >/dev/null 2>&1; then
+            echo "final git tag already exists" >&2
+            exit 1
+          fi
+
+      - name: Re-run remote artifact-install E2E before final tag
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          pnpm qualify:dsh-interactive \
+            "$RUNNER_TEMP/qualified-release/workflow-self-recursive-execution-system-$VERSION.tgz" \
+            "$RUNNER_TEMP/qualified-release/workflow-self-recursive-dsh-intake-$VERSION.tgz" \
+            "$GITHUB_WORKSPACE"
+
+      - name: Create final tag and Release as the last operation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_TAG: ${{ inputs.final_tag }}
+        run: |
+          gh release create "$FINAL_TAG" "$RUNNER_TEMP/qualified-release/"* \
+            --target "$(git rev-parse HEAD)" \
+            --title "Execution System $FINAL_TAG" \
+            --notes "Promoted from fully qualified prerelease ${{ inputs.candidate_tag }}."

@@ -3,20 +3,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.1.0";
-const ARTIFACTS = Object.freeze([
-  "workflow-self-recursive-dsh-intake-0.1.0.tgz",
-  "workflow-self-recursive-execution-system-0.1.0.tgz",
-]);
+const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const COMPATIBILITY = Object.freeze({
   node: ">=24.12.0 <25",
   dsh: "0.1.1-rc.2",
   workflowContract: "agentops.workflow-dsl@1.1.0",
   observationContract: "agentops.observation@1.0.0",
-});
-const PACKAGE_NAMES = Object.freeze<Record<string, string>>({
-  "workflow-self-recursive-execution-system-0.1.0.tgz": "@workflow-self-recursive/execution-system",
-  "workflow-self-recursive-dsh-intake-0.1.0.tgz": "@workflow-self-recursive/dsh-intake",
 });
 
 export class ReleaseArtifactVerificationError extends Error {
@@ -42,16 +34,25 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
   try { parsed = JSON.parse(await readFile(path.join(directory, "release-metadata.json"), "utf8")); }
   catch { throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID"); }
   const metadata = record(parsed, ["schemaVersion", "version", "compatibility", "artifacts"], "RELEASE_METADATA_INVALID");
-  if (metadata.schemaVersion !== "execution.release@1.0.0" || metadata.version !== VERSION || !Array.isArray(metadata.artifacts)) {
+  if (metadata.schemaVersion !== "execution.release@1.0.0" || typeof metadata.version !== "string"
+    || !STABLE_VERSION.test(metadata.version) || !Array.isArray(metadata.artifacts)) {
     throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID");
   }
+  const version = metadata.version as string;
+  const pluginArchiveName = `workflow-self-recursive-dsh-intake-${version}.tgz`;
+  const coreArchiveName = `workflow-self-recursive-execution-system-${version}.tgz`;
+  const artifactsExpected = Object.freeze([pluginArchiveName, coreArchiveName]);
+  const packageNames = Object.freeze<Record<string, string>>({
+    [pluginArchiveName]: "@workflow-self-recursive/dsh-intake",
+    [coreArchiveName]: "@workflow-self-recursive/execution-system",
+  });
   const compatibility = record(metadata.compatibility, Object.keys(COMPATIBILITY), "RELEASE_COMPATIBILITY_MISMATCH");
   if (Object.entries(COMPATIBILITY).some(([key, value]) => compatibility[key] !== value)) {
     throw new ReleaseArtifactVerificationError("RELEASE_COMPATIBILITY_MISMATCH");
   }
   const artifacts = metadata.artifacts.map((candidate) => record(candidate, ["name", "bytes", "sha256", "inventory"], "RELEASE_METADATA_INVALID"));
   const names = artifacts.map((artifact) => artifact.name).sort();
-  if (artifacts.length !== ARTIFACTS.length || names.join(",") !== [...ARTIFACTS].sort().join(",")) {
+  if (artifacts.length !== artifactsExpected.length || names.join(",") !== [...artifactsExpected].sort().join(",")) {
     throw new ReleaseArtifactVerificationError("RELEASE_ARTIFACT_SET_INVALID");
   }
   for (const artifact of artifacts) {
@@ -61,7 +62,7 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
       || new Set(artifact.inventory).size !== artifact.inventory.length) {
       throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID");
     }
-    if (artifact.name === ARTIFACTS[0] && artifact.inventory.some((item) => /(?:workflow-packages?\/|implementation-workflow|system-design-workflow)/u.test(item as string))) {
+    if (artifact.name === pluginArchiveName && artifact.inventory.some((item) => /(?:workflow-packages?\/|implementation-workflow|system-design-workflow)/u.test(item as string))) {
       throw new ReleaseArtifactVerificationError("RELEASE_ARTIFACT_INVENTORY_INVALID");
     }
     let bytes: Uint8Array;
@@ -78,14 +79,14 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
     const publicationCompatibility = record(publication.compatibility, Object.keys(COMPATIBILITY), "RELEASE_PUBLICATION_RECORD_INVALID");
     const publicationArtifact = record(publication.artifact, ["name", "bytes", "sha256", "inventory"], "RELEASE_PUBLICATION_RECORD_INVALID");
     if (publication.schemaVersion !== "execution.artifact-publication@1.0.0"
-      || packageRecord.name !== PACKAGE_NAMES[artifact.name as string]
-      || packageRecord.version !== VERSION
+      || packageRecord.name !== packageNames[artifact.name as string]
+      || packageRecord.version !== version
       || JSON.stringify(publicationCompatibility) !== JSON.stringify(compatibility)
       || JSON.stringify(publicationArtifact) !== JSON.stringify(artifact)) {
       throw new ReleaseArtifactVerificationError("RELEASE_PUBLICATION_RECORD_MISMATCH");
     }
   }
-  return Object.freeze({ version: VERSION, artifactCount: artifacts.length });
+  return Object.freeze({ version, artifactCount: artifacts.length });
 }
 
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

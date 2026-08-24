@@ -95,7 +95,7 @@ export async function qualifyDshPackageLifecycle(
 ): Promise<DshPackageLifecycleQualificationResult> {
   const oldArchive = path.resolve(options.oldArchive);
   const newArchive = path.resolve(options.newArchive);
-  const profile = options.profile ?? "workflow-execution";
+  const profile = options.profile ?? "web";
   const root = await mkdtemp(path.join(tmpdir(), "execution-dsh-lifecycle-"));
   const dshHome = path.join(root, "dsh-home");
   const profileDirectory = path.join(dshHome, "profiles", profile);

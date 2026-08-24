@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 const PACKAGE_NAME = "@workflow-self-recursive/dsh-intake";
 const SKILL_NAME = "workflow-execution";
 const TOOL_IDENTITY = "workflow_execution_intake";
+const PRESENTATION_SLOT = "conversation.chat.commandview";
+const SIDEBAR_SLOT = "sidebar.footer.action";
 const OPERATIONS = Object.freeze(["list", "create", "recover", "status", "action-finish", "abandon"]);
 
 export class DshIntakeDistributionVerificationError extends Error {
@@ -35,6 +37,8 @@ export async function verifyDshIntakeDistribution(directory: string): Promise<Re
   skillName: string;
   toolIdentity: string;
   operations: readonly string[];
+  presentationSlot: string;
+  sidebarSlot: string;
 }>> {
   const root = path.resolve(directory);
   let manifest: unknown;
@@ -47,10 +51,15 @@ export async function verifyDshIntakeDistribution(directory: string): Promise<Re
     throw new DshIntakeDistributionVerificationError("DSH_INTAKE_MANIFEST_INVALID");
   }
   const packageManifest = manifest as Record<string, unknown>;
-  const dsh = packageManifest.dsh as { readonly bundle?: { readonly patch?: unknown } } | undefined;
+  const exports = packageManifest.exports as Record<string, unknown> | undefined;
+  const dsh = packageManifest.dsh as { readonly bundle?: { readonly patch?: unknown }; readonly client?: { readonly inject?: unknown; readonly platform?: unknown } } | undefined;
   const files = packageManifest.files;
-  if (packageManifest.name !== PACKAGE_NAME || dsh?.bundle?.patch !== "./cordis.patch.yml"
-    || !Array.isArray(files) || !["src", "skills", "cordis.patch.yml"].every((entry) => files.includes(entry))) {
+  if (packageManifest.name !== PACKAGE_NAME || exports?.["./client"] !== "./lib/client.js" || dsh?.bundle?.patch !== "./cordis.patch.yml"
+    || dsh.client?.platform !== "web" || !Array.isArray(dsh.client.inject)
+    || JSON.stringify(dsh.client.inject) !== JSON.stringify([
+      "@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar",
+    ])
+    || !Array.isArray(files) || !["src", "lib/client.js", "skills", "cordis.patch.yml"].every((entry) => files.includes(entry))) {
     throw new DshIntakeDistributionVerificationError("DSH_INTAKE_MANIFEST_INVALID");
   }
 
@@ -79,11 +88,20 @@ export async function verifyDshIntakeDistribution(directory: string): Promise<Re
     throw new DshIntakeDistributionVerificationError("DSH_INTAKE_OPERATION_SET_INVALID");
   }
 
+  const client = await requiredText(path.join(root, "lib/client.js"), "DSH_INTAKE_CLIENT_INVALID");
+  if (!client.includes(PRESENTATION_SLOT) || !client.includes(SIDEBAR_SLOT) || !client.includes('key: "wsr"')
+    || !client.includes('"data-wsr-presentation"') || !client.includes('"data-wsr-version"')
+    || !client.includes('"data-wsr-kind"') || !client.includes("WSR_PRESENTATION_INVALID")) {
+    throw new DshIntakeDistributionVerificationError("DSH_INTAKE_CLIENT_INVALID");
+  }
+
   return Object.freeze({
     packageName: PACKAGE_NAME,
     skillName: SKILL_NAME,
     toolIdentity: TOOL_IDENTITY,
     operations: OPERATIONS,
+    presentationSlot: PRESENTATION_SLOT,
+    sidebarSlot: SIDEBAR_SLOT,
   });
 }
 
