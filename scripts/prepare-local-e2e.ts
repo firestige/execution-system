@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { constants } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +27,7 @@ export type LocalE2EPreparationInput = Readonly<{
 }>;
 
 type CommandRunner = (command: string, args: readonly string[], cwd: string) => Promise<void>;
+type DshRunner = (command: string, args: readonly string[], cwd: string, dshHome: string) => Promise<string>;
 
 async function writeIfMissing(file: string, value: string): Promise<void> {
   try {
@@ -104,14 +106,114 @@ export async function resolveLocalE2EPreparationInput(executionRootValue: string
   });
 }
 
+export type LocalE2EDshProfileInput = Readonly<{
+  dshHome: string;
+  profile: string;
+  worktree: string;
+  coreArchive: string;
+  pluginArchive: string;
+  configFile: string;
+  bindingFile: string;
+}>;
+
+function ownedWorkflowExecutionRow(configFile: string, bindingFile: string): string {
+  return [
+    "- id: workflow-execution",
+    "  config:",
+    `    configFile: ${JSON.stringify(configFile)}`,
+    `    bindingFile: ${JSON.stringify(bindingFile)}`,
+    "",
+  ].join("\n");
+}
+
+function reconcileOwnedPatchRow(value: string, row: string): string {
+  const match = /^- id:\s*workflow-execution\s*$/mu.exec(value);
+  if (match?.index !== undefined) {
+    const next = value.indexOf("\n- ", match.index + match[0].length);
+    const suffix = next < 0 ? "" : value.slice(next + 1);
+    const prefix = value.slice(0, match.index).replace(/^\s*\[\]\s*\n?/mu, "");
+    return `${prefix}${row}${suffix}`;
+  }
+  const semanticLines = value.split("\n").filter((line) => line.trim().length > 0 && !line.trimStart().startsWith("#"));
+  if (semanticLines.length === 1 && semanticLines[0]?.trim() === "[]") {
+    return value.replace(/^\s*\[\]\s*$/mu, row.trimEnd());
+  }
+  const prefix = value.length === 0 || value.endsWith("\n") ? value : `${value}\n`;
+  return `${prefix}${row}`;
+}
+
+export async function reconcileLocalE2EDshProfile(
+  input: LocalE2EDshProfileInput,
+  run: DshRunner = async (command, args, cwd, dshHome) => {
+    const dump = args.includes("--dump-config");
+    return execFileSync(command, [...args], {
+      cwd,
+      env: { ...process.env, DSH_HOME: dshHome },
+      encoding: "utf8",
+      stdio: dump ? ["ignore", "pipe", "pipe"] : "inherit",
+    }) ?? "";
+  },
+): Promise<Readonly<{ profile: string; operation: "RECONCILED"; patchFile: string }>> {
+  const dshHome = path.resolve(input.dshHome);
+  const profile = input.profile;
+  const worktree = path.resolve(input.worktree);
+  const coreArchive = path.resolve(input.coreArchive);
+  const pluginArchive = path.resolve(input.pluginArchive);
+  const configFile = path.resolve(input.configFile);
+  const bindingFile = path.resolve(input.bindingFile);
+  const profileManifestFile = path.join(dshHome, "profiles", profile, "package.json");
+  let dependencies: Record<string, unknown> = {};
+  try {
+    const profileManifest = JSON.parse(await readFile(profileManifestFile, "utf8")) as { readonly dependencies?: Record<string, unknown> };
+    dependencies = profileManifest.dependencies ?? {};
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+  }
+  const corePackage = "@workflow-self-recursive/execution-system";
+  const pluginPackage = "@workflow-self-recursive/dsh-intake";
+  const removePrefix = ["plugin", "--profile", profile, "remove", "--workspace-root"] as const;
+  if (dependencies[pluginPackage] !== undefined) await run("dsh", [...removePrefix, pluginPackage], worktree, dshHome);
+  if (dependencies[corePackage] !== undefined) await run("dsh", [...removePrefix, corePackage], worktree, dshHome);
+  const addPrefix = ["plugin", "--profile", profile, "add", "--workspace-root"] as const;
+
+  await run("dsh", [...addPrefix, coreArchive], worktree, dshHome);
+  await run("dsh", [...addPrefix, pluginArchive], worktree, dshHome);
+
+  const patchFile = path.join(dshHome, "profiles", profile, "cordis.patch.yml");
+  const current = await readFile(patchFile, "utf8");
+  const next = reconcileOwnedPatchRow(current, ownedWorkflowExecutionRow(configFile, bindingFile));
+  if (next !== current) {
+    const temporary = `${patchFile}.workflow-execution-${String(process.pid)}.tmp`;
+    await writeFile(temporary, next, { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, patchFile);
+  }
+
+  const dump = await run("dsh", ["--profile", profile, "--dump-config"], worktree, dshHome);
+  if (dump.includes("/__REQUIRED__/") || !dump.includes(configFile) || !dump.includes(bindingFile)) {
+    throw new Error("DSH_LOCAL_E2E_PROFILE_INVALID");
+  }
+  return Object.freeze({ profile, operation: "RECONCILED" as const, patchFile });
+}
+
 async function main(): Promise<void> {
   const executionRoot = path.resolve(import.meta.dirname, "..");
   const result = await prepareLocalE2E(await resolveLocalE2EPreparationInput(executionRoot));
+  const dsh = await reconcileLocalE2EDshProfile({
+    dshHome: process.env.DSH_HOME ?? path.join(homedir(), ".dsh"),
+    profile: "web",
+    worktree: path.resolve(executionRoot, ".."),
+    coreArchive: result.coreArchive,
+    pluginArchive: result.pluginArchive,
+    configFile: result.configFile,
+    bindingFile: path.join(path.dirname(result.configFile), "dsh-intake-bindings.json"),
+  });
   process.stdout.write([
     "Local E2E files are ready.",
     `Artifacts: ${result.releaseDirectory}`,
     `Configuration: ${result.configFile}`,
     `Credentials: ${result.credentialFile}`,
+    `DSH profile: ${dsh.profile}`,
+    `DSH override: ${dsh.patchFile}`,
     "Replace the credential placeholder before validation or Workflow execution.",
     "",
   ].join("\n"));

@@ -123,9 +123,12 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     }
   }
   for (const guide of guideValues.slice(2, 4)) {
-    includesAll(guide.value, ["quickstart:prepare", "tmp/local-e2e/release", "wsr-local/execution.json", "corepack install --global pnpm@11.23.0", "prebuild-install@7.1.3", "no dsh.bundle"], guide.relative);
+    includesAll(guide.value, ["quickstart:prepare", "tmp/local-e2e/release", "wsr-local/execution.json", "corepack install --global pnpm@11.23.0", "prebuild-install@7.1.3", "no dsh.bundle", "fresh profile", "existing profile", "cordis.patch.yml", "remove Intake", "remove Core"], guide.relative);
     if (guide.value.includes("gh release download") || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
       throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
+    }
+    if (/(?:Edit|编辑)[^\n]*\$DSH_HOME\/profiles\/web\/cordis\.patch\.yml/iu.test(guide.value)) {
+      throw new DocumentationVerificationError("DOCUMENTATION_LOCAL_E2E_RECONCILIATION_INVALID", guide.relative);
     }
   }
   for (const guide of guideValues.slice(4)) {

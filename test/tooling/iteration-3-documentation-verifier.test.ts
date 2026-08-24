@@ -59,6 +59,17 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
     });
   });
 
+  it("rejects manual profile-patch editing in the automated local E2E guide", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-local-e2e.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, `${value}\nEdit $DSH_HOME/profiles/web/cordis.patch.yml by hand.\n`);
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_LOCAL_E2E_RECONCILIATION_INVALID",
+    });
+  });
+
   it("rejects host prerequisites that are installed before checking whether they already exist", async () => {
     const roots = await fixture();
     const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
