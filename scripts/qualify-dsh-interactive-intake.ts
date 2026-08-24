@@ -67,16 +67,6 @@ export interface CdpConnection {
   close(): void;
 }
 
-export function observeChildTranscript(child: ChildProcess, maxCharacters = 10_000): () => string {
-  let transcript = "";
-  const append = (chunk: Buffer | string) => {
-    transcript = `${transcript}${chunk.toString()}`.slice(-maxCharacters);
-  };
-  child.stdout?.on("data", append);
-  child.stderr?.on("data", append);
-  return () => transcript;
-}
-
 async function connectCdp(url: string): Promise<CdpConnection> {
   const socket = new WebSocket(url);
   await new Promise<void>((resolve, reject) => {
@@ -164,36 +154,6 @@ export async function evaluate(cdp: CdpConnection, expression: string): Promise<
   return response.result?.value;
 }
 
-export async function captureBrowserReadinessDiagnostic(cdp: CdpConnection): Promise<Readonly<{
-  page: unknown;
-  cdpEvents: readonly unknown[];
-}>> {
-  const page = await evaluate(cdp, `(() => {
-    const root = document.querySelector('#root');
-    return {
-      url: location.href,
-      readyState: document.readyState,
-      bodyText: (document.body?.innerText ?? '').slice(0, 4000),
-      root: root === null ? { present: false } : {
-        present: true,
-        inert: root.hasAttribute('inert'),
-        attributes: Object.fromEntries([...root.attributes].map((attribute) => [attribute.name, attribute.value])),
-        html: root.innerHTML.slice(0, 4000),
-      },
-      controls: [...document.querySelectorAll('button,[role="button"],textarea,[contenteditable="true"]')]
-        .slice(0, 50)
-        .map((element) => ({
-          tag: element.tagName,
-          text: (element.textContent ?? '').trim().slice(0, 300),
-          role: element.getAttribute('role'),
-          disabled: element.getAttribute('disabled'),
-          ariaDisabled: element.getAttribute('aria-disabled'),
-        })),
-    };
-  })()`);
-  return Object.freeze({ page, cdpEvents: Object.freeze(cdp.events.slice(-20)) });
-}
-
 export function isBlockingPromptDismissalLabel(label: string): boolean {
   return /^(继续|Continue|稍后配置|Configure later|Later|Skip for now)$/u.test(label.trim());
 }
@@ -249,7 +209,6 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
   const configFile = path.join(durable, "execution.json");
   const bindingFile = path.join(durable, "intake-bindings.json");
   let child: ChildProcess | undefined;
-  let readDshTranscript: (() => string) | undefined;
   let chrome: ChildProcess | undefined;
   let cdp: CdpConnection | undefined;
   try {
@@ -288,7 +247,6 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       env: { ...process.env, DSH_HOME: dshHome },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    readDshTranscript = observeChildTranscript(child);
     const webUrl = await waitForWebUrl(child);
     const page = await fetch(webUrl);
     if (page.status !== 200 || !(await page.text()).includes("<div id=\"root\"></div>")) throw new Error("DSH_WEB_PAGE_INVALID");
@@ -301,33 +259,17 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
         if (kind && !window.__wsrObservedKinds.includes(kind)) window.__wsrObservedKinds.push(kind);
       }
     }).observe(document.documentElement, { childList: true, subtree: true, attributes: true }); true`);
-    try {
-      await waitFor(async () => {
-        const ready = await evaluate(cdp!, `(() => {
-          const button = [...document.querySelectorAll('button')].find((candidate) =>
-            (${isBlockingPromptDismissalLabel.toString()})(candidate.textContent ?? ''));
-          if (button) { button.click(); return false; }
-          return document.querySelector('#root')?.hasAttribute('inert') === false
-            && [...document.querySelectorAll('button')].some((candidate) =>
-              (${isWorkspacePickerLabel.toString()})(candidate.textContent ?? ''));
-        })()`);
-        return ready === true ? true : undefined;
-      }, "DSH_BROWSER_ONBOARDING_UNAVAILABLE");
-    } catch (cause) {
-      let browser: unknown;
-      try { browser = await captureBrowserReadinessDiagnostic(cdp); }
-      catch (diagnosticCause) { browser = { captureError: String(diagnosticCause) }; }
-      const diagnostic = JSON.stringify({
-        browser,
-        dsh: {
-          exitCode: child.exitCode,
-          signalCode: child.signalCode,
-          killed: child.killed,
-          transcript: readDshTranscript?.(),
-        },
-      }).slice(0, 20_000);
-      throw new Error(`DSH_BROWSER_ONBOARDING_UNAVAILABLE:${diagnostic}`, { cause });
-    }
+    await waitFor(async () => {
+      const ready = await evaluate(cdp!, `(() => {
+        const button = [...document.querySelectorAll('button')].find((candidate) =>
+          (${isBlockingPromptDismissalLabel.toString()})(candidate.textContent ?? ''));
+        if (button) { button.click(); return false; }
+        return document.querySelector('#root')?.hasAttribute('inert') === false
+          && [...document.querySelectorAll('button')].some((candidate) =>
+            (${isWorkspacePickerLabel.toString()})(candidate.textContent ?? ''));
+      })()`);
+      return ready === true ? true : undefined;
+    }, "DSH_BROWSER_ONBOARDING_UNAVAILABLE");
     const workspaceCreated = await rpc(webUrl, "workspace.create", { path: worktree });
     if (workspaceCreated.ok !== true || typeof workspaceCreated.value?.workspace?.workspaceId !== "string") {
       throw new Error(`DSH_WORKSPACE_CREATE_FAILED:${JSON.stringify(workspaceCreated)}`);
