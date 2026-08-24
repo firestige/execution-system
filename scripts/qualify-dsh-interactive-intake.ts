@@ -198,6 +198,10 @@ export function isBlockingPromptDismissalLabel(label: string): boolean {
   return /^(继续|Continue|稍后配置|Configure later|Later|Skip for now)$/u.test(label.trim());
 }
 
+export function isWorkspacePickerLabel(label: string): boolean {
+  return /^(选择工作区|Choose workspace|Select workspace)$/u.test(label.trim());
+}
+
 export async function dismissBlockingPrompts(cdp: CdpConnection): Promise<void> {
   await waitFor(async () => {
     const ready = await evaluate(cdp, `(() => {
@@ -304,7 +308,8 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
             (${isBlockingPromptDismissalLabel.toString()})(candidate.textContent ?? ''));
           if (button) { button.click(); return false; }
           return document.querySelector('#root')?.hasAttribute('inert') === false
-            && /选择工作区|Select workspace/u.test(document.body?.innerText ?? '');
+            && [...document.querySelectorAll('button')].some((candidate) =>
+              (${isWorkspacePickerLabel.toString()})(candidate.textContent ?? ''));
         })()`);
         return ready === true ? true : undefined;
       }, "DSH_BROWSER_ONBOARDING_UNAVAILABLE");
@@ -329,7 +334,8 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
     }
     await waitFor(async () => {
       const opened = await evaluate(cdp!, `(() => {
-        const button = [...document.querySelectorAll('button')].find((candidate) => /^(选择工作区|Select workspace)$/u.test(candidate.textContent?.trim() ?? ''));
+        const button = [...document.querySelectorAll('button')].find((candidate) =>
+          (${isWorkspacePickerLabel.toString()})(candidate.textContent ?? ''));
         if (!button) return false;
         button.click();
         return true;
@@ -342,7 +348,8 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
         const selected = await evaluate(cdp!, `(() => {
           const title = ${JSON.stringify(workspaceTitle)};
           const candidate = [...document.querySelectorAll('button,[role="button"]')].find((element) =>
-            (element.textContent?.trim() ?? '').includes(title) && !/^(选择工作区|Select workspace)$/u.test(element.textContent?.trim() ?? ''));
+            (element.textContent?.trim() ?? '').includes(title)
+              && !(${isWorkspacePickerLabel.toString()})(element.textContent ?? ''));
           if (!candidate) return false;
           candidate.click();
           return true;
