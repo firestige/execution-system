@@ -17,6 +17,7 @@ import {
   waitForWebUrl,
   type CdpConnection,
 } from "./qualify-dsh-interactive-intake.js";
+import { exerciseGrillingDialogue } from "./dsh-product-grilling-oracle.js";
 
 export interface DshProductQualificationOptions {
   readonly coreArchive: string;
@@ -68,6 +69,39 @@ async function selectWorkspace(cdp: CdpConnection, url: URL, worktree: string): 
   })()`) === true ? true : undefined, "PRODUCT_WORKSPACE_OPTION_UNAVAILABLE", 40_000);
   await dismissBlockingPrompts(cdp);
   return created.value.workspace.workspaceId;
+}
+
+async function reopenWorkspace(cdp: CdpConnection, url: URL, workspaceId: string): Promise<void> {
+  await dismissBlockingPrompts(cdp);
+  const listed = await rpc(url, "workspace.list", {});
+  const existing = listed.value?.items?.find((entry: any) => entry.workspaceId === workspaceId);
+  if (listed.ok !== true || typeof existing?.title !== "string") throw new Error("PRODUCT_RESTART_WORKSPACE_MISSING");
+  const state = await waitFor(async () => await evaluate(cdp, `(() => {
+    const title = ${JSON.stringify(existing.title)};
+    const text = document.body?.innerText ?? '';
+    if (text.includes(title) && document.querySelector('[data-wsr-sidebar="true"]')) return 'restored';
+    if (/选择工作区|Select workspace/u.test(text)) return 'picker';
+    return undefined;
+  })()`), "PRODUCT_BROWSER_RESTART_STATE_UNAVAILABLE", 40_000);
+  if (state === "restored") return;
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('button')].find((candidate) => /^(选择工作区|Select workspace)$/u.test(candidate.textContent?.trim() ?? ''));
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`) === true ? true : undefined, "PRODUCT_RESTART_WORKSPACE_PICKER_UNAVAILABLE", 40_000);
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const title = ${JSON.stringify(existing.title)};
+    const candidate = [...document.querySelectorAll('button,[role="button"]')].find((element) =>
+      (element.textContent?.trim() ?? '').includes(title) && !/^(选择工作区|Select workspace)$/u.test(element.textContent?.trim() ?? ''));
+    if (!candidate) return false;
+    candidate.click();
+    return true;
+  })()`) === true ? true : undefined, "PRODUCT_RESTART_WORKSPACE_OPTION_UNAVAILABLE", 40_000);
+  await dismissBlockingPrompts(cdp);
+  await waitFor(async () => await evaluate(cdp,
+    `document.body?.innerText?.includes(${JSON.stringify(existing.title)}) === true`) === true ? true : undefined,
+  "PRODUCT_RESTART_WORKSPACE_SELECTION_FAILED", 40_000);
 }
 
 async function sessionId(url: URL, workspaceId: string): Promise<string> {
@@ -220,7 +254,7 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       const inputCount = before.filter((event) => event.kind === "action-input-request").length;
       const manifestDirectory = path.join(durable, "state", "manifests");
       const manifestsBefore = new Set(await readdir(manifestDirectory));
-      await submitBrowserCommand(cdp, `/wsr create system-design-workflow@0.3.0\nThis qualification requires exactly two external answers before completion. Before design work, you MUST call workflow_request_input to ask which implementation stack to use. After the first answer, you MUST call workflow_request_input a second time to ask which local port to use. Do not call workflow_complete until both answers are received. Qualification attempt ${String(attempt)}.`);
+      await submitBrowserCommand(cdp, `/wsr create system-design-workflow@0.3.0\nThis qualification requires a grilling dialogue before completion. Before design work, you MUST call workflow_request_input to ask one question: which implementation stack to use. After the first external answer, ask one question: which local port to use. After the second external answer, ask one final confirmation question exactly: Have we reached agreement on this design? Do not call workflow_complete until the user explicitly confirms agreement. Qualification attempt ${String(attempt)}.`);
       const manifestName = await waitFor(async () => {
         for (const name of await readdir(manifestDirectory)) {
           if (manifestsBefore.has(name)) continue;
@@ -247,45 +281,58 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       }
     }
     if (firstInput === undefined) throw new Error("PRODUCT_SYSTEM_INPUT_NOT_REQUESTED");
-    const inputBeforeAnswer = (await events(cdp)).filter((event) => event.kind === "action-input-request").length;
-    await submitBrowserCommand(cdp, "Use Node.js with the built-in node:http module for the local-only service.");
-    await waitFor(async () => await evaluate(cdp!,
-      `document.body?.innerText?.includes('Use Node.js with the built-in node:http module') === true`) === true ? true : undefined,
-    "PRODUCT_ORDINARY_REPLY_NOT_VISIBLE", 40_000);
     if (activeSystemManifestName === undefined) throw new Error("PRODUCT_SYSTEM_MANIFEST_MISSING");
     const activeCoordinatorDirectory = path.join(durable, "state", "runner", path.basename(activeSystemManifestName, ".json"), "coordinator");
-    const afterAnswer = await waitFor(async () => {
-      const input = (await events(cdp!)).filter((event) => event.surface === "chat" && event.kind === "action-input-request");
-      if (input.length > inputBeforeAnswer) return input.at(-1);
-      try {
-        for (const name of await readdir(activeCoordinatorDirectory)) {
-          const coordinator = JSON.parse(await readFile(path.join(activeCoordinatorDirectory, name), "utf8"));
-          if (coordinator.phase === "terminal") return { kind: "terminal-result" };
-        }
-      } catch { /* Coordinator may still be resuming. */ }
-      return undefined;
-    }, "PRODUCT_SECOND_INPUT_UNRESOLVED", 420_000);
-    if (afterAnswer.kind !== "action-input-request") throw new Error("PRODUCT_SECOND_INPUT_NOT_REQUESTED");
-    const eventsBeforeFinish = await events(cdp);
-    const inputBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "action-input-request").length;
-    const terminalBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "terminal-result").length;
-    const statusBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "delivery-status").length;
-    await submitBrowserCommand(cdp, "/wsr action finish");
-    await waitForKind(cdp, "delivery-status", statusBeforeFinish, 120_000, "chat");
-    const afterFinish = await waitFor(async () => {
-      const observed = await events(cdp!);
-      const input = observed.filter((event) => event.surface === "chat" && event.kind === "action-input-request");
-      if (input.length > inputBeforeFinish) return input.at(-1);
-      const terminal = observed.filter((event) => event.surface === "chat" && event.kind === "terminal-result");
-      if (terminal.length > terminalBeforeFinish) return terminal.at(-1);
-      try {
-        for (const name of await readdir(activeCoordinatorDirectory)) {
-          const coordinator = JSON.parse(await readFile(path.join(activeCoordinatorDirectory, name), "utf8"));
-          if (coordinator.phase === "terminal") return { kind: "terminal-result" };
-        }
-      } catch { /* Coordinator may still be advancing. */ }
-      return undefined;
-    }, "PRODUCT_ACTION_FINISH_NOT_OBSERVED", 300_000);
+    const firstQuestionCount = (await events(cdp)).filter((event) => event.surface === "chat" && event.kind === "action-input-request").length;
+    let afterFinish: { readonly kind: string } | undefined;
+    const grilling = await exerciseGrillingDialogue({
+      firstQuestion: firstInput,
+      firstQuestionCount,
+      waitForNextQuestion: async (afterQuestionCount) => {
+        const next = await waitFor(async () => {
+          const input = (await events(cdp!)).filter((event) => event.surface === "chat" && event.kind === "action-input-request");
+          if (input.length > afterQuestionCount) return input.at(-1);
+          try {
+            for (const name of await readdir(activeCoordinatorDirectory)) {
+              const coordinator = JSON.parse(await readFile(path.join(activeCoordinatorDirectory, name), "utf8"));
+              if (coordinator.phase === "terminal") return { kind: "terminal-result", text: "terminal" };
+            }
+          } catch { /* Coordinator may still be resuming. */ }
+          return undefined;
+        }, "PRODUCT_GRILLING_QUESTION_UNRESOLVED", 420_000);
+        if (next.kind !== "action-input-request") throw new Error("PRODUCT_GRILLING_QUESTION_NOT_REQUESTED");
+        return next;
+      },
+      submitOrdinaryAnswer: async (answer) => {
+        await submitBrowserCommand(cdp!, answer);
+        await waitFor(async () => await evaluate(cdp!,
+          `document.body?.innerText?.includes(${JSON.stringify(answer)}) === true`) === true ? true : undefined,
+        "PRODUCT_GRILLING_REPLY_NOT_VISIBLE", 40_000);
+      },
+      submitAgreementAndFinish: async (answer) => {
+        const observedBeforeFinish = await events(cdp!);
+        const inputBeforeFinish = observedBeforeFinish.filter((event) => event.surface === "chat" && event.kind === "action-input-request").length;
+        const terminalBeforeFinish = observedBeforeFinish.filter((event) => event.surface === "chat" && event.kind === "terminal-result").length;
+        const statusBeforeFinish = observedBeforeFinish.filter((event) => event.surface === "chat" && event.kind === "delivery-status").length;
+        await submitBrowserCommand(cdp!, `/wsr action finish\n${answer}`);
+        await waitForKind(cdp!, "delivery-status", statusBeforeFinish, 120_000, "chat");
+        afterFinish = await waitFor(async () => {
+          const observed = await events(cdp!);
+          const input = observed.filter((event) => event.surface === "chat" && event.kind === "action-input-request");
+          if (input.length > inputBeforeFinish) return input.at(-1);
+          const terminal = observed.filter((event) => event.surface === "chat" && event.kind === "terminal-result");
+          if (terminal.length > terminalBeforeFinish) return terminal.at(-1);
+          try {
+            for (const name of await readdir(activeCoordinatorDirectory)) {
+              const coordinator = JSON.parse(await readFile(path.join(activeCoordinatorDirectory, name), "utf8"));
+              if (coordinator.phase === "terminal") return { kind: "terminal-result" };
+            }
+          } catch { /* Coordinator may still be advancing. */ }
+          return undefined;
+        }, "PRODUCT_ACTION_FINISH_NOT_OBSERVED", 300_000);
+      },
+    });
+    if (afterFinish === undefined) throw new Error("PRODUCT_ACTION_FINISH_NOT_OBSERVED");
 
     const manifestDirectory = path.join(durable, "state", "manifests");
     if (afterFinish.kind === "terminal-result") {
@@ -328,7 +375,7 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     const secondBrowser = await launchBrowser(root, restarted.url);
     chrome = secondBrowser.child;
     cdp = secondBrowser.cdp;
-    await dismissBlockingPrompts(cdp);
+    await reopenWorkspace(cdp, restarted.url, workspaceId);
     await observe(cdp);
     await clickWsrTab(cdp, "Current status");
     const recovered = await waitForKind(cdp, "delivery-status", 0, 120_000, "sidebar");
@@ -359,7 +406,7 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       }),
       empty: Object.freeze({ kind: empty.kind, text: empty.text }),
       hello: Object.freeze({ terminal: helloTerminal.text, kinds: [...new Set(helloEvents.map((event) => event.kind))] }),
-      systemDesign: Object.freeze({ inputRequest: firstInput.text, actionFinishObserved: true }),
+      systemDesign: Object.freeze({ inputRequest: firstInput.text, grilling, actionFinishObserved: true }),
       recovery: Object.freeze({ status: recovered.text, manifestIdentityPreserved: true, bindingIdentityPreserved: true }),
       browserEvents: Object.freeze(finalEvents),
     });
