@@ -69,4 +69,15 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
       code: "DOCUMENTATION_PREREQUISITE_INSTALL_INVALID",
     });
   });
+
+  it("rejects shell control flow in the human-operated quickstart prerequisite check", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, value.replace("node --version", "if ! command -v pnpm; then pnpm --version; fi\nnode --version"));
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_PREREQUISITE_CHECK_NOT_MANUAL",
+    });
+  });
 });
