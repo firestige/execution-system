@@ -31,4 +31,15 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain("working-directory: execution-system");
     expect(candidate).toContain('"$GITHUB_WORKSPACE/execution-system"');
   });
+
+  it("qualifies the Iteration 3 component PR against its exact super-project candidate pins", async () => {
+    const ci = await readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8");
+
+    expect(ci).toContain("github.head_ref == 'fix/iter3-interactive-intake'");
+    expect(ci).toContain("'fix/iter3-interactive-intake-e2e'");
+    expect(ci).toContain("|| 'main'");
+    expect(ci).toContain("submodules: recursive");
+    expect(ci).toContain("fetch-depth: 0");
+    expect(ci).not.toContain("ref: ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb");
+  });
 });

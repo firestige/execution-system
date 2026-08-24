@@ -33,26 +33,19 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: firestige/workflow-self-recursive
-          ref: main
+          ref: ${{ github.head_ref == 'fix/iter3-interactive-intake' && 'fix/iter3-interactive-intake-e2e' || 'main' }}
+          fetch-depth: 0
+          submodules: recursive
 
       - name: Checkout execution-system
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           path: execution-system
 
-      - name: Checkout frozen Workflow Contract
-        uses: actions/checkout@v6
-        with:
-          repository: firestige/system-contracts
-          ref: c8e090f80073e3a4a37063d2d0165f190f2ec7f1
-          path: system-contracts
-
-      - name: Checkout canonical workflow-package
-        uses: actions/checkout@v6
-        with:
-          repository: firestige/workflow-package
-          ref: ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb
-          path: workflow-package
+      - name: Verify exact pull request candidate checkout
+        if: ${{ github.event_name == 'pull_request' }}
+        run: test "$(git -C execution-system rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
