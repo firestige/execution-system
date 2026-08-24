@@ -1,6 +1,6 @@
 {
   "name": "@workflow-self-recursive/dsh-intake",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./src/plugin.js",
   "types": "./src/index.d.ts",
@@ -21,7 +21,7 @@
       "patch": "./cordis.patch.yml"
     },
     "compatibility": {
-      "executionSystem": "0.1.0",
+      "executionSystem": "0.1.1",
       "dsh": "0.1.1-rc.2",
       "agents": "0.1.1-rc.2",
       "commands": "0.1.1-rc.2",

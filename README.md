@@ -14,11 +14,11 @@ The public `ExecutionApplication` is host-neutral and can be embedded without a 
 
 ## Developer preview
 
-This repository is part of workflow-self-recursive's architecture-first developer preview for trusted local use by individuals and small teams. Version `0.1.0` is an MVP release and may make compatibility-breaking changes.
+This repository is part of workflow-self-recursive's architecture-first developer preview for trusted local use by individuals and small teams. Version `0.1.1` is an MVP candidate and may make compatibility-breaking changes.
 
 ## Release quickstart
 
-1. Download the `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake` `0.1.0` artifacts.
+1. Before release, build the `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake` `0.1.1` artifacts from this checkout with `pnpm release:artifacts <directory>`.
 2. Copy `config/defaults/execution.default.yaml`, replace each `__REQUIRED__` value, and provision the referenced API key in the external DSH credential file (`version: 1`, `refs: ...`).
 3. In a DSH profile with an interactive app (the shipped `web` profile is the reference), first run `dsh plugin --profile web add --workspace-root <absolute-execution-system-tarball>`, then run the same command with `<absolute-dsh-intake-tarball>`. The flag is required by the workspace created by the current DSH preview.
 4. Set the plugin row's absolute `configFile` and `bindingFile`, then verify it with `dsh --profile web --dump-config` and `dsh --profile web --help`.

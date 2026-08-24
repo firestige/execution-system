@@ -43,9 +43,9 @@ describe("Wave 6 DSH Intake plugin", () => {
 
     expect(manifest).toMatchObject({
       name: "@workflow-self-recursive/dsh-intake",
-      version: "0.1.0",
+      version: "0.1.1",
       dsh: { bundle: { patch: "./cordis.patch.yml" }, compatibility: {
-        executionSystem: "0.1.0", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
+        executionSystem: "0.1.1", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
         agents: "0.1.1-rc.2", skillFilesystem: "0.1.1-rc.2", toolSkill: "0.1.1-rc.2", tools: "0.1.1-rc.2",
       } },
     });

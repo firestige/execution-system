@@ -14,11 +14,11 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 
 ## Developer preview
 
-本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。`0.1.0` 是 MVP 发行版，后续可能有破坏兼容性的变更。
+本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。`0.1.1` 是 MVP candidate，后续可能有破坏兼容性的变更。
 
 ## Release 快速开始
 
-1. 下载 `@workflow-self-recursive/execution-system` 与 `@workflow-self-recursive/dsh-intake` 的 `0.1.0` artifact。
+1. 发布前用 `pnpm release:artifacts <directory>` 从当前 checkout 构建 `@workflow-self-recursive/execution-system` 与 `@workflow-self-recursive/dsh-intake` 的 `0.1.1` artifact。
 2. 复制 `config/defaults/execution.default.yaml`，替换全部 `__REQUIRED__` 值，并在外置 DSH credential 文件中 provision 所引用的 API key（格式为 `version: 1`、`refs: ...`）。
 3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，再以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志。
 4. 为 plugin row 填写 absolute `configFile` 与 `bindingFile`，再执行 `dsh --profile web --dump-config` 和 `dsh --profile web --help` 验证。

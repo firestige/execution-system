@@ -2,13 +2,13 @@
 
 Preview Intake Adapter distribution. It owns `/wsr`, the DSH-I-only `workflow_execution_intake` tool, the explicit `/workflow-execution` first-party instruction skill, and private conversation-to-Delivery bindings. Workflow execution remains owned by the separately installed host-neutral Execution package.
 
-Release package identities are `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake`, both at `0.1.0` for this compatibility tuple.
+Candidate package identities are `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake`, both at `0.1.1` for this compatibility tuple.
 
-Install the two release artifacts in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag):
+Install the two release artifacts into locked DSH's built-in `web` profile in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag). The plugin bundle supplies no UI; a new custom profile contains only `dsh-base` and is not an interactive Intake surface:
 
 ```sh
-dsh plugin --profile workflow-execution add --workspace-root /absolute/path/workflow-self-recursive-execution-system-0.1.0.tgz
-dsh plugin --profile workflow-execution add --workspace-root /absolute/path/workflow-self-recursive-dsh-intake-0.1.0.tgz
+dsh plugin --profile web add --workspace-root /absolute/path/workflow-self-recursive-execution-system-0.1.1.tgz
+dsh plugin --profile web add --workspace-root /absolute/path/workflow-self-recursive-dsh-intake-0.1.1.tgz
 ```
 
 The plugin accepts exactly two absolute-path settings in its DSH profile row:
@@ -25,7 +25,8 @@ The plugin accepts exactly two absolute-path settings in its DSH profile row:
 Check the launcher syntax with `dsh --help`, then verify the composed profile without starting a Workflow:
 
 ```sh
-dsh --profile workflow-execution --dump-config
+dsh --profile web --dump-config
+dsh web
 ```
 
 The locked DSH preview does not use launcher or app help as a plugin-command catalog. Profile-level help belongs to the configured app and may keep that app running. The exact WSR command reference is below; plugin startup never creates a Delivery.
@@ -48,12 +49,12 @@ The text and images in the current DSH turn are the Workflow prompt. There is no
 Use DSH's package lifecycle for an exact compatible update, removal, or reinstall. Update Core before Intake; remove Intake before Core:
 
 ```sh
-dsh plugin --profile workflow-execution update --workspace-root @workflow-self-recursive/execution-system@<new-exact-version>
-dsh plugin --profile workflow-execution update --workspace-root @workflow-self-recursive/dsh-intake@<new-exact-version>
-dsh plugin --profile workflow-execution remove --workspace-root @workflow-self-recursive/dsh-intake
-dsh plugin --profile workflow-execution remove --workspace-root @workflow-self-recursive/execution-system
-dsh plugin --profile workflow-execution add --workspace-root @workflow-self-recursive/execution-system@<exact-version>
-dsh plugin --profile workflow-execution add --workspace-root @workflow-self-recursive/dsh-intake@<exact-version>
+dsh plugin --profile web update --workspace-root @workflow-self-recursive/execution-system@<new-exact-version>
+dsh plugin --profile web update --workspace-root @workflow-self-recursive/dsh-intake@<new-exact-version>
+dsh plugin --profile web remove --workspace-root @workflow-self-recursive/dsh-intake
+dsh plugin --profile web remove --workspace-root @workflow-self-recursive/execution-system
+dsh plugin --profile web add --workspace-root @workflow-self-recursive/execution-system@<exact-version>
+dsh plugin --profile web add --workspace-root @workflow-self-recursive/dsh-intake@<exact-version>
 ```
 
 WSR does not intercept those package operations. The Execution state root, Manifest/current-slot, Runner state, `configFile`, and `bindingFile` stay outside the plugin installation directory. Starting a compatible reinstall resumes the same persisted Delivery binding from its last durable boundary; interaction state not persisted before process termination or package removal may be lost. If `--dump-config` reports a broken profile patch, restore the complete row shown above and rerun it; there is no fallback to another config path.

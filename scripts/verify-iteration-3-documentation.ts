@@ -99,9 +99,13 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
 
   for (const guide of guideValues.slice(0, 2)) {
     includesAll(guide.value, [...IDENTITIES, ...COMMANDS], guide.relative);
-    includesAll(guide.value, ["execution-config init", "execution-config validate", "execution-config dump-effective", "--dump-config", "dsh --help", "plugin --profile workflow-execution add", "plugin --profile workflow-execution update", "plugin --profile workflow-execution remove"], guide.relative);
-    if (guide.value.includes("dsh --profile workflow-execution --help")) {
+    includesAll(guide.value, ["pnpm@9.15.0", "@deepseek-ai/dsh@0.1.1-rc.2", "execution-config init", "execution-config validate", "execution-config dump-effective", "--dump-config", "dsh --help", "dsh web", "plugin --profile web add", "plugin --profile web update", "plugin --profile web remove", "webserver", "ui-conversation", "ui-commands"], guide.relative);
+    if (guide.value.includes("dsh --profile web --help")) {
       throw new DocumentationVerificationError("DOCUMENTATION_IDENTITY_MISMATCH", `${guide.relative}: interactive profile help must not be used as launcher help`);
+    }
+    if (!guide.value.includes("release:artifacts") || !guide.value.includes("release:verify")
+      || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
+      throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
     }
   }
   for (const guide of guideValues.slice(2)) {

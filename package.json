@@ -1,6 +1,6 @@
 {
   "name": "@workflow-self-recursive/execution-system",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "exports": {
@@ -39,6 +39,8 @@
     "build": "tsc -p tsconfig.build.json",
     "release:artifacts": "node --import tsx scripts/build-release-artifacts.ts",
     "release:verify": "node --import tsx scripts/verify-release-artifacts.ts",
+    "release:policy": "node --import tsx scripts/release-promotion-policy.ts",
+    "qualify:dsh-interactive": "node --import tsx scripts/qualify-dsh-interactive-intake.ts",
     "release:workflow-assets": "node --import tsx scripts/build-workflow-release-assets.ts",
     "verify:iteration3-docs": "node --import tsx scripts/verify-iteration-3-documentation.ts . ..",
     "verify:dsh-intake": "node --import tsx scripts/verify-dsh-intake-distribution.ts",

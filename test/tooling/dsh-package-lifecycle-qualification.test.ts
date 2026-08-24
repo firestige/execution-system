@@ -35,7 +35,7 @@ describe("DSH package lifecycle qualification", () => {
       const result = await qualifyDshPackageLifecycle({ oldArchive, newArchive });
 
       expect(result).toMatchObject({
-        profile: "workflow-execution",
+        profile: "web",
         updateCommandSucceeded: true,
         installedVersions: ["0.1.0", "0.1.1", "0.1.1"],
         bundleStates: ["REGISTERED", "REGISTERED", "REMOVED", "REGISTERED"],
@@ -46,6 +46,10 @@ describe("DSH package lifecycle qualification", () => {
       });
       expect(result.dumpConfig).toContain(result.configFile);
       expect(result.dumpConfig).toContain(result.bindingFile);
+      expect(result.dumpConfig).toContain("id: webserver");
+      expect(result.dumpConfig).toContain("id: ui-conversation");
+      expect(result.dumpConfig).toContain("id: ui-commands");
+      expect(result.dumpConfig).toContain("id: workflow-execution");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

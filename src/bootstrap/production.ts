@@ -322,7 +322,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     );
     const observation = createDeliveryObservationEmitter({
       config: config.observation,
-      serviceVersion: "0.1.0",
+      serviceVersion: "0.1.1",
       diagnostic() {},
     });
     const ownerFacts: OwnerFactIngress = Object.freeze({
