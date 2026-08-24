@@ -20,7 +20,7 @@ This repository is part of workflow-self-recursive's architecture-first develope
 
 1. Before release, run `pnpm quickstart:prepare` to build and verify both `0.1.1` artifacts and initialize local E2E configuration in one operation.
 2. Copy `config/defaults/execution.default.yaml`, replace each `__REQUIRED__` value, and provision the referenced API key in the external DSH credential file (`version: 1`, `refs: ...`).
-3. In a DSH profile with an interactive app (the shipped `web` profile is the reference), first run `dsh plugin --profile web add --workspace-root <absolute-execution-system-tarball>`, then run the same command with `<absolute-dsh-intake-tarball>`. The flag is required by the workspace created by the current DSH preview.
+3. In a DSH profile with an interactive app (the shipped `web` profile is the reference), merge `better-sqlite3: true` into its pnpm 11 `allowBuilds`, then run `dsh plugin --profile web add --workspace-root <absolute-execution-system-tarball>` followed by the same command for `<absolute-dsh-intake-tarball>`. The flag is required by the workspace created by the current DSH preview; `pnpm quickstart:prepare` performs the policy merge automatically.
 4. Set the plugin row's absolute `configFile` and `bindingFile`, then verify it with `dsh --profile web --dump-config` and `dsh --profile web --help`.
 5. Start `dsh --profile web` from the target worktree. Use the sidebar Deliveries and Current status tabs for read-only queries; use chat for `/wsr create implementation-workflow@0.3.0`, ordinary Action answers, and `/wsr action finish`. The `/wsr list` and `/wsr status` operations remain available for compatibility and automation. Restarting the Intake preserves Manifest/current-slot and private binding state for recovery.
 

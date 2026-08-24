@@ -31,11 +31,13 @@ describe("local E2E DSH profile reconciliation", () => {
       return `- id: workflow-execution\n  config:\n    configFile: ${configFile}\n    bindingFile: ${bindingFile}\n`;
     });
 
-    expect(calls.slice(0, 2)).toEqual([
+    expect(calls.slice(0, 4)).toEqual([
+      ["plugin", "--profile", "web", "config", "get", "--json", "allowBuilds"],
+      ["plugin", "--profile", "web", "config", "set", "--location=project", "--json", "allowBuilds", '{"better-sqlite3":true}'],
       ["plugin", "--profile", "web", "add", "--workspace-root", path.join(root, "core.tgz")],
       ["plugin", "--profile", "web", "add", "--workspace-root", path.join(root, "plugin.tgz")],
     ]);
-    expect(calls[2]).toEqual(["--profile", "web", "--dump-config"]);
+    expect(calls[4]).toEqual(["--profile", "web", "--dump-config"]);
     expect(result).toMatchObject({ profile: "web", operation: "RECONCILED" });
     const patch = await readFile(path.join(profileDirectory, "cordis.patch.yml"), "utf8");
     expect(patch).toContain("# fresh DSH user patch");
@@ -76,7 +78,9 @@ describe("local E2E DSH profile reconciliation", () => {
     expect(twice).toContain(prefix);
     expect(twice).toContain("- id: unrelated\n  disabled: true\n");
     expect(twice).not.toContain("/old/");
-    expect(calls.slice(0, 5)).toEqual([
+    expect(calls.slice(0, 7)).toEqual([
+      ["plugin", "--profile", "web", "config", "get", "--json", "allowBuilds"],
+      ["plugin", "--profile", "web", "config", "set", "--location=project", "--json", "allowBuilds", '{"better-sqlite3":true}'],
       ["plugin", "--profile", "web", "remove", "--workspace-root", "@workflow-self-recursive/dsh-intake"],
       ["plugin", "--profile", "web", "remove", "--workspace-root", "@workflow-self-recursive/execution-system"],
       ["plugin", "--profile", "web", "add", "--workspace-root", path.join(root, "core.tgz")],

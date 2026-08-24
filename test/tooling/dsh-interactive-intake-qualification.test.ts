@@ -23,6 +23,7 @@ describe("DSH interactive Intake qualification", () => {
     const release = path.join(root, "release");
     try {
       await mkdir(release);
+      execFileSync("pnpm", ["build"], { cwd: repository, stdio: "pipe" });
       const coreArchive = pack(repository, release);
       const pluginArchive = pack(path.join(repository, "packages/dsh-intake"), release);
       await expect(qualifyDshInteractiveIntake({ coreArchive, pluginArchive }))

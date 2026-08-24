@@ -4,9 +4,10 @@ Preview Intake Adapter distribution. It owns `/wsr`, the DSH-I-only `workflow_ex
 
 Candidate package identities are `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake`, both at `0.1.1` for this compatibility tuple.
 
-Install the two release artifacts into locked DSH's built-in `web` profile in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag). The Intake bundle supplies a bounded WSR chat node and read-only current-session sidebar tabs; a new custom profile contains only `dsh-base` and is not an interactive Intake surface:
+Install the two release artifacts into locked DSH's built-in `web` profile in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag). Core's checkpoint dependency requires pnpm 11 to approve `better-sqlite3` under the profile's `allowBuilds` before package installation. The command below is for a fresh profile; on an existing profile, preserve all existing approvals and merge `better-sqlite3: true` into `$DSH_HOME/profiles/web/pnpm-workspace.yaml`. The Intake bundle supplies a bounded WSR chat node and read-only current-session sidebar tabs; a new custom profile contains only `dsh-base` and is not an interactive Intake surface:
 
 ```sh
+dsh plugin --profile web config set --location=project --json allowBuilds '{"better-sqlite3":true}'
 dsh plugin --profile web add --workspace-root /absolute/path/workflow-self-recursive-execution-system-0.1.1.tgz
 dsh plugin --profile web add --workspace-root /absolute/path/workflow-self-recursive-dsh-intake-0.1.1.tgz
 ```

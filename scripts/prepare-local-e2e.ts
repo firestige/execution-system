@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadExecutionInstallationConfig } from "../src/configuration/index.js";
+import { ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
 
 type JsonRecord = Record<string, any>;
 
@@ -218,6 +219,7 @@ export async function reconcileLocalE2EDshProfile(
   const corePackage = "@workflow-self-recursive/execution-system";
   const pluginPackage = "@workflow-self-recursive/dsh-intake";
   const removePrefix = ["plugin", "--profile", profile, "remove", "--workspace-root"] as const;
+  await ensureDshProfileInstallationPolicy(profile, (args) => run("dsh", args, worktree, dshHome));
   if (dependencies[pluginPackage] !== undefined) await run("dsh", [...removePrefix, pluginPackage], worktree, dshHome);
   if (dependencies[corePackage] !== undefined) await run("dsh", [...removePrefix, corePackage], worktree, dshHome);
   const addPrefix = ["plugin", "--profile", profile, "add", "--workspace-root"] as const;

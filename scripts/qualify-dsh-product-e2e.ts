@@ -18,6 +18,7 @@ import {
   type CdpConnection,
 } from "./qualify-dsh-interactive-intake.js";
 import { exerciseGrillingDialogue } from "./dsh-product-grilling-oracle.js";
+import { ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
 
 export interface DshProductQualificationOptions {
   readonly coreArchive: string;
@@ -214,6 +215,7 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     };
     sourceConfig.controls = { ...sourceConfig.controls, executionTimeoutMs: 600_000 };
     await writeFile(configFile, `${JSON.stringify(sourceConfig, null, 2)}\n`);
+    await ensureDshProfileInstallationPolicy("web", (args) => runDsh(dshHome, worktree, args));
     runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", path.resolve(options.coreArchive)]);
     runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", path.resolve(options.pluginArchive)]);
     await writeFile(path.join(dshHome, "profiles/web/cordis.patch.yml"), [

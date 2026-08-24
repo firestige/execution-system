@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
+
 const require = createRequire(import.meta.url);
 const repository = path.resolve(import.meta.dirname, "..");
 const defaultWorktree = path.resolve(repository, "..");
@@ -16,8 +18,8 @@ export function dshExecutable(): string {
   return path.resolve(path.dirname(manifestPath), manifest.bin.dsh);
 }
 
-export function runDsh(dshHome: string, cwd: string, args: readonly string[]): void {
-  execFileSync(process.execPath, [dshExecutable(), ...args], {
+export function runDsh(dshHome: string, cwd: string, args: readonly string[]): string {
+  return execFileSync(process.execPath, [dshExecutable(), ...args], {
     cwd,
     env: { ...process.env, DSH_HOME: dshHome },
     encoding: "utf8",
@@ -222,6 +224,7 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       writeFile(configFile, `${JSON.stringify(defaults, null, 2)}\n`, "utf8"),
       writeFile(defaults.paths.credentialStorePath, "version: 1\nrefs:\n  QUALIFICATION_KEY: unused-for-list\n", "utf8"),
     ]);
+    await ensureDshProfileInstallationPolicy("web", (args) => runDsh(dshHome, worktree, args));
     runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", coreArchive]);
     runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", pluginArchive]);
     await writeFile(path.join(dshHome, "profiles/web/cordis.patch.yml"), [

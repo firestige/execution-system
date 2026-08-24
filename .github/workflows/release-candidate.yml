@@ -11,6 +11,16 @@ on:
         description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
         required: true
         type: string
+  workflow_call:
+    inputs:
+      candidate_tag:
+        description: RC tag matching the stable package version, for example 0.1.1-rc.1
+        required: true
+        type: string
+      local_manual_e2e_evidence:
+        description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
+        required: true
+        type: string
 
 permissions:
   contents: write

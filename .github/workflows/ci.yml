@@ -3,9 +3,20 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
+    inputs:
+      release_candidate:
+        description: Run the release-candidate publisher from the selected ref
+        required: false
+        default: false
+        type: boolean
+      candidate_tag:
+        description: RC tag matching the stable package version
+        required: false
+        type: string
+      local_manual_e2e_evidence:
+        description: GitHub issue/comment URL recording credentialed local DSH Web E2E
+        required: false
+        type: string
 
 concurrency:
   group: execution-system-${{ github.workflow }}-${{ github.ref }}
@@ -13,6 +24,9 @@ concurrency:
 
 jobs:
   verify:
+    if: ${{ github.event_name == 'pull_request' || inputs.release_candidate != true }}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout superproject authority workspace
@@ -75,3 +89,12 @@ jobs:
           pnpm check:generated
           pnpm harness static
           pnpm harness feasibility
+
+  release-candidate:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate == true }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-candidate.yml
+    with:
+      candidate_tag: ${{ inputs.candidate_tag }}
+      local_manual_e2e_evidence: ${{ inputs.local_manual_e2e_evidence }}
