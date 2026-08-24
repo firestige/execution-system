@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadExecutionInstallationConfig } from "../src/configuration/index.js";
+
 type JsonRecord = Record<string, any>;
 
 export type LocalE2EPreparationResult = Readonly<{
@@ -37,6 +39,45 @@ async function writeIfMissing(file: string, value: string): Promise<void> {
   }
 }
 
+async function writeOrRepairGeneratedConfig(
+  file: string,
+  config: JsonRecord,
+  legacyPaths: Readonly<{ worktree: string; workspaceRoot: string; stateRoot: string; credentialStorePath: string }>,
+): Promise<void> {
+  try {
+    await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      mode: 0o600,
+    });
+    return;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+  }
+
+  let existing: JsonRecord;
+  try { existing = JSON.parse(await readFile(file, "utf8")) as JsonRecord; }
+  catch { return; }
+  const paths = existing.paths as JsonRecord | undefined;
+  if (paths === undefined
+    || paths.repositoryRoot !== legacyPaths.worktree
+    || paths.workspaceRoot !== legacyPaths.workspaceRoot
+    || !Array.isArray(paths.allowedWorktreeRoots)
+    || paths.allowedWorktreeRoots.length !== 1
+    || paths.allowedWorktreeRoots[0] !== legacyPaths.workspaceRoot
+    || paths.stateRoot !== legacyPaths.stateRoot
+    || paths.credentialStorePath !== legacyPaths.credentialStorePath) return;
+
+  existing.paths = {
+    ...paths,
+    workspaceRoot: legacyPaths.worktree,
+    allowedWorktreeRoots: [legacyPaths.worktree],
+  };
+  const temporary = `${file}.path-scope-${String(process.pid)}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(existing, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temporary, file);
+}
+
 export async function prepareLocalE2E(
   input: LocalE2EPreparationInput,
   run: CommandRunner = async (command, args, cwd) => {
@@ -61,8 +102,8 @@ export async function prepareLocalE2E(
   const config = structuredClone(input.defaults);
   config.paths = {
     repositoryRoot: worktree,
-    workspaceRoot: path.dirname(worktree),
-    allowedWorktreeRoots: [path.dirname(worktree)],
+    workspaceRoot: worktree,
+    allowedWorktreeRoots: [worktree],
     stateRoot: stateDirectory,
     credentialStorePath: credentialFile,
   };
@@ -75,7 +116,12 @@ export async function prepareLocalE2E(
     credentialRef: "DEEPSEEK_API_KEY",
   };
   await Promise.all([
-    writeIfMissing(configFile, `${JSON.stringify(config, null, 2)}\n`),
+    writeOrRepairGeneratedConfig(configFile, config, {
+      worktree,
+      workspaceRoot: path.dirname(worktree),
+      stateRoot: stateDirectory,
+      credentialStorePath: credentialFile,
+    }),
     writeIfMissing(credentialFile, "version: 1\nrefs:\n  DEEPSEEK_API_KEY: replace-with-the-provider-key\n"),
   ]);
 
@@ -198,6 +244,7 @@ export async function reconcileLocalE2EDshProfile(
 async function main(): Promise<void> {
   const executionRoot = path.resolve(import.meta.dirname, "..");
   const result = await prepareLocalE2E(await resolveLocalE2EPreparationInput(executionRoot));
+  await loadExecutionInstallationConfig(result.configFile);
   const dsh = await reconcileLocalE2EDshProfile({
     dshHome: process.env.DSH_HOME ?? path.join(homedir(), ".dsh"),
     profile: "web",

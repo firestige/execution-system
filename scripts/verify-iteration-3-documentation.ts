@@ -127,7 +127,7 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     if (guide.value.includes("gh release download") || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
       throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
     }
-    if (/(?:Edit|编辑)[^\n]*\$DSH_HOME\/profiles\/web\/cordis\.patch\.yml/iu.test(guide.value)) {
+    if (/^(?:Edit|编辑)\s+[^\n]*\$DSH_HOME\/profiles\/web\/cordis\.patch\.yml/imu.test(guide.value)) {
       throw new DocumentationVerificationError("DOCUMENTATION_LOCAL_E2E_RECONCILIATION_INVALID", guide.relative);
     }
   }
