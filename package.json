@@ -38,6 +38,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
     "release:artifacts": "node --import tsx scripts/build-release-artifacts.ts",
+    "release:verify": "node --import tsx scripts/verify-release-artifacts.ts",
     "release:workflow-assets": "node --import tsx scripts/build-workflow-release-assets.ts"
   },
   "dependencies": {

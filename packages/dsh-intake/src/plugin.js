@@ -109,10 +109,16 @@ export async function createPluginRuntime(config, options = {}) {
     control.attach(binding.deliveryId, binding.correlation);
     sessionByCorrelation.set(binding.correlation, binding.sessionKey);
   }
-  await application.start();
+  try {
+    await application.start();
+  } catch (cause) {
+    try { await application.close(); } catch { /* preserve the first startup failure */ }
+    throw cause;
+  }
   const service = new api.WorkflowIntakeService(Object.freeze({ application, control }));
   const active = new Set();
   let accepting = true;
+  let closePromise;
 
   async function captureImages(images, attachmentStore, signal) {
     const captured = [];
@@ -162,14 +168,14 @@ export async function createPluginRuntime(config, options = {}) {
         return result;
       }
       await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: delivery.deliveryId, worktree: delivery.worktree }));
-      void execution.then(async (result) => {
+      void track(execution.then(async (result) => {
         try { await options.present?.(Object.freeze({ sessionKey: input.sessionKey, text: api.renderIntakeResult(result, 4096) })); }
         catch { /* presentation is not Delivery control */ }
         if (result.kind === "TERMINAL" || result.kind === "ERROR") {
           await bindings.detach(delivery.deliveryId);
           sessionByCorrelation.delete(correlation);
         }
-      }).catch(() => undefined);
+      })).catch(() => undefined);
       return Object.freeze({ kind: "START_UNCERTAIN", worktree: delivery.worktree, deliveryId: delivery.deliveryId });
     }
     if (operation.operation === "list") return service.invoke(Object.freeze({ operation: "list", correlation }));
@@ -214,9 +220,9 @@ export async function createPluginRuntime(config, options = {}) {
     return control.answerAction(Object.freeze({ correlation: binding.correlation, prompt: Object.freeze({ text: input.text, attachments }) }));
   }
 
-  return Object.freeze({ application, service, control, bindings, invokeForSession, answerForSession,
-    async close() {
-      if (!accepting) return;
+  function close() {
+    if (closePromise !== undefined) return closePromise;
+    closePromise = (async () => {
       accepting = false;
       await Promise.race([
         Promise.allSettled([...active]),
@@ -224,8 +230,11 @@ export async function createPluginRuntime(config, options = {}) {
       ]);
       await application.close();
       attachmentBytes.clear();
-    },
-  });
+    })();
+    return closePromise;
+  }
+
+  return Object.freeze({ application, service, control, bindings, invokeForSession, answerForSession, close });
 }
 
 function commandTurn(rawInput) {

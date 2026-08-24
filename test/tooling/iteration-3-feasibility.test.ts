@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import path from "node:path";
 
 import {
   probeCordisIsolation,
@@ -27,6 +28,16 @@ describe("Iteration 3 locked DSH feasibility", () => {
     expect(skill.summary.invocation).toEqual({ modelInvocable: false, userInvocable: true });
     expect(skill.content).toContain("workflow_execution_activate");
     expect(skill.content).toContain("exactly once");
+  });
+
+  it("discovers the production skill root and loads only the frozen Intake tool instruction", async () => {
+    const skill = await probeDshSkillFilesystem(path.resolve(import.meta.dirname, "../../packages/dsh-intake/skills"));
+
+    expect(skill.summary).toEqual({ name: "workflow-execution", invocation: { modelInvocable: false, userInvocable: true } });
+    expect(skill.content).toContain("workflow_execution_intake");
+    expect(skill.content.match(/workflow_execution_intake/gu)).toHaveLength(1);
+    expect(skill.content).toContain("exactly once");
+    expect(skill.content).not.toMatch(/(?:import\s|require\(|RunnerFactory|DSH-E service|Package validation bypass)/u);
   });
 
   it("proves Cordis isolate is a service realm inside one Context, not a second runtime instance", async () => {

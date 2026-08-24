@@ -171,7 +171,12 @@ describe("execution installation configuration", () => {
       ["yaml-in-json.json", "schemaVersion: execution.config@1.0.0", "CONFIG_PARSE_FAILED"],
       ["json-in-yaml.yaml", JSON.stringify(valid), "CONFIG_PARSE_FAILED"],
       ["alias.yaml", "base: &base { x: 1 }\ncopy: *base\n", "CONFIG_YAML_UNSAFE"],
+      ["custom-tag.yaml", "schemaVersion: !execution execution.config@1.0.0\n", "CONFIG_YAML_UNSAFE"],
+      ["merge-key.yaml", "base: &base { schemaVersion: execution.config@1.0.0 }\n<<: *base\n", "CONFIG_YAML_UNSAFE"],
+      ["non-string-key.yaml", "? [schemaVersion]\n: execution.config@1.0.0\n", "CONFIG_YAML_UNSAFE"],
       ["timestamp.yaml", "schemaVersion: 2026-08-23\n", "CONFIG_YAML_UNSAFE"],
+      ["binary.yaml", "schemaVersion: !!binary ZXhlY3V0aW9uLmNvbmZpZ0AxLjAuMA==\n", "CONFIG_YAML_UNSAFE"],
+      ["nan.yaml", "schemaVersion: .nan\n", "CONFIG_YAML_UNSAFE"],
       ["placeholder.json", JSON.stringify({ ...valid, paths: { ...valid.paths, stateRoot: "__REQUIRED__:paths.stateRoot" } }), "CONFIG_REQUIRED_INPUT_MISSING"],
       ["derived.json", JSON.stringify({ ...valid, paths: { ...valid.paths, packageStoreRoot: join(paths.root, "packages") } }), "CONFIG_DERIVED_KEY_FORBIDDEN"],
     ];

@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { verifyExecutionReleaseArtifacts } from "./verify-release-artifacts.js";
+
 const repository = path.resolve(import.meta.dirname, "..");
 const destination = path.resolve(process.argv[2] ?? path.join(repository, "tmp/release"));
 
@@ -43,3 +45,4 @@ const metadata = Object.freeze({
   artifacts: Object.freeze(artifacts),
 });
 await writeFile(path.join(destination, "release-metadata.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+await verifyExecutionReleaseArtifacts(destination);

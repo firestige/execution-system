@@ -20,6 +20,20 @@ afterEach(async () => {
 });
 
 describe("Wave 6 DSH Intake plugin", () => {
+  it("rejects invalid profile config before binding, bootstrap, or startup activation effects", async () => {
+    let factoryCalls = 0;
+    const options = {
+      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      factory: Object.freeze({ async create() { factoryCalls += 1; throw new Error("must not run"); } }),
+    } as any;
+    for (const config of [
+      null, {}, { configFile: "relative", bindingFile: "/tmp/bindings.json" },
+      { configFile: "/tmp/execution.json", bindingFile: "relative" },
+      { configFile: "/tmp/execution.json", bindingFile: "/tmp/bindings.json", credential: "secret" },
+    ]) await expect(createPluginRuntime(config as never, options)).rejects.toThrow("DSH_INTAKE_CONFIG_INVALID");
+    expect(factoryCalls).toBe(0);
+  });
+
   it("publishes the exact DSH bundle, public dependency, and first-party skill without Package content", async () => {
     const packageRoot = path.resolve(import.meta.dirname, "../../packages/dsh-intake");
     const manifest = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) as any;
@@ -264,5 +278,49 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(applicationClosed).toBe(true);
     await expect(runtime.invokeForSession({ sessionKey: "after-close", worktree, operation: parseWsrCommand("list"), images: [] }))
       .resolves.toMatchObject({ kind: "ERROR", code: "APPLICATION_CLOSING" });
+  });
+
+  it("rolls back a failed startup and makes concurrent repeated close join one disposal", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-lifecycle-faults-"));
+    roots.push(root);
+    const config = { configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json") };
+    let failedCloseCalls = 0;
+    const failedApplication = Object.freeze({
+      async start() { throw new Error("startup failed"); }, async execute() { throw new Error("not used"); },
+      async inspect() { throw new Error("not used"); }, async cancel() { throw new Error("not used"); },
+      status() { return { state: "CLOSED" }; }, async close() { failedCloseCalls += 1; },
+    });
+    const control = Object.freeze({
+      async list() { return []; }, attach() {}, async waitForDelivery() { return undefined; },
+      async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); },
+      async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
+    });
+    await expect(createPluginRuntime(config, {
+      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      factory: Object.freeze({ async create() { return failedApplication; } }), control,
+    } as any)).rejects.toThrow("startup failed");
+    expect(failedCloseCalls).toBe(1);
+
+    let resolveClose!: () => void;
+    const closeBoundary = new Promise<void>((resolve) => { resolveClose = resolve; });
+    let closeCalls = 0;
+    const application = Object.freeze({
+      async start() {}, async execute() { throw new Error("not used"); }, async inspect() { throw new Error("not used"); },
+      async cancel() { throw new Error("not used"); }, status() { return { state: "READY" }; },
+      async close() { closeCalls += 1; await closeBoundary; },
+    });
+    const runtime: any = await createPluginRuntime(config, {
+      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      factory: Object.freeze({ async create() { return application; } }), control,
+    } as any);
+    const first = runtime.close();
+    const second = runtime.close();
+    let secondSettled = false;
+    void second.then(() => { secondSettled = true; });
+    await expect.poll(() => closeCalls).toBe(1);
+    expect(secondSettled).toBe(false);
+    resolveClose();
+    await Promise.all([first, second]);
+    expect(closeCalls).toBe(1);
   });
 });

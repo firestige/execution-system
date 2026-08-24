@@ -106,7 +106,7 @@ export function probeDshBundleLoader(): {
   }
 }
 
-export async function probeDshSkillFilesystem(): Promise<{
+export async function probeDshSkillFilesystem(skillRoot = path.join(fixtureRoot, "skills")): Promise<{
   readonly packageVersion: string;
   readonly summary: {
     readonly name: string;
@@ -133,7 +133,7 @@ export async function probeDshSkillFilesystem(): Promise<{
   const provider = new Provider(
     context,
     { signal: controller.signal, invalidate: () => undefined },
-    { includeDefaultRoots: false, bundledSkillDir: path.join(fixtureRoot, "skills"), watch: false },
+    { includeDefaultRoots: false, bundledSkillDir: skillRoot, watch: false },
   );
   try {
     const candidates = await provider.list({});
