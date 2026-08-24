@@ -296,22 +296,31 @@ export async function apply(ctx, config) {
     recordInput: false,
     async handler(invocation) {
       return run((async () => {
+        let query = false;
         try {
           const operation = parseWsrCommand(invocation.rawInput);
+          query = operation.operation === "list" || operation.operation === "status";
+          const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+          if (!query) presentToDshSession(invocation.agent, createIntakePresentation(
+            String(invocation.commandId), "command-accepted", {},
+          ));
           if (invocation.attachments.length > 0 && !["create", "action-finish"].includes(operation.operation)) {
-            const { createIntakePresentation, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
-            return { kind: "error", text: serializeIntakePresentation(createIntakePresentation(
+            const presentation = createIntakePresentation(
               `presentation-${randomUUID()}`, "error", { code: "WSR_COMMAND_INVALID", message: "WSR_COMMAND_INVALID" },
-            ), 4096) };
+            );
+            if (!query) presentToDshSession(invocation.agent, presentation);
+            return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
           }
           const result = await runtime.invokeForSession({ sessionKey: String(invocation.agent.id), worktree: worktree(), operation, turnText: commandTurn(invocation.rawInput), images: invocation.attachments, attachmentStore, signal: invocation.signal });
-          const { presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
           const presentation = presentationForIntakeResult(`presentation-${randomUUID()}`, result, 4096);
+          if (!query) presentToDshSession(invocation.agent, presentation);
           return { kind: result.kind === "ERROR" ? "error" : "success", text: serializeIntakePresentation(presentation, 4096) };
         } catch (cause) {
           const { createIntakePresentation, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
           const code = typeof cause?.code === "string" ? cause.code : "DSH_INTAKE_FAILED";
-          return { kind: "error", text: serializeIntakePresentation(createIntakePresentation(`presentation-${randomUUID()}`, "error", { code, message: code }), 4096) };
+          const presentation = createIntakePresentation(`presentation-${randomUUID()}`, "error", { code, message: code });
+          if (!query) presentToDshSession(invocation.agent, presentation);
+          return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
         }
       })());
     },

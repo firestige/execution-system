@@ -4,7 +4,7 @@ Preview Intake Adapter distribution. It owns `/wsr`, the DSH-I-only `workflow_ex
 
 Candidate package identities are `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake`, both at `0.1.1` for this compatibility tuple.
 
-Install the two release artifacts into locked DSH's built-in `web` profile in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag). The Intake bundle supplies a bounded WSR command view and an additive current-session WSR placeholder in the sidebar footer; a new custom profile contains only `dsh-base` and is not an interactive Intake surface:
+Install the two release artifacts into locked DSH's built-in `web` profile in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag). The Intake bundle supplies a bounded WSR chat node and read-only current-session sidebar tabs; a new custom profile contains only `dsh-base` and is not an interactive Intake surface:
 
 ```sh
 dsh plugin --profile web add --workspace-root /absolute/path/workflow-self-recursive-execution-system-0.1.1.tgz
@@ -31,9 +31,9 @@ dsh web
 
 The locked DSH preview does not use launcher or app help as a plugin-command catalog. Profile-level help belongs to the configured app and may keep that app running. The exact WSR command reference is below; plugin startup never creates a Delivery.
 
-The sidebar projection is intentionally simple. It displays the latest `wsr.presentation@1.0.0` event for the currently selected session, including command acknowledgement, empty/list, status, Action output/input, terminal result, and bounded error. It does not replace the workspace/session browser, create an assistant message, or control Execution. Switching sessions switches the projection; malformed presentation text is replaced with `WSR_PRESENTATION_INVALID` rather than shown raw.
+The surface boundary is deliberate. The sidebar tabs actively query Delivery list and current Delivery status and display only those read-only control-plane results. The chat timeline owns interactive command acknowledgement, running state, Action output/input request, ordinary visible user answers, bounded errors, and terminal result. Neither surface creates an assistant message or controls Execution. Switching sessions switches the sidebar query target; malformed presentation text is replaced with `WSR_PRESENTATION_INVALID` rather than shown raw.
 
-Commands:
+Closed operations (the `list` and `status` slash aliases remain compatibility/automation surfaces, while sidebar tabs are the default user entry):
 
 ```text
 /wsr list

@@ -127,6 +127,37 @@ async function fixture(options: Readonly<{
 }
 
 describe("Wave 6 production bootstrap", () => {
+  it("keeps later Delivery waiters registered when an earlier waiter times out", async () => {
+    const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }));
+    const first = broker.waitForDelivery("correlation-waiters", 1);
+    const second = broker.waitForDelivery("correlation-waiters", 100);
+    await expect(first).resolves.toBeUndefined();
+    broker.expect("/waiter-worktree", "correlation-waiters");
+    broker.register("delivery-waiter", "/waiter-worktree", "fixture@1.0.0");
+    await expect(second).resolves.toMatchObject({ deliveryId: "delivery-waiter" });
+  });
+
+  it("projects an ordinary attachment-free chat answer into a string Action response schema", async () => {
+    const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }));
+    broker.register("delivery-string-input", "/worktree", "fixture@1.0.0");
+    const episode = {
+      thread: { delivery: { deliveryIdentity: "delivery-string-input", deliveryGeneration: 1 }, threadIdentity: "thread-1" },
+      action: "action-1", invocationIdentity: "invocation-1", attempt: 1,
+    } as never;
+    const response = broker.bridge("delivery-string-input").requestInput({
+      identity: "request-string" as never,
+      episode,
+      prompt: { question: "What should change?" },
+      responseSchema: { type: "string" },
+    });
+
+    expect(broker.respond("delivery-string-input", "ANSWER", { text: "ordinary answer", attachments: [] })).toBe(true);
+    await expect(response).resolves.toMatchObject({
+      ok: true,
+      value: { kind: "ANSWER", requestIdentity: "request-string", content: "ordinary answer" },
+    });
+  });
+
   it("bridges Workflow Wait through the bound Intake with exact JSON correlation", async () => {
     const presentations: any[] = [];
     const broker = new ProductionInteractionBroker(Object.freeze({ async publish(message: any) { presentations.push(message); } }));

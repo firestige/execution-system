@@ -22,7 +22,7 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 2. 复制 `config/defaults/execution.default.yaml`，替换全部 `__REQUIRED__` 值，并在外置 DSH credential 文件中 provision 所引用的 API key（格式为 `version: 1`、`refs: ...`）。
 3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，再以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志。
 4. 为 plugin row 填写 absolute `configFile` 与 `bindingFile`，再执行 `dsh --profile web --dump-config` 和 `dsh --profile web --help` 验证。
-5. 从目标 worktree 启动 `dsh --profile web`，使用 `/wsr create implementation-workflow@0.3.0`、`/wsr list` 与 `/wsr status`。重启 Intake 时会保留 Manifest/current-slot 与 private binding state 以供恢复。
+5. 从目标 worktree 启动 `dsh --profile web`。只读查询使用 sidebar 的 Deliveries 与 Current status tabs；chat 用于 `/wsr create implementation-workflow@0.3.0`、普通 Action 答复与 `/wsr action finish`。`/wsr list` 和 `/wsr status` operation 继续保留给 compatibility 与 automation。重启 Intake 时会保留 Manifest/current-slot 与 private binding state 以供恢复。
 
 默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 

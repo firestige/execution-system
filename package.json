@@ -42,6 +42,7 @@
     "release:verify": "node --import tsx scripts/verify-release-artifacts.ts",
     "release:policy": "node --import tsx scripts/release-promotion-policy.ts",
     "qualify:dsh-interactive": "node --import tsx scripts/qualify-dsh-interactive-intake.ts",
+    "qualify:dsh-product": "node --import tsx scripts/qualify-dsh-product-e2e.ts",
     "release:workflow-assets": "node --import tsx scripts/build-workflow-release-assets.ts",
     "verify:iteration3-docs": "node --import tsx scripts/verify-iteration-3-documentation.ts . ..",
     "verify:dsh-intake": "node --import tsx scripts/verify-dsh-intake-distribution.ts",

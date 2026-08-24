@@ -108,7 +108,9 @@ export class ProductionInteractionBroker {
       return true;
     }
     this.#pending.delete(deliveryId);
-    const content = Object.freeze({ text: prompt.text, attachments: prompt.attachments }) as unknown as FrozenJsonValue;
+    const content = pending.request.responseSchema.type === "string" && prompt.attachments.length === 0
+      ? prompt.text
+      : Object.freeze({ text: prompt.text, attachments: prompt.attachments }) as unknown as FrozenJsonValue;
     pending.resolve(Object.freeze({ ok: true, value: Object.freeze({
       kind,
       requestIdentity: pending.request.identity,

@@ -9,14 +9,14 @@ const require = createRequire(import.meta.url);
 const repository = path.resolve(import.meta.dirname, "..");
 const defaultWorktree = path.resolve(repository, "..");
 
-function dshExecutable(): string {
+export function dshExecutable(): string {
   const manifestPath = require.resolve("@deepseek-ai/dsh/package.json");
   const manifest = require(manifestPath) as { readonly bin?: { readonly dsh?: string } };
   if (manifest.bin?.dsh === undefined) throw new TypeError("DSH_EXECUTABLE_UNAVAILABLE");
   return path.resolve(path.dirname(manifestPath), manifest.bin.dsh);
 }
 
-function runDsh(dshHome: string, cwd: string, args: readonly string[]): void {
+export function runDsh(dshHome: string, cwd: string, args: readonly string[]): void {
   execFileSync(process.execPath, [dshExecutable(), ...args], {
     cwd,
     env: { ...process.env, DSH_HOME: dshHome },
@@ -25,7 +25,7 @@ function runDsh(dshHome: string, cwd: string, args: readonly string[]): void {
   });
 }
 
-async function waitForWebUrl(child: ChildProcess): Promise<URL> {
+export async function waitForWebUrl(child: ChildProcess): Promise<URL> {
   return await new Promise<URL>((resolve, reject) => {
     let output = "";
     const timer = setTimeout(() => reject(new Error(`DSH_WEB_START_TIMEOUT:${output.slice(-2_000)}`)), 30_000);
@@ -46,7 +46,7 @@ async function waitForWebUrl(child: ChildProcess): Promise<URL> {
   });
 }
 
-async function rpc(url: URL, method: string, payload: unknown): Promise<any> {
+export async function rpc(url: URL, method: string, payload: unknown): Promise<any> {
   const rpcId = `qualification-${method}`;
   const response = await fetch(new URL(`/api/${method}`, url), {
     method: "POST",
@@ -59,7 +59,7 @@ async function rpc(url: URL, method: string, payload: unknown): Promise<any> {
   return body.result;
 }
 
-interface CdpConnection {
+export interface CdpConnection {
   readonly events: unknown[];
   call(method: string, params?: Readonly<Record<string, unknown>>): Promise<any>;
   close(): void;
@@ -106,7 +106,7 @@ function chromeExecutable(): string {
   return "google-chrome";
 }
 
-async function waitFor<T>(read: () => Promise<T | undefined>, code: string, timeoutMs = 20_000): Promise<T> {
+export async function waitFor<T>(read: () => Promise<T | undefined>, code: string, timeoutMs = 20_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = await read();
@@ -116,9 +116,12 @@ async function waitFor<T>(read: () => Promise<T | undefined>, code: string, time
   throw new Error(code);
 }
 
-async function launchBrowser(root: string, url: URL): Promise<Readonly<{ child: ChildProcess; cdp: CdpConnection }>> {
+export async function launchBrowser(root: string, url: URL): Promise<Readonly<{ child: ChildProcess; cdp: CdpConnection }>> {
   const profile = path.join(root, "chrome-profile");
   await mkdir(profile, { recursive: true });
+  // A reused browser profile retains this file after Chrome exits. Remove the
+  // stale port before relaunch so readiness cannot resolve to the dead process.
+  await rm(path.join(profile, "DevToolsActivePort"), { force: true });
   const child = spawn(chromeExecutable(), [
     "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
     "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
@@ -143,13 +146,13 @@ async function launchBrowser(root: string, url: URL): Promise<Readonly<{ child: 
   return Object.freeze({ child, cdp });
 }
 
-async function evaluate(cdp: CdpConnection, expression: string): Promise<any> {
+export async function evaluate(cdp: CdpConnection, expression: string): Promise<any> {
   const response = await cdp.call("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }) as any;
   if (response.exceptionDetails !== undefined) throw new Error(`DSH_BROWSER_EVALUATION_FAILED:${JSON.stringify(response.exceptionDetails)}`);
   return response.result?.value;
 }
 
-async function dismissBlockingPrompts(cdp: CdpConnection): Promise<void> {
+export async function dismissBlockingPrompts(cdp: CdpConnection): Promise<void> {
   await waitFor(async () => {
     const ready = await evaluate(cdp, `(() => {
       const button = [...document.querySelectorAll('button')].find((candidate) =>
@@ -161,13 +164,15 @@ async function dismissBlockingPrompts(cdp: CdpConnection): Promise<void> {
   }, "DSH_BROWSER_BLOCKING_PROMPT_UNAVAILABLE");
 }
 
-async function submitBrowserCommand(cdp: CdpConnection, line: string): Promise<void> {
+export async function submitBrowserCommand(cdp: CdpConnection, line: string): Promise<void> {
   await waitFor(async () => await evaluate(cdp, `(() => {
     const input = document.querySelector('textarea,[contenteditable="true"]');
     if (!input) return false;
+    if (input instanceof HTMLTextAreaElement && (input.disabled || input.readOnly)) return false;
+    if (input instanceof HTMLElement && input.getAttribute('aria-disabled') === 'true') return false;
     input.focus();
     return true;
-  })()`) === true ? true : undefined, "DSH_BROWSER_COMPOSER_UNAVAILABLE");
+  })()`) === true ? true : undefined, "DSH_BROWSER_COMPOSER_UNAVAILABLE", 120_000);
   await cdp.call("Input.insertText", { text: line });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
@@ -293,7 +298,13 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
     }, "DSH_BROWSER_SESSION_CREATE_FAILED");
     const catalog = await rpc(webUrl, "commands/list", { args: { agentId: sessionId } });
     if (catalog.ok !== true || !catalog.value?.some((entry: any) => entry.name === "wsr")) throw new Error("DSH_WSR_COMMAND_MISSING");
-    await submitBrowserCommand(cdp, "/wsr list");
+    await waitFor(async () => await evaluate(cdp!, `(() => {
+      const button = [...document.querySelectorAll('[data-wsr-sidebar="true"] button')]
+        .find((candidate) => candidate.textContent?.trim() === 'Deliveries');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`) === true ? true : undefined, "DSH_WSR_LIST_TAB_UNAVAILABLE");
     const history = await waitFor(async () => {
       const candidate = await rpc(webUrl, "session.history", { sessionId });
       const commandEvents = candidate.value?.events?.filter((entry: any) => entry.event.type.startsWith("command/"));
@@ -334,10 +345,16 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       })`);
       throw new Error(`DSH_WSR_BROWSER_PRESENTATION_MISSING:${JSON.stringify({ ...diagnostic, durableEvents: events, cdpEvents: cdp.events.slice(-20) })}`, { cause });
     }
-    if (!presentation.observedKinds.includes("command-accepted") || !presentation.observedKinds.includes("delivery-list")) {
+    if (!presentation.observedKinds.includes("delivery-list")) {
       throw new Error(`DSH_WSR_BROWSER_LIFECYCLE_MISSING:${JSON.stringify(presentation.observedKinds)}`);
     }
-    await submitBrowserCommand(cdp, "/wsr status");
+    await waitFor(async () => await evaluate(cdp!, `(() => {
+      const button = [...document.querySelectorAll('[data-wsr-sidebar="true"] button')]
+        .find((candidate) => candidate.textContent?.trim() === 'Current status');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`) === true ? true : undefined, "DSH_WSR_STATUS_TAB_UNAVAILABLE");
     const errorHistory = await waitFor(async () => {
       const candidate = await rpc(webUrl, "session.history", { sessionId });
       const commandEvents = candidate.value?.events?.filter((entry: any) => entry.event.type.startsWith("command/"));

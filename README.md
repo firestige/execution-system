@@ -22,7 +22,7 @@ This repository is part of workflow-self-recursive's architecture-first develope
 2. Copy `config/defaults/execution.default.yaml`, replace each `__REQUIRED__` value, and provision the referenced API key in the external DSH credential file (`version: 1`, `refs: ...`).
 3. In a DSH profile with an interactive app (the shipped `web` profile is the reference), first run `dsh plugin --profile web add --workspace-root <absolute-execution-system-tarball>`, then run the same command with `<absolute-dsh-intake-tarball>`. The flag is required by the workspace created by the current DSH preview.
 4. Set the plugin row's absolute `configFile` and `bindingFile`, then verify it with `dsh --profile web --dump-config` and `dsh --profile web --help`.
-5. Start `dsh --profile web` from the target worktree. Use `/wsr create implementation-workflow@0.3.0`, `/wsr list`, and `/wsr status`. Restarting the Intake preserves Manifest/current-slot and private binding state for recovery.
+5. Start `dsh --profile web` from the target worktree. Use the sidebar Deliveries and Current status tabs for read-only queries; use chat for `/wsr create implementation-workflow@0.3.0`, ordinary Action answers, and `/wsr action finish`. The `/wsr list` and `/wsr status` operations remain available for compatibility and automation. Restarting the Intake preserves Manifest/current-slot and private binding state for recovery.
 
 The default Source is the configured `firestige/workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
 

@@ -101,6 +101,7 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
 
   for (const guide of guideValues.slice(0, 4)) {
     includesAll(guide.value, [...IDENTITIES, ...COMMANDS], guide.relative);
+    includesAll(guide.value, ["sidebar tabs", "compatibility/automation", "chat timeline"], guide.relative);
     includesAll(guide.value, ["node --version", "pnpm --version", "npm install --global pnpm", "dsh --version", "@deepseek-ai/dsh@0.1.1-rc.2", "--dump-config", "dsh --help", "dsh web", "plugin --profile web add", "plugin --profile web update", "plugin --profile web remove", "webserver", "ui-conversation", "ui-commands"], guide.relative);
     if (guide.value.includes("dsh --profile web --help")) {
       throw new DocumentationVerificationError("DOCUMENTATION_IDENTITY_MISMATCH", `${guide.relative}: interactive profile help must not be used as launcher help`);
@@ -141,6 +142,9 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     "workflow_execution_intake",
     "/workflow-execution",
     ...COMMANDS,
+    "sidebar tabs",
+    "compatibility/automation",
+    "chat timeline",
   ], "packages/dsh-intake/README.md");
   includesAll(skill, ["workflow_execution_intake", "action-finish"], "packages/dsh-intake/skills/workflow-execution/SKILL.md");
   includesAll(defaultYaml, schema.required ?? [], "config/defaults/execution.default.yaml");
