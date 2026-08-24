@@ -20,16 +20,13 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain("local_manual_e2e_evidence:");
   });
 
-  it("qualifies the RC in the exact sibling authority layout used by component tests", async () => {
+  it("qualifies the RC from the super-project authority workspace at the exact Execution pin", async () => {
     const candidate = await readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8");
 
-    expect(candidate).toContain("path: execution-system");
-    expect(candidate).toContain("repository: firestige/system-contracts");
-    expect(candidate).toContain("ref: c8e090f80073e3a4a37063d2d0165f190f2ec7f1");
-    expect(candidate).toContain("path: system-contracts");
-    expect(candidate).toContain("repository: firestige/workflow-package");
-    expect(candidate).toContain("ref: 0ff4bc1e29e58542c644e47c738051ef46cb8bbf");
-    expect(candidate).toContain("path: workflow-package");
+    expect(candidate).toContain("repository: firestige/workflow-self-recursive");
+    expect(candidate).toContain("ref: fix/iter3-interactive-intake-e2e");
+    expect(candidate).toContain("submodules: recursive");
+    expect(candidate).toContain('test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"');
     expect(candidate).toContain("Install frozen contract checker dependencies");
     expect(candidate).toContain("working-directory: execution-system");
     expect(candidate).toContain('"$GITHUB_WORKSPACE/execution-system"');

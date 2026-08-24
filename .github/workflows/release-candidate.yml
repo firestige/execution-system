@@ -34,25 +34,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout exact candidate
+      - name: Checkout super-project qualification authority workspace
         uses: actions/checkout@v6
         with:
+          repository: firestige/workflow-self-recursive
+          ref: fix/iter3-interactive-intake-e2e
           fetch-depth: 0
-          path: execution-system
+          submodules: recursive
 
-      - name: Checkout frozen Workflow Contract
-        uses: actions/checkout@v6
-        with:
-          repository: firestige/system-contracts
-          ref: c8e090f80073e3a4a37063d2d0165f190f2ec7f1
-          path: system-contracts
-
-      - name: Checkout qualified Workflow Package candidate
-        uses: actions/checkout@v6
-        with:
-          repository: firestige/workflow-package
-          ref: 0ff4bc1e29e58542c644e47c738051ef46cb8bbf
-          path: workflow-package
+      - name: Verify exact Execution candidate pin
+        run: test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
