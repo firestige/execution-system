@@ -58,4 +58,15 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
       code: "DOCUMENTATION_INSTALL_SOURCE_INVALID",
     });
   });
+
+  it("rejects host prerequisites that are installed before checking whether they already exist", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, value.replace("```sh\n", "```sh\nnpm install --global pnpm @deepseek-ai/dsh@0.1.1-rc.2\n"));
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_PREREQUISITE_INSTALL_INVALID",
+    });
+  });
 });
