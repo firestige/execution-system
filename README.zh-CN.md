@@ -26,7 +26,7 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 
 默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 
-Workflow Package Release 以单 Package 为范围：tag 为 `workflow-package/<name>/v<version>`，且只包含 archive、对应的 package-release descriptor 与 SHA-256 checksum。exact 与 latest selector 枚举同一个 configured Release 集合；latest 只在目标 Package 内按 SemVer 排序并排除 GitHub/SemVer prerelease，exact 则可以选择 prerelease。不可变的 initial `0.3.0` cohort descriptor 也由同一枚举算法解释。本地 READY 与 sticky-latest 在任何 Source 请求之前保持优先。使用 `pnpm release:workflow-assets -- <package-directory> <destination> <40-character-revision>` 构建单个 Release。
+Workflow Package Release 以单 Package 为范围：tag 为 `workflow-package/<name>/v<version>`，且只包含 archive、对应的 package-release descriptor 与 SHA-256 checksum。exact 与 latest selector 枚举同一个 configured Release 集合；latest 只在目标 Package 内按 SemVer 排序并排除 GitHub/SemVer prerelease，exact 则可以选择 prerelease。不可变的 initial `0.3.0` cohort descriptor 也由同一枚举算法解释。本地 READY 与 sticky-latest 在任何 Source 请求之前保持优先。使用 `pnpm release:workflow-assets <package-directory> <destination> <40-character-revision>` 构建单个 Release。
 
 完整步骤见 repository-owned [本地发布前 E2E 指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.zh-CN.md)、final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。Release automation 与用户安装保持为不同 surface。
 

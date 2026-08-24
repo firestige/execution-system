@@ -15,6 +15,17 @@ import type { DeliveryActivationProjector } from "./lifecycle.js";
 import type { DeliveryManifest } from "./manifest.js";
 
 type Document = Record<string, any>;
+type ProjectedTaskPrompt = Readonly<{
+  text: string;
+  attachments: readonly Readonly<{
+    identity: string;
+    filename: string;
+    mediaType: string;
+    byteLength: number;
+    digest: string;
+    content: Readonly<{ encoding: "base64"; data: string }>;
+  }>[];
+}>;
 
 function deepFreeze<T>(value: T, seen = new Set<object>()): T {
   if (value === null || typeof value !== "object" || seen.has(value)) return value;
@@ -67,9 +78,9 @@ function admittedNode(node: Document): Document {
   throw new TypeError(`unsupported admitted node '${String(node.id)}'`);
 }
 
-function initialValue(field: Document, taskPrompt: string): FrozenJsonValue {
+function initialValue(field: Document, taskPrompt: ProjectedTaskPrompt): FrozenJsonValue {
   const name = String(field.name).toLowerCase();
-  if (["task", "taskprompt", "intent", "request", "goal"].some((token) => name.includes(token))) return taskPrompt;
+  if (["task", "taskprompt", "intent", "request", "goal"].some((token) => name.includes(token))) return taskPrompt.text;
   if (field.name === "currentGoal") return "goal.delivery";
   if (field.name === "currentRung") return "rung.delivery";
   if (field.name === "status") return "pending";
@@ -80,12 +91,13 @@ function initialValue(field: Document, taskPrompt: string): FrozenJsonValue {
   return {};
 }
 
-function initialActionInput(action: Document, taskPrompt: string, workspace: string): FrozenJsonValue {
+function initialActionInput(action: Document, taskPrompt: ProjectedTaskPrompt, workspace: string): FrozenJsonValue {
   const schema = action.inputSchema as Document;
   const properties = schema?.properties as Document | undefined;
   const required = Array.isArray(schema?.required) ? schema.required as string[] : [];
   const entries = required.map((name): readonly [string, FrozenJsonValue] => {
-    if (name === "request" || name === "intake" || name === "intent") return [name, taskPrompt];
+    if (name === "request" || name === "intake" || name === "intent") return [name, taskPrompt.text];
+    if (name === "prompt" || name === "taskPrompt") return [name, taskPrompt as FrozenJsonValue];
     if (name === "repository" || name === "worktree") return [name, workspace];
     const type = properties?.[name]?.type;
     if (type === "string") return [name, ""];
@@ -97,7 +109,7 @@ function initialActionInput(action: Document, taskPrompt: string, workspace: str
   return Object.fromEntries(entries) as FrozenJsonValue;
 }
 
-async function verifyPromptSnapshot(manifest: DeliveryManifest): Promise<string> {
+async function verifyPromptSnapshot(manifest: DeliveryManifest): Promise<ProjectedTaskPrompt> {
   const snapshotPath = manifest.prompt.snapshotPath;
   if (!(await stat(snapshotPath)).isDirectory()) throw new TypeError("TaskPrompt snapshot is unavailable");
   const record = await json(path.join(snapshotPath, "snapshot.json"));
@@ -109,16 +121,25 @@ async function verifyPromptSnapshot(manifest: DeliveryManifest): Promise<string>
   const text = await readFile(path.join(snapshotPath, String(record.textFile)), "utf8");
   const textDigest = rawDigest(Buffer.from(text, "utf8"));
   const attachmentBindings: Document[] = [];
+  const projectedAttachments: ProjectedTaskPrompt["attachments"][number][] = [];
   for (const attachment of record.attachments as Document[]) {
     const bytes = await readFile(path.join(snapshotPath, String(attachment.file)));
     if (bytes.byteLength !== attachment.byteLength || rawDigest(bytes) !== attachment.digest) throw new TypeError("TaskPrompt attachment is invalid");
     attachmentBindings.push({ identity: attachment.identity, filename: attachment.filename, mediaType: attachment.mediaType, byteLength: attachment.byteLength, digest: attachment.digest });
+    projectedAttachments.push(Object.freeze({
+      identity: attachment.identity,
+      filename: attachment.filename,
+      mediaType: attachment.mediaType,
+      byteLength: attachment.byteLength,
+      digest: attachment.digest,
+      content: Object.freeze({ encoding: "base64", data: bytes.toString("base64") }),
+    }));
   }
   if (canonicalDigest({ textDigest, attachments: attachmentBindings }) !== record.identity
     || canonicalDigest({ taskPromptIdentity: record.identity, textDigest, attachments: attachmentBindings }) !== record.digest) {
     throw new TypeError("TaskPrompt snapshot content identity is invalid");
   }
-  return text;
+  return Object.freeze({ text, attachments: Object.freeze(projectedAttachments) });
 }
 
 export class DeliveryAdmissionProjector implements DeliveryActivationProjector {

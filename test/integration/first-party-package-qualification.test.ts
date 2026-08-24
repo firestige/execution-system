@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
 const contractRoot = path.join(repositoryRoot, "system-contracts/workflow-dsl");
-const workflowPackageCommit = "ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb";
+const initialWorkflowPackageCommit = "ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb";
 
 function qualify(definition: string, root = repositoryRoot) {
   return spawnSync(process.execPath, [
@@ -15,14 +15,25 @@ function qualify(definition: string, root = repositoryRoot) {
   ], { cwd: contractRoot, encoding: "utf8", shell: false });
 }
 
-describe("Wave 4 first-party Package qualification", () => {
+describe("first-party Package qualification", () => {
   it.each([
     ["System Design", "workflow-package/system-design/definition", repositoryRoot],
     ["Implementation", "workflow-package/implementation/definition", repositoryRoot],
   ])("qualifies the %s Package against the frozen 1.1 Contract before Runner projection", (_name, definition, root) => {
-    const identity = spawnSync("git", ["rev-parse", "HEAD"], { cwd: path.join(repositoryRoot, "workflow-package"), encoding: "utf8", shell: false });
-    expect(identity.stdout.trim()).toBe(workflowPackageCommit);
+    const packageName = definition.split("/")[1]!;
+    const currentTree = spawnSync("git", ["rev-parse", `HEAD:${packageName}`], { cwd: path.join(repositoryRoot, "workflow-package"), encoding: "utf8", shell: false });
+    const initialTree = spawnSync("git", ["rev-parse", `${initialWorkflowPackageCommit}:${packageName}`], { cwd: path.join(repositoryRoot, "workflow-package"), encoding: "utf8", shell: false });
+    expect(currentTree.stdout.trim()).toBe(initialTree.stdout.trim());
     const result = qualify(definition, root);
+    expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toMatchObject({
+      status: 0,
+      stdout: expect.stringContaining("PASS: schema, graph/event, authority, corpus-shape and digest closure succeeded"),
+      stderr: "",
+    });
+  });
+
+  it("qualifies the non-initial Hello World Package independently", () => {
+    const result = qualify("workflow-package/hello-world-workflow/definition");
     expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toMatchObject({
       status: 0,
       stdout: expect.stringContaining("PASS: schema, graph/event, authority, corpus-shape and digest closure succeeded"),
