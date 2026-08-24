@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cp, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -19,6 +20,34 @@ import { ProductionInteractionBroker } from "../../src/bootstrap/interaction-bro
 const roots: string[] = [];
 const servers: Server[] = [];
 const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
+
+function scopedReleaseNetwork(archive: Uint8Array, archiveUrl: string) {
+  const archiveName = "workflow-package-implementation-workflow-0.3.0.tar.gz";
+  const descriptorUrl = "https://github.example.test/releases/download/scoped/implementation.json";
+  const checksumUrl = `${archiveUrl}.sha256`;
+  const archiveDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+  return async (url: string) => {
+    if (url.includes("/releases?per_page=100&page=1")) return Object.freeze({ status: 200, body: Buffer.from(JSON.stringify([{
+      tag_name: "workflow-package/implementation-workflow/v0.3.0", draft: false, prerelease: false,
+      assets: [
+        { name: archiveName, browser_download_url: archiveUrl },
+        { name: "workflow-package-implementation-workflow-0.3.0.json", browser_download_url: descriptorUrl },
+        { name: `${archiveName}.sha256`, browser_download_url: checksumUrl },
+      ],
+    }])) });
+    if (url === descriptorUrl) return Object.freeze({ status: 200, body: Buffer.from(JSON.stringify({
+      schemaVersion: "workflow-package.package-release@1.0.0", revision: "a".repeat(40),
+      tag: "workflow-package/implementation-workflow/v0.3.0",
+      package: { name: "implementation-workflow", version: "0.3.0", digest: `sha256:${"b".repeat(64)}` },
+      archive: { name: archiveName, sha256: archiveDigest, bytes: archive.byteLength },
+      checksum: { name: `${archiveName}.sha256` },
+    })) });
+    if (url === checksumUrl) return Object.freeze({ status: 200, body: Buffer.from(`${archiveDigest.slice(7)}  ${archiveName}\n`) });
+    return url === archiveUrl
+      ? Object.freeze({ status: 200, body: archive })
+      : Object.freeze({ status: 404, body: new Uint8Array() });
+  };
+}
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -87,7 +116,9 @@ async function fixture(options: Readonly<{
     }),
     network: Object.freeze({ request: async (url: string) => {
       requested.push(url);
-      return options.network?.(url) ?? Object.freeze({ status: 404, body: new Uint8Array() });
+      return options.network?.(url) ?? (url.includes("/releases?per_page=100&page=1")
+        ? Object.freeze({ status: 200, body: Buffer.from("[]") })
+        : Object.freeze({ status: 404, body: new Uint8Array() }));
     } }),
     intake: Object.freeze({ publish: async () => undefined }),
     attachments: Object.freeze({ read: async () => { throw new Error("not requested"); } }),
@@ -182,7 +213,7 @@ describe("Wave 6 production bootstrap", () => {
       worktree, selector: "missing@1.0.0", prompt: { text: "run", attachments: [] },
     })).resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
     expect(requested).toEqual([
-      "https://api.github.example.test/repos/firestige/workflow-package/releases/tags/1.0.0",
+      "https://api.github.example.test/repos/firestige/workflow-package/releases?per_page=100&page=1",
     ]);
 
     await application.close();
@@ -234,9 +265,7 @@ describe("Wave 6 production bootstrap", () => {
       baseUrl: `http://127.0.0.1:${address.port}`,
       deliveryId: "delivery-production-smoke",
       observationEndpoint: `http://127.0.0.1:${observationAddress.port}`,
-      network: async (url) => url === assetUrl
-        ? Object.freeze({ status: 200, body: archive })
-        : Object.freeze({ status: 200, body: Buffer.from(JSON.stringify({ tag_name: "0.3.0", assets: [{ name: path.basename(archivePath), browser_download_url: assetUrl }] })) }),
+      network: scopedReleaseNetwork(archive, assetUrl),
     });
     await writeFile(path.join(worktree, "README.md"), "production bootstrap\n", "utf8");
     execFileSync("git", ["config", "user.email", "runner@example.invalid"], { cwd: worktree });
@@ -287,9 +316,7 @@ describe("Wave 6 production bootstrap", () => {
     const { configFile, dependencies, worktree } = await fixture({
       baseUrl: `http://127.0.0.1:${address.port}`,
       deliveryIds: ["delivery-production-interaction", "delivery-production-parallel"],
-      network: async (url) => url === assetUrl
-        ? Object.freeze({ status: 200, body: archive })
-        : Object.freeze({ status: 200, body: Buffer.from(JSON.stringify({ tag_name: "0.3.0", assets: [{ name: path.basename(archivePath), browser_download_url: assetUrl }] })) }),
+      network: scopedReleaseNetwork(archive, assetUrl),
     });
     await writeFile(path.join(worktree, "README.md"), "production interaction\n", "utf8");
     execFileSync("git", ["config", "user.email", "runner@example.invalid"], { cwd: worktree });
