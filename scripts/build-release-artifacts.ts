@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { verifyExecutionReleaseArtifacts } from "./verify-release-artifacts.js";
+import { verifyDshIntakeDistribution } from "./verify-dsh-intake-distribution.js";
 
 const repository = path.resolve(import.meta.dirname, "..");
 const destination = path.resolve(process.argv[2] ?? path.join(repository, "tmp/release"));
@@ -17,6 +18,7 @@ function pack(directory: string): void {
 }
 
 await mkdir(destination, { recursive: true });
+await verifyDshIntakeDistribution(path.join(repository, "packages/dsh-intake"));
 await Promise.all([
   "workflow-self-recursive-execution-system-0.1.0.tgz",
   "workflow-self-recursive-dsh-intake-0.1.0.tgz",

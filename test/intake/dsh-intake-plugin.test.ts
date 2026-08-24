@@ -135,6 +135,62 @@ describe("Wave 6 DSH Intake plugin", () => {
     await runtime.close();
   });
 
+  it("joins every durable restart disposition before opening Intake without replaying an effect", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-four-state-restart-"));
+    roots.push(root);
+    const worktrees = await Promise.all(["running", "input", "wait", "uncertain"].map(async (name) => {
+      const directory = path.join(root, name);
+      await (await import("node:fs/promises")).mkdir(directory);
+      return directory;
+    }));
+    const inventory = [
+      { deliveryId: "delivery-running", worktree: worktrees[0]!, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "RUNNING" },
+      { deliveryId: "delivery-input", worktree: worktrees[1]!, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "AWAITING_INPUT" },
+      { deliveryId: "delivery-wait", worktree: worktrees[2]!, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "WORKFLOW_WAIT" },
+      { deliveryId: "delivery-uncertain", worktree: worktrees[3]!, package: "fixture@1.0.0", lifecycle: "START_UNCERTAIN", intakeBinding: "BOUND", action: "UNKNOWN" },
+    ];
+    const bindings = new IntakeSessionBindingRepository(path.join(root, "bindings.json"));
+    await bindings.start();
+    for (const [index, item] of inventory.entries()) {
+      await bindings.claim(Object.freeze({
+        sessionKey: `session-${index}`,
+        correlation: `correlation-${index}`,
+        deliveryId: item.deliveryId,
+        worktree: item.worktree,
+      }));
+    }
+    const attached: unknown[] = [];
+    let executeCalls = 0;
+    let startObservedAttachments = 0;
+    const application = Object.freeze({
+      async start() { startObservedAttachments = attached.length; },
+      async execute() { executeCalls += 1; throw new Error("startup must not create or replay a Delivery"); },
+      async inspect() { throw new Error("not used"); }, async cancel() { throw new Error("not used"); },
+      status() { return { state: "READY" }; }, async close() {},
+    });
+    const control = Object.freeze({
+      async list() { return inventory; },
+      attach(deliveryId: string, correlation: string) { attached.push({ deliveryId, correlation }); },
+      async waitForDelivery() { return undefined; }, async recover() { throw new Error("not used"); },
+      async status() { throw new Error("not used"); }, async finishAction() { throw new Error("not used"); },
+      async answerAction() { throw new Error("not used"); },
+    });
+
+    const runtime: any = await createPluginRuntime({
+      configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json"),
+    }, {
+      bindings, control,
+      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      factory: Object.freeze({ async create() { return application; } }),
+      sessionAvailable: () => true,
+    } as any);
+
+    expect(attached).toEqual(inventory.map((item, index) => ({ deliveryId: item.deliveryId, correlation: `correlation-${index}` })));
+    expect(startObservedAttachments).toBe(4);
+    expect(executeCalls).toBe(0);
+    await runtime.close();
+  });
+
   it("fails closed when durable bindings violate one-to-one identity", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-corrupt-"));
     roots.push(root);
@@ -163,6 +219,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(() => mapIntakeToolOperation({ operation: "create", selector: "implementation-workflow@0.3.0", deliveryId: "delivery-1" }))
       .toThrowError("INTAKE_OPERATION_INVALID");
     expect(() => mapIntakeToolOperation({ operation: "list", ambient: true })).toThrowError("INTAKE_OPERATION_INVALID");
+    expect(() => mapIntakeToolOperation({ operation: "latest" })).toThrowError("INTAKE_OPERATION_INVALID");
   });
 
   it("renders asynchronous DSH-E output in DSH-I without invoking its AgentLoop", async () => {
@@ -278,6 +335,45 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(applicationClosed).toBe(true);
     await expect(runtime.invokeForSession({ sessionKey: "after-close", worktree, operation: parseWsrCommand("list"), images: [] }))
       .resolves.toMatchObject({ kind: "ERROR", code: "APPLICATION_CLOSING" });
+  });
+
+  it("bounds quiescence without fabricating terminal truth or clearing the durable binding", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-close-timeout-"));
+    roots.push(root);
+    const worktree = path.join(root, "worktree");
+    await (await import("node:fs/promises")).mkdir(worktree);
+    const execution = new Promise<never>(() => undefined);
+    let closeCalls = 0;
+    let cancelCalls = 0;
+    const application = Object.freeze({
+      async start() {}, async execute() { return execution; }, async inspect() { throw new Error("not used"); },
+      async cancel() { cancelCalls += 1; throw new Error("shutdown must not fabricate cancellation"); },
+      status() { return { state: "READY" }; }, async close() { closeCalls += 1; },
+    });
+    const control = Object.freeze({
+      async list() { return []; }, attach() {}, async waitForDelivery() { return { deliveryId: "delivery-timeout", worktree }; },
+      async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); },
+      async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
+    });
+    const runtime: any = await createPluginRuntime({
+      configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json"),
+    }, {
+      moduleLoader: async () => ({ WorkflowIntakeService, renderIntakeResult }),
+      factory: Object.freeze({ async create() { return application; } }), control, quiesceTimeoutMs: 5,
+    } as any);
+    await runtime.invokeForSession({
+      sessionKey: "session-timeout", worktree,
+      operation: parseWsrCommand("create fixture@1.0.0\nwait"),
+      turnText: "/wsr create fixture@1.0.0\nwait", images: [],
+    });
+
+    await runtime.close();
+
+    expect(closeCalls).toBe(1);
+    expect(cancelCalls).toBe(0);
+    expect(await runtime.bindings.bySession("session-timeout")).toMatchObject({
+      deliveryId: "delivery-timeout", state: "BOUND",
+    });
   });
 
   it("rolls back a failed startup and makes concurrent repeated close join one disposal", async () => {

@@ -106,6 +106,43 @@ export function probeDshBundleLoader(): {
   }
 }
 
+export function probeDshBrokenPatchRecovery(): {
+  readonly failureStatus: number | null;
+  readonly diagnostic: string;
+  readonly recoveredStatus: number | null;
+} {
+  const directory = mkdtempSync(path.join(tmpdir(), "iter3-dsh-broken-patch-"));
+  const dshHome = path.join(directory, "home");
+  const profile = path.join(dshHome, "profiles/workflow-execution");
+  const packageScope = path.join(profile, "node_modules/@workflow-self-recursive");
+  const bundleName = "@workflow-self-recursive/dsh-intake-feasibility";
+  try {
+    mkdirSync(packageScope, { recursive: true });
+    symlinkSync(fixtureRoot, path.join(packageScope, "dsh-intake-feasibility"), "dir");
+    writeFileSync(path.join(profile, "package.json"), `${JSON.stringify({
+      name: "dsh-profile-workflow-execution", private: true, type: "module",
+      dependencies: { [bundleName]: "0.0.0-feasibility" },
+      dsh: { profile: { bundles: [bundleName] } },
+    })}\n`);
+    const dshManifest = require.resolve("@deepseek-ai/dsh/package.json");
+    const executable = metadata(dshManifest).bin?.dsh;
+    if (executable === undefined) throw new Error("locked DSH package has no dsh executable");
+    const command = [path.resolve(path.dirname(dshManifest), executable), "--profile", "workflow-execution", "--dump-config"];
+    const options = { cwd: projectRoot, encoding: "utf8" as const, env: { ...process.env, DSH_HOME: dshHome }, shell: false };
+    writeFileSync(path.join(profile, "cordis.patch.yml"), "- id: workflow-execution\n  config: [\n");
+    const failed = spawnSync(process.execPath, command, options);
+    writeFileSync(path.join(profile, "cordis.patch.yml"), "[]\n");
+    const recovered = spawnSync(process.execPath, command, options);
+    return {
+      failureStatus: failed.status,
+      diagnostic: `${failed.stderr}\n${failed.stdout}`.trim(),
+      recoveredStatus: recovered.status,
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 export async function probeDshSkillFilesystem(skillRoot = path.join(fixtureRoot, "skills")): Promise<{
   readonly packageVersion: string;
   readonly summary: {

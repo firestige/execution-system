@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   probeCordisIsolation,
+  probeDshBrokenPatchRecovery,
   probeDshBundleLoader,
   probeDshSkillFilesystem,
 } from "../support/iteration-3/dsh-feasibility.js";
@@ -18,6 +19,14 @@ describe("Iteration 3 locked DSH feasibility", () => {
       name: "@workflow-self-recursive/dsh-intake-feasibility",
       config: { configPath: "/tmp/execution-config.yaml" },
     });
+  });
+
+  it("reports a broken profile patch and recovers only after the patch is repaired", () => {
+    const result = probeDshBrokenPatchRecovery();
+
+    expect(result.failureStatus).not.toBe(0);
+    expect(result.diagnostic.length).toBeGreaterThan(0);
+    expect(result.recoveredStatus).toBe(0);
   });
 
   it("discovers and loads an explicit package skill with the locked filesystem provider", async () => {

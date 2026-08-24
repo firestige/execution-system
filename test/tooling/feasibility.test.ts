@@ -94,6 +94,25 @@ describe("I2-G00 selected substrate matrix", () => {
     expect(result.stderr).toBe("");
   });
 
+  it("renders locked DSH launcher help without presenting it as a plugin command catalog", () => {
+    const dshPackagePath = require.resolve("@deepseek-ai/dsh/package.json");
+    const dsh = packageMetadata("@deepseek-ai/dsh/package.json");
+    const bin = dsh.bin?.dsh;
+    expect(bin).toBeDefined();
+
+    const result = spawnSync(process.execPath, [path.resolve(path.dirname(dshPackagePath), bin!), "--help"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      env: process.env,
+      shell: false,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Usage: dsh");
+    expect(result.stdout).toContain("--profile");
+    expect(result.stdout).not.toContain("/wsr");
+  });
+
   it("binds DSH headless to an explicit cwd and scoped DSH_HOME before Agent activation", () => {
     const directory = mkdtempSync(path.join(tmpdir(), "i2-g00-dsh-"));
     const workspace = path.join(directory, "worktree");
