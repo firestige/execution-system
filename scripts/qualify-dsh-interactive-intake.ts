@@ -194,11 +194,15 @@ export async function captureBrowserReadinessDiagnostic(cdp: CdpConnection): Pro
   return Object.freeze({ page, cdpEvents: Object.freeze(cdp.events.slice(-20)) });
 }
 
+export function isBlockingPromptDismissalLabel(label: string): boolean {
+  return /^(继续|Continue|稍后配置|Configure later|Later|Skip for now)$/u.test(label.trim());
+}
+
 export async function dismissBlockingPrompts(cdp: CdpConnection): Promise<void> {
   await waitFor(async () => {
     const ready = await evaluate(cdp, `(() => {
       const button = [...document.querySelectorAll('button')].find((candidate) =>
-        /^(继续|Continue|稍后配置|Later|Skip for now)$/u.test(candidate.textContent?.trim() ?? ''));
+        (${isBlockingPromptDismissalLabel.toString()})(candidate.textContent ?? ''));
       if (button) { button.click(); return false; }
       return document.querySelector('#root')?.hasAttribute('inert') === false;
     })()`);
@@ -296,7 +300,8 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
     try {
       await waitFor(async () => {
         const ready = await evaluate(cdp!, `(() => {
-          const button = [...document.querySelectorAll('button')].find((candidate) => /^(继续|Continue|稍后配置|Later|Skip for now)$/u.test(candidate.textContent?.trim() ?? ''));
+          const button = [...document.querySelectorAll('button')].find((candidate) =>
+            (${isBlockingPromptDismissalLabel.toString()})(candidate.textContent ?? ''));
           if (button) { button.click(); return false; }
           return document.querySelector('#root')?.hasAttribute('inert') === false
             && /选择工作区|Select workspace/u.test(document.body?.innerText ?? '');

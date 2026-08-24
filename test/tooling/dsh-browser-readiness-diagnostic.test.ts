@@ -5,11 +5,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   captureBrowserReadinessDiagnostic,
+  isBlockingPromptDismissalLabel,
   observeChildTranscript,
   type CdpConnection,
 } from "../../scripts/qualify-dsh-interactive-intake.js";
 
 describe("DSH browser readiness diagnostics", () => {
+  it("recognizes the provider onboarding dismissal label used by the pinned DSH Web client", () => {
+    expect(isBlockingPromptDismissalLabel("Configure later")).toBe(true);
+    expect(isBlockingPromptDismissalLabel("Save and continue")).toBe(false);
+  });
+
   it("captures bounded process output and the current DOM/runtime state without changing readiness", async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
