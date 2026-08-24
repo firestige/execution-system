@@ -106,6 +106,7 @@ function fixture(dispositions: HostDisposition[], retirement?: Partial<Record<"h
   };
   const workflow = { request: vi.fn(async (request: any) => ok({ controlIdentity: request.controlIdentity, correlationIdentity: request.correlationIdentity, content: true, contentIdentity: canonicalDigest(true) })) };
   const observe = vi.fn(async () => undefined);
+  const acknowledgeStart = vi.fn(async () => { events.push("start.acknowledge"); return ok(undefined); });
   const stateDirectory = mkdtempSync(path.join(tmpdir(), "formal-g05-"));
   const options = {
     stateDirectory: stateDirectory as never,
@@ -115,11 +116,12 @@ function fixture(dispositions: HostDisposition[], retirement?: Partial<Record<"h
     interaction,
     workflow,
     observation: { observe },
+    startCorrelation: { acknowledge: acknowledgeStart },
     publicationTarget: { identity: "target.fixture" as never },
     implementationIdentity: "implementation.fixture" as never,
   };
   const adapter = createExecutionRuntimeAdapter(options);
-  return { adapter, options, stateDirectory, value, delivery, events, host, invocation, custody, preserved, published, interaction, workflow, observe };
+  return { adapter, options, stateDirectory, value, delivery, events, host, invocation, custody, preserved, published, interaction, workflow, observe, acknowledgeStart };
 }
 
 describe("formal G05 Execution Runtime Adapter", () => {
@@ -135,9 +137,40 @@ describe("formal G05 Execution Runtime Adapter", () => {
     if (!result.ok || result.value.kind !== "terminal") throw new Error("terminal settlement missing");
     expect(result.value.outcome).toBe("COMPLETED");
     expect(result.value.settlement.ownerRetirements.map((fact) => fact.owner)).toEqual(["coordinator", "host", "invocation", "custody"]);
-    expect(f.events).toEqual(["host.start", "custody.preserve", "custody.publish", "host.retire", "invocation.retire", "custody.retire"]);
+    expect(f.events).toEqual(["start.acknowledge", "host.start", "custody.preserve", "custody.publish", "host.retire", "invocation.retire", "custody.retire"]);
+    expect(f.acknowledgeStart).toHaveBeenCalledWith(expect.objectContaining({
+      schemaVersion: "runner.start-correlation@1.0.0",
+      delivery: deliveryOf(f.value),
+    }));
     expect(f.host.start).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: "runner.compiled-activation@1.0.0", activationBindingIdentity: f.value.bindingIdentity }), f.interaction);
     expect(Object.isFrozen(result.value.settlement)).toBe(true);
+  });
+
+  it("replays a durable pending start acknowledgement after interruption without duplicating Host start", async () => {
+    const value = activation();
+    const f = fixture([{ kind: "terminal-proposal", proposal: terminal(value) }]);
+    f.acknowledgeStart.mockRejectedValueOnce(new Error("acknowledgement interrupted"));
+    (f.host.start as any).mockImplementationOnce(async () => ok({ kind: "terminal-proposal", proposal: terminal(f.value) }));
+
+    const first = await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+    const durableBeforeReplay = JSON.parse(readFileSync(path.join(f.stateDirectory, readdirSync(f.stateDirectory)[0]!), "utf8"));
+    const restarted = createExecutionRuntimeAdapter(f.options);
+    const second = await restarted.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value });
+
+    expect(first).toMatchObject({ ok: false, error: { code: "ADAPTER_UNAVAILABLE" } });
+    expect(durableBeforeReplay).toMatchObject({ phase: "start-pending", startCorrelation: { delivery: f.delivery } });
+    expect(second).toMatchObject({ ok: true, value: { kind: "terminal" } });
+    expect(f.acknowledgeStart).toHaveBeenCalledTimes(2);
+    expect(f.host.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed before Host start when M01 rejects the exact start correlation", async () => {
+    const f = fixture([]);
+    f.acknowledgeStart.mockResolvedValueOnce({ ok: false, error: { code: "CORRELATION_MISMATCH" } } as never);
+
+    expect(await f.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: f.value }))
+      .toMatchObject({ ok: false, error: { code: "CORRELATION_MISMATCH" } });
+    expect(f.host.start).not.toHaveBeenCalled();
   });
 
   it("uses the Action bridge and resumes the exact same episode without creating Workflow control", async () => {

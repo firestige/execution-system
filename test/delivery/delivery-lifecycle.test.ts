@@ -125,6 +125,97 @@ async function fixture(runtimeResult: "start-failed" | "unknown" | "invalid" | "
 }
 
 describe("M01 production Delivery lifecycle", () => {
+  it("durably correlates the Runner start before its first Host or Action effect", async () => {
+    const f = await fixture("terminal");
+    let stateAtFirstEffect: string | undefined;
+    const service = new DeliveryLifecycleService({
+      ...f.options,
+      runtime: Object.freeze({ create: async (input: DeliveryRuntimeFactoryInput) => Object.freeze({
+        execute: async (request: any) => {
+          const port = (input as any).startCorrelation;
+          if (port !== undefined) {
+            const fact = Object.freeze({
+              schemaVersion: "runner.start-correlation@1.0.0",
+              delivery: Object.freeze({
+                deliveryIdentity: request.activation.correlation.deliveryIdentity,
+                manifestBindingIdentity: request.activation.correlation.manifestBindingIdentity,
+                activationBindingIdentity: request.activation.bindingIdentity,
+              }),
+            });
+            const acknowledged = await port.acknowledge(fact);
+            if (!acknowledged.ok) return acknowledged;
+            expect(await port.acknowledge(fact)).toMatchObject({ ok: true });
+            expect(await port.acknowledge(Object.freeze({
+              ...fact,
+              delivery: Object.freeze({ ...fact.delivery, deliveryIdentity: "wrong-delivery" }),
+            }))).toMatchObject({ ok: false, error: { code: "CORRELATION_MISMATCH" } });
+          }
+          stateAtFirstEffect = (await f.slots.read(f.worktree)).state;
+          return f.runtime.execute(request);
+        },
+        inspect: f.runtime.inspect,
+        cancel: f.runtime.cancel,
+      }) }),
+    });
+
+    await service.activate(f.ready);
+
+    expect(stateAtFirstEffect).toBe("RUNNING_CORRELATED");
+  });
+
+  it("keeps start correlation controlling when Observation rejects its later best-effort copy", async () => {
+    const f = await fixture("terminal");
+    let stateAtFirstEffect: string | undefined;
+    const service = new DeliveryLifecycleService({
+      ...f.options,
+      ownerFacts: Object.freeze({ emit() { throw new Error("M03 unavailable"); } }),
+      runtime: Object.freeze({ create: async (input: DeliveryRuntimeFactoryInput) => Object.freeze({
+        execute: async (request: any) => {
+          const acknowledged = await input.startCorrelation.acknowledge(Object.freeze({
+            schemaVersion: "runner.start-correlation@1.0.0",
+            delivery: Object.freeze({
+              deliveryIdentity: request.activation.correlation.deliveryIdentity,
+              manifestBindingIdentity: request.activation.correlation.manifestBindingIdentity,
+              activationBindingIdentity: request.activation.bindingIdentity,
+            }),
+          }));
+          if (!acknowledged.ok) return acknowledged;
+          stateAtFirstEffect = (await f.slots.read(f.worktree)).state;
+          return f.runtime.execute(request);
+        }, inspect: f.runtime.inspect, cancel: f.runtime.cancel,
+      }) }),
+    });
+
+    expect(await service.activate(f.ready)).toMatchObject({ kind: "TERMINAL", outcome: "SUCCEEDED" });
+    expect(stateAtFirstEffect).toBe("RUNNING_CORRELATED");
+  });
+
+  it("reports persisted running truth when Runner acknowledgement persistence is interrupted", async () => {
+    const f = await fixture("terminal");
+    const service = new DeliveryLifecycleService({
+      ...f.options,
+      runtime: Object.freeze({ create: async (input: DeliveryRuntimeFactoryInput) => Object.freeze({
+        execute: async (request: any) => {
+          const acknowledged = await input.startCorrelation.acknowledge(Object.freeze({
+            schemaVersion: "runner.start-correlation@1.0.0",
+            delivery: Object.freeze({
+              deliveryIdentity: request.activation.correlation.deliveryIdentity,
+              manifestBindingIdentity: request.activation.correlation.manifestBindingIdentity,
+              activationBindingIdentity: request.activation.bindingIdentity,
+            }),
+          }));
+          if (!acknowledged.ok) return acknowledged;
+          return { ok: false as const, error: { code: "ADAPTER_UNAVAILABLE" as const } };
+        }, inspect: f.runtime.inspect, cancel: f.runtime.cancel,
+      }) }),
+    });
+
+    expect(await service.activate(f.ready)).toMatchObject({
+      kind: "RECOVERY", deliveryId: "delivery-1", state: "RUNNING_CORRELATED",
+    });
+    expect(await f.slots.read(f.worktree)).toMatchObject({ state: "RUNNING_CORRELATED" });
+  });
+
   it("persists the binding and wires owner facts before the first pinned M02 effect", async () => {
     const f = await fixture("start-failed");
     const result = await f.service.activate(f.ready);

@@ -2,6 +2,7 @@ import type { ExecutionFailure, ExecutionResult } from "../application/execution
 import type { AttachmentContentPort, ClockPort, DisabledObservationSink, IdPort, OwnerFact, OwnerFactIngress } from "../bootstrap/contracts.js";
 import { deepFreeze, type DeliveryConfigProjection } from "../configuration/index.js";
 import type { RunnerActivationContext } from "../contracts/index.js";
+import type { RunnerStartCorrelationFact, RunnerStartCorrelationPort } from "../coordinator/runner-coordinator.js";
 import type { ExecutionPrebindingReady } from "../core/execution-core.js";
 import { EXECUTION_RUNTIME_ADAPTER_VERSION, type ExecutionRuntimeAdapter, type ExecutionRuntimeResult } from "../execution/runtime-adapter.js";
 import type { DeliveryAdmissionHolder } from "./admission.js";
@@ -23,6 +24,7 @@ export interface DeliveryRuntimeFactoryInput {
   readonly manifest: DeliveryManifest;
   readonly activation: RunnerActivationContext;
   readonly ownerFacts: OwnerFactIngress;
+  readonly startCorrelation: RunnerStartCorrelationPort;
 }
 
 export interface DeliveryRuntimeFactory {
@@ -69,6 +71,16 @@ function exactDelivery(activation: RunnerActivationContext) {
     manifestBindingIdentity: activation.correlation.manifestBindingIdentity,
     activationBindingIdentity: activation.bindingIdentity,
   });
+}
+
+function exactStartCorrelationFact(value: RunnerStartCorrelationFact, activation: RunnerActivationContext): boolean {
+  return Object.isFrozen(value) && Object.isFrozen(value.delivery)
+    && Object.keys(value).sort().join(",") === "delivery,schemaVersion"
+    && Object.keys(value.delivery).sort().join(",") === "activationBindingIdentity,deliveryIdentity,manifestBindingIdentity"
+    && value.schemaVersion === "runner.start-correlation@1.0.0"
+    && value.delivery.deliveryIdentity === activation.correlation.deliveryIdentity
+    && value.delivery.manifestBindingIdentity === activation.correlation.manifestBindingIdentity
+    && value.delivery.activationBindingIdentity === activation.bindingIdentity;
 }
 
 function correlated(result: Extract<ExecutionRuntimeResult, { kind: "unknown" }>, activation: RunnerActivationContext): boolean {
@@ -235,19 +247,39 @@ export class DeliveryLifecycleService {
     if (!Object.isFrozen(activation) || activation.correlation.manifestBindingIdentity !== manifest.deliveryBindingIdentity
       || activation.correlation.deliveryIdentity !== manifest.deliveryId
       || activation.correlation.packageDigest !== manifest.resolvedPackage.packageDigest) return failure("DELIVERY_BINDING_FAILED");
-    const ownerFacts = this.#options.runtime.ownerFacts?.(manifest, activation) ?? this.#ownerFacts;
-
     let state = initialState;
+    const ownerFacts = this.#options.runtime.ownerFacts?.(manifest, activation) ?? this.#ownerFacts;
+    const startCorrelation: RunnerStartCorrelationPort = Object.freeze({
+      acknowledge: async (fact: RunnerStartCorrelationFact) => {
+        if (!exactStartCorrelationFact(fact, activation)) return Object.freeze({ ok: false as const, error: Object.freeze({ code: "CORRELATION_MISMATCH" as const }) });
+        const current = await this.#options.slots.read(manifest.canonicalWorktree);
+        if (current.state === "EMPTY" || current.deliveryId !== manifest.deliveryId
+          || current.deliveryBindingIdentity !== manifest.deliveryBindingIdentity) {
+          return Object.freeze({ ok: false as const, error: Object.freeze({ code: "CORRELATION_MISMATCH" as const }) });
+        }
+        if (current.state === "START_UNCERTAIN") {
+          await this.#options.slots.transition(manifest.canonicalWorktree, "M02_START_CORRELATED", this.#options.clock.now());
+          safeEmit(ownerFacts, { owner: "M02", name: "start-correlated", occurredAt: this.#options.clock.now() });
+        } else if (current.state !== "RUNNING_CORRELATED") {
+          return Object.freeze({ ok: false as const, error: Object.freeze({ code: "CORRELATION_MISMATCH" as const }) });
+        }
+        state = "RUNNING_CORRELATED";
+        return Object.freeze({ ok: true as const, value: undefined });
+      },
+    });
     if (state === "BOUND") {
       ownerFacts.emit({ owner: "M01", name: "runner-launch-requested", occurredAt: this.#options.clock.now() });
       await this.#options.slots.transition(manifest.canonicalWorktree, "M01_RUNNER_LAUNCH_REQUESTED", this.#options.clock.now());
       state = "START_UNCERTAIN";
     }
     let runtime: ExecutionRuntimeAdapter;
-    try { runtime = await this.#options.runtime.create({ manifest, activation, ownerFacts }); }
+    try { runtime = await this.#options.runtime.create({ manifest, activation, ownerFacts, startCorrelation }); }
     catch { return Object.freeze({ kind: "UNKNOWN", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, state: "START_UNCERTAIN" }); }
     const called = await runtime.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation }).catch(() => undefined);
     if (called === undefined || !called.ok) {
+      if (state === "RUNNING_CORRELATED") {
+        return Object.freeze({ kind: "RECOVERY", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, state });
+      }
       return Object.freeze({ kind: "UNKNOWN", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, state: state === "RESULT_UNRESOLVED" ? "RESULT_UNRESOLVED" : "START_UNCERTAIN" });
     }
     return this.#handleRuntimeResult(manifest, activation, state, called.value, ownerFacts);

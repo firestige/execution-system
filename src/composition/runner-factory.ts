@@ -20,7 +20,7 @@ import { FileInvocationJournalStore } from "../invocation/journal.js";
 import { createManagedInvocation, type InvocationResultValidator } from "../invocation/managed-invocation.js";
 import { DshProviderAdapterFactory, type DshProviderAdapterConfiguration } from "../providers/dsh/index.js";
 import type { ProviderAdapter, ProviderAdapterFactory, ProviderAdapterKey } from "../providers/provider.js";
-import type { RunnerObservationPort } from "../coordinator/runner-coordinator.js";
+import type { RunnerObservationPort, RunnerStartCorrelationPort } from "../coordinator/runner-coordinator.js";
 import { createExecutionRuntimeAdapter } from "./create-execution-runtime-adapter.js";
 
 export interface RunnerFactoryConfig {
@@ -47,6 +47,7 @@ export interface RunnerFactoryDependencies {
   readonly interaction: ActionInteractionBridge;
   readonly workflow: WorkflowControlBridge;
   readonly observation: RunnerObservationPort;
+  readonly startCorrelation: RunnerStartCorrelationPort;
   readonly hostOperations: Readonly<Record<string, HostOperationHandler>>;
 }
 
@@ -165,18 +166,20 @@ function admitConfiguration(candidate: RunnerFactoryConfig): RunnerFactoryConfig
 
 function admitDependencies(candidate: RunnerFactoryDependencies): RunnerFactoryDependencies {
   if (!Object.isFrozen(candidate)) throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact and immutable");
-  const root = exactData(candidate, ["interaction", "workflow", "observation", "hostOperations"]);
+  const root = exactData(candidate, ["interaction", "workflow", "observation", "startCorrelation", "hostOperations"]);
   const interaction = exactMethods(root?.interaction, ["publish", "requestInput"]);
   const workflow = exactMethods(root?.workflow, ["request"]);
   const observation = exactMethods(root?.observation, ["observe"]);
+  const startCorrelation = exactMethods(root?.startCorrelation, ["acknowledge"]);
   const hostOperations = exactHostOperations(root?.hostOperations);
-  if (root === undefined || interaction === undefined || workflow === undefined || observation === undefined || hostOperations === undefined) {
+  if (root === undefined || interaction === undefined || workflow === undefined || observation === undefined || startCorrelation === undefined || hostOperations === undefined) {
     throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact capabilities");
   }
   return Object.freeze({
     interaction: interaction as unknown as ActionInteractionBridge,
     workflow: workflow as unknown as WorkflowControlBridge,
     observation: observation as unknown as RunnerObservationPort,
+    startCorrelation: startCorrelation as unknown as RunnerStartCorrelationPort,
     hostOperations,
   });
 }
@@ -366,6 +369,7 @@ export class RunnerFactory {
         interaction: admittedDependencies.interaction,
         workflow: admittedDependencies.workflow,
         observation: admittedDependencies.observation,
+        startCorrelation: admittedDependencies.startCorrelation,
         publicationTarget,
         implementationIdentity: config.implementationIdentity as ImplementationId,
       });

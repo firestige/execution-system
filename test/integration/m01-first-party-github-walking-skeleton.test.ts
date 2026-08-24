@@ -139,12 +139,13 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
       snapshotRoot: path.join(root, "prompt-snapshots"),
       attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }),
       projector: new DeliveryAdmissionProjector(),
-      runtime: Object.freeze({ create: async ({ ownerFacts }: DeliveryRuntimeFactoryInput) => {
+      runtime: Object.freeze({ create: async ({ ownerFacts, startCorrelation }: DeliveryRuntimeFactoryInput) => {
         ownerFacts.emit(Object.freeze({ owner: "M02", name: "runner-composed", occurredAt: 0 }));
         const adapter = await runnerFactory.create(runtimeConfig, Object.freeze({
           interaction: Object.freeze({ publish: async () => ({ ok: true as const, value: undefined }), requestInput: async () => { throw new Error("not requested"); } }),
           workflow: Object.freeze({ request: async () => { throw new Error("not requested"); } }),
           observation: Object.freeze({ async observe() {} }),
+          startCorrelation,
           hostOperations: Object.freeze({ "validator.intake-checks": Object.freeze({ execute: async () => Object.freeze({ accepted: true, value: null }) }) }),
         }));
         adapters.push(adapter);

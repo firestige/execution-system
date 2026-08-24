@@ -97,6 +97,7 @@ const dependencies = Object.freeze({
   }),
   workflow: Object.freeze({ async request() { throw new Error("success path does not enter Workflow Wait"); } }),
   observation: Object.freeze({ async observe() {} }),
+  startCorrelation: Object.freeze({ async acknowledge() { return { ok: true as const, value: undefined }; } }),
   hostOperations: Object.freeze({}),
 });
 
