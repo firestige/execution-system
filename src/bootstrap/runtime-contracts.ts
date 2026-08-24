@@ -1,4 +1,5 @@
 import type { ExecutionApplicationState } from "../application/execution-application.js";
+import type { IntakePresentation } from "../intake/presentation.js";
 import type { ExecutionBootstrapDependencies, FilesystemInspection, HostOperationFactory, OwnerFact } from "./contracts.js";
 
 export class BootstrapContractError extends TypeError {
@@ -45,7 +46,7 @@ export function admitExecutionBootstrapDependencies(candidate: ExecutionBootstra
       inspect: filesystem.inspect!.bind(root.filesystem) as (path: string) => Promise<FilesystemInspection>,
     }),
     network: Object.freeze({ request: network.request!.bind(root.network) as (url: string) => Promise<{ readonly status: number; readonly body: Uint8Array }> }),
-    intake: Object.freeze({ publish: intake.publish!.bind(root.intake) as (message: Readonly<{ correlation: string; text: string }>) => Promise<void> }),
+    intake: Object.freeze({ publish: intake.publish!.bind(root.intake) as (event: IntakePresentation) => Promise<void> }),
     attachments: Object.freeze({ read: attachments.read!.bind(root.attachments) as (contentRef: string, maxBytes: number) => Promise<Uint8Array> }),
   });
 }

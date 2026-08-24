@@ -1,5 +1,6 @@
 import { canonicalDigest, type ActionInputRequest, type ActionInputResponse, type ActionInteractionBridge, type AdmittedControlResult, type AgentOutputFrame, type ControlBridgeError, type ExternalControlRequest, type FrozenJsonValue, type InteractionError, type Result, type WorkflowControlBridge } from "../contracts/index.js";
 import type { TaskPrompt } from "../application/execution-application.js";
+import { actionInputRequestPresentation, actionOutputPresentation } from "../intake/presentation.js";
 import type { ExecutionBootstrapDependencies } from "./contracts.js";
 
 export interface BrokerDelivery {
@@ -48,13 +49,13 @@ export class ProductionInteractionBroker {
     return Object.freeze({
       publish: async (frame: AgentOutputFrame) => {
         const correlation = this.#deliveries.get(deliveryId)?.correlation ?? deliveryId;
-        await this.presentation.publish(Object.freeze({ correlation, text: JSON.stringify(frame.content) })).catch(() => undefined);
+        await this.presentation.publish(actionOutputPresentation(correlation, frame.content)).catch(() => undefined);
         return Object.freeze({ ok: true as const, value: undefined });
       },
       requestInput: async (request: ActionInputRequest): Promise<Result<ActionInputResponse, InteractionError>> => new Promise((resolve) => {
         this.#pending.set(deliveryId, Object.freeze({ kind: "action" as const, request, resolve }));
         const correlation = this.#deliveries.get(deliveryId)?.correlation ?? deliveryId;
-        void this.presentation.publish(Object.freeze({ correlation, text: JSON.stringify(request.prompt) })).catch(() => undefined);
+        void this.presentation.publish(actionInputRequestPresentation(correlation, request.prompt)).catch(() => undefined);
       }),
     });
   }
@@ -63,7 +64,7 @@ export class ProductionInteractionBroker {
       request: async (request: ExternalControlRequest): Promise<Result<AdmittedControlResult, ControlBridgeError>> => new Promise((resolve) => {
         this.#pending.set(deliveryId, Object.freeze({ kind: "workflow" as const, request, resolve }));
         const correlation = this.#deliveries.get(deliveryId)?.correlation ?? deliveryId;
-        void this.presentation.publish(Object.freeze({ correlation, text: JSON.stringify(request.content) })).catch(() => undefined);
+        void this.presentation.publish(actionInputRequestPresentation(correlation, request.content)).catch(() => undefined);
       }),
     });
   }

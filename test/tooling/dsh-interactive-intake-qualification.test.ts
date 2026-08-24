@@ -26,7 +26,14 @@ describe("DSH interactive Intake qualification", () => {
       const coreArchive = pack(repository, release);
       const pluginArchive = pack(path.join(repository, "packages/dsh-intake"), release);
       await expect(qualifyDshInteractiveIntake({ coreArchive, pluginArchive }))
-        .resolves.toMatchObject({ command: "/wsr list", result: "PASS" });
+        .resolves.toMatchObject({
+          command: "/wsr list",
+          result: "PASS",
+          oracle: "browser-dom",
+          presentation: { version: "wsr.presentation@1.0.0", kind: "delivery-list", itemCount: 0 },
+          errorPresentation: { version: "wsr.presentation@1.0.0", kind: "error", code: "DELIVERY_UNKNOWN" },
+          sessionSwitch: "PASS",
+        });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

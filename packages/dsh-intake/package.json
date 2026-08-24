@@ -6,12 +6,14 @@
   "types": "./src/index.d.ts",
   "exports": {
     ".": "./src/plugin.js",
+    "./client": "./lib/client.js",
     "./binding-repository": "./src/binding-repository.js",
     "./command": "./src/command.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
+    "lib/client.js",
     "skills",
     "cordis.patch.yml",
     "README.md"
@@ -19,6 +21,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
     },
     "compatibility": {
       "executionSystem": "0.1.1",

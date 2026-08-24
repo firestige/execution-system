@@ -23,6 +23,8 @@ describe("DSH Intake distribution format verifier", () => {
         skillName: "workflow-execution",
         toolIdentity: "workflow_execution_intake",
         operations: ["list", "create", "recover", "status", "action-finish", "abandon"],
+        presentationSlot: "conversation.chat.commandview",
+        sidebarSlot: "sidebar.footer.action",
       });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
@@ -77,5 +79,10 @@ describe("DSH Intake distribution format verifier", () => {
     await writeFile(path.join(operation, "src/plugin.js"), operationPlugin.replace('"action-finish", "abandon"', '"action-finish", "latest"'));
     await expect(verifyDshIntakeDistribution(operation)).rejects.toMatchObject({ code: "DSH_INTAKE_OPERATION_SET_INVALID" });
     await rm(operation, { recursive: true, force: true });
+
+    const missingClient = await fixture();
+    await unlink(path.join(missingClient, "lib/client.js"));
+    await expect(verifyDshIntakeDistribution(missingClient)).rejects.toMatchObject({ code: "DSH_INTAKE_CLIENT_INVALID" });
+    await rm(missingClient, { recursive: true, force: true });
   });
 });

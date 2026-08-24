@@ -106,7 +106,12 @@ describe("Wave 6 production bootstrap", () => {
       content: Object.freeze({ question: "Confirm?" }), contentIdentity: "sha256:request",
     }) as any;
     const waiting = broker.workflowBridge("delivery-wait").request(request);
-    await expect.poll(() => presentations).toEqual([{ correlation: "intake-correlation", text: '{"question":"Confirm?"}' }]);
+    await expect.poll(() => presentations).toEqual([{
+      schemaVersion: "wsr.presentation@1.0.0",
+      correlation: "intake-correlation",
+      kind: "action-input-request",
+      data: { prompt: { question: "Confirm?" } },
+    }]);
     expect(broker.respond("delivery-wait", "ACTION_FINISH_REQUESTED", { text: "", attachments: [] })).toBe(false);
     expect(broker.respond("delivery-wait", "ANSWER", { text: "not-json", attachments: [] })).toBe(false);
     expect(broker.respond("delivery-wait", "ANSWER", { text: '{"confirmed":true}', attachments: [] })).toBe(true);
