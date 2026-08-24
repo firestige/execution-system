@@ -1,4 +1,4 @@
-import { realpath, readFile, writeFile } from "node:fs/promises";
+import { realpath, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { InvocationDispatch } from "../../contracts/index.js";
 import type { DshPublicClosure } from "./public-closure.js";
@@ -23,6 +23,7 @@ export interface DshOperationAuthority {
 }
 
 function matches(pattern: string, candidate: string): boolean {
+  if (pattern === "**") return true;
   if (pattern.endsWith("/**")) {
     const prefix = pattern.slice(0, -3).replace(/\/$/, "");
     return candidate === prefix || candidate.startsWith(`${prefix}/`);
@@ -35,6 +36,7 @@ async function scopedPath(root: string, requested: unknown, mode: "read" | "writ
     throw new TypeError("DSH workspace path is not a relative admitted path");
   }
   const normalized = requested.replaceAll("\\", "/").replace(/^\.\//, "");
+  if (normalized === "") throw new TypeError("DSH workspace path is not a relative admitted path");
   const permitted = grant.access.some((rule) => (mode === "read" ? rule.mode === "read" || rule.mode === "write" : rule.mode === "write") && matches(rule.path, normalized));
   if (!permitted) throw new TypeError("DSH workspace operation is outside signed access");
   const canonicalRoot = await realpath(root);
@@ -80,12 +82,19 @@ export function createDshOperationAuthority(closure: DshPublicClosure, workspace
           name: tool.name,
           description: "Read or write a path inside the signed workflow workspace scope.",
           parameters: {
-            operation: { type: "string", enum: ["read", "write"], required: true },
+            operation: { type: "string", enum: ["list", "read", "write"], required: true },
             path: { type: "string", required: true },
             content: { type: "string" },
           },
           output: { schema: { type: "object", additionalProperties: true }, render: () => [] },
-          async execute(args: { operation: "read" | "write"; path: string; content?: string }) {
+          async execute(args: { operation: "list" | "read" | "write"; path: string; content?: string }) {
+            if (args.operation === "list") {
+              const entries = await readdir(await scopedPath(workspaceDirectory, args.path, "read", grant), { withFileTypes: true });
+              return { entries: entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0).map((entry) => ({
+                name: entry.name,
+                kind: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : entry.isSymbolicLink() ? "symlink" : "other",
+              })) };
+            }
             if (args.operation === "read") return { content: await readFile(await scopedPath(workspaceDirectory, args.path, "read", grant), "utf8") };
             if (args.operation !== "write" || typeof args.content !== "string") throw new TypeError("DSH workspace write requires content");
             await writeFile(await scopedPath(workspaceDirectory, args.path, "write", grant), args.content, "utf8");

@@ -36,6 +36,7 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
     const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
     const workflowDocument = JSON.parse(await readFile(path.join(definition, "workflow.json"), "utf8"));
     const snapshotDocument = JSON.parse(await readFile(path.join(definition, "snapshot.json"), "utf8"));
+    const routesDocument = JSON.parse(await readFile(path.join(definition, "routes.json"), "utf8"));
     const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-"));
     const snapshot = await captureTaskPromptSnapshot({
       root: path.join(root, "snapshots"),
@@ -75,7 +76,14 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
       admission: { deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0" },
     });
     expect(compileRunnerActivation(activation).ok).toBe(true);
+    for (const agent of Object.values(activation.program.execution.agents)) {
+      const route = routesDocument.routes.find((candidate: any) => candidate.id === agent.session.routeIdentity);
+      const modes = [...new Set((route?.access ?? []).map((entry: any) => entry.mode).filter((mode: string) => mode === "read" || mode === "write"))];
+      expect(agent.turn.access).toEqual(modes.map((mode) => ({ mode, path: "**" })));
+    }
     const serialized = JSON.stringify(activation);
+    expect(serialized).not.toContain('"path":"README.md"');
+    expect(serialized).not.toContain('"path":"run"');
     expect(serialized).not.toMatch(/"contentRef"|"workflowSource"|"packageStore"|"credentialStore"|"nativeSession"|"checkpointIdentity"/);
     expect(serialized).not.toContain('"schemaVersion":"agentops.workflow-dsl@1.1.0","package"');
   });

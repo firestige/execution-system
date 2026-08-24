@@ -298,7 +298,7 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       const candidate = await rpc(webUrl, "session.history", { sessionId });
       const commandEvents = candidate.value?.events?.filter((entry: any) => entry.event.type.startsWith("command/"));
       return candidate.ok === true && commandEvents?.length === 2 ? candidate : undefined;
-    }, "DSH_WSR_COMMAND_FAILED");
+    }, "DSH_WSR_COMMAND_FAILED", 40_000);
     const events = history.value.events.filter((entry: any) => entry.event.type.startsWith("command/"));
     let commandPresentation: any;
     try { commandPresentation = JSON.parse(events[1]?.event?.data?.text); } catch { /* checked below */ }
@@ -342,7 +342,7 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       const candidate = await rpc(webUrl, "session.history", { sessionId });
       const commandEvents = candidate.value?.events?.filter((entry: any) => entry.event.type.startsWith("command/"));
       return candidate.ok === true && commandEvents?.length === 4 ? candidate : undefined;
-    }, "DSH_WSR_ERROR_COMMAND_FAILED");
+    }, "DSH_WSR_ERROR_COMMAND_FAILED", 40_000);
     const errorDone = errorHistory.value.events.filter((entry: any) => entry.event.type === "command/done").at(-1);
     let errorEnvelope: any;
     try { errorEnvelope = JSON.parse(errorDone?.event?.data?.text); } catch { /* checked below */ }

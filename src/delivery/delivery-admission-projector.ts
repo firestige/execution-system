@@ -228,7 +228,15 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
           providedCapabilities: route.resources.capabilities,
           policy: { identity: `session.${String(route.id)}`, scope: route.resources.sessionPolicy.scope, isolation: route.resources.sessionPolicy.isolation },
         };
-        const turn = { access: [{ mode: "read", path: "README.md" }, { mode: "write", path: "run" }] };
+        const modes = new Set<string>();
+        const access: Document[] = [];
+        for (const entry of route.access ?? []) {
+          if ((entry.mode === "read" || entry.mode === "write") && !modes.has(entry.mode)) {
+            modes.add(entry.mode);
+            access.push({ mode: entry.mode, path: "**" });
+          }
+        }
+        const turn = { access };
         agents[executorIdentity] = {
           identity: executorIdentity,
           sessionCompatibilityIdentity: canonicalDigest(session),
