@@ -15,6 +15,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout superproject authority workspace
+        uses: actions/checkout@v6
+        with:
+          repository: firestige/workflow-self-recursive
+          ref: main
+
       - name: Checkout execution-system
         uses: actions/checkout@v6
         with:
@@ -47,6 +53,11 @@ jobs:
       - name: Install dependencies
         working-directory: execution-system
         run: pnpm install --frozen-lockfile
+
+      - name: Install frozen contract checker dependencies
+        run: |
+          npm --prefix system-contracts/workflow-dsl ci
+          npm --prefix system-contracts/observation ci
 
       - name: Run full regression
         working-directory: execution-system

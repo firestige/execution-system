@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { cp, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,12 +25,12 @@ async function fixture() {
   return { executionRoot, superRoot };
 }
 
-describe("Iteration 3 release documentation verifier", () => {
-  it("binds repository guides, config examples, package help, skill, and defaults to one exact surface", async () => {
-    const executionRoot = path.resolve(import.meta.dirname, "../..");
-    const superRoot = path.resolve(executionRoot, "..");
+const repositoryExecutionRoot = path.resolve(import.meta.dirname, "../..");
+const repositorySuperRoot = path.resolve(repositoryExecutionRoot, "..");
 
-    await expect(verifyIteration3Documentation({ superRoot, executionRoot })).resolves.toEqual({
+describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-execution-quickstart.md")))("Iteration 3 release documentation verifier", () => {
+  it("binds repository guides, config examples, package help, skill, and defaults to one exact surface", async () => {
+    await expect(verifyIteration3Documentation({ superRoot: repositorySuperRoot, executionRoot: repositoryExecutionRoot })).resolves.toEqual({
       commands: 6,
       configExamples: 4,
       guides: 4,

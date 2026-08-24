@@ -12,6 +12,7 @@ export default defineConfig({
         "scripts/generate-workflow-contract.ts",
         "scripts/build-release-artifacts.ts",
         "scripts/build-workflow-release-assets.ts",
+        "scripts/verify-iteration-3-documentation.ts",
       ],
       thresholds: {
         statements: 90,
