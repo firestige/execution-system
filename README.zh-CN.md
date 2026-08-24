@@ -10,11 +10,25 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 - **Runtime Interaction** 拥有规范工作区排他性、当前 Delivery 槽位、Manifest 持久化、Runtime 调用、恢复与最终处理。
 - **Delivery Observation** 将出站有界事实映射到单向、尽力而为的 OTLP profile，但不控制执行。
 
-Runtime 是位于 Core 边界之后的可替换适配器：[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 是首个，后续计划提供第一方 LangGraph 适配器。
+公开的 `ExecutionApplication` 与宿主无关，不安装 DSH Intake plugin 也可以直接嵌入。独立打包的 DSH Intake Adapter 是首个产品入口；通过 M01 admission 的 Workflow Action 均在 Runner 所有、与 Intake 隔离的 DSH 执行 Context 中运行。
 
 ## Developer preview
 
-本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。当前发布 Execution 设计与组件边界，尚未提供可供最终用户运行的发行版。**后续会有破坏兼容性的变更。**
+本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。`0.1.0` 是 MVP 发行版，后续可能有破坏兼容性的变更。
+
+## Release 快速开始
+
+1. 下载 `@workflow-self-recursive/execution-system` 与 `@workflow-self-recursive/dsh-intake` 的 `0.1.0` artifact。
+2. 复制 `config/defaults/execution.default.yaml`，替换全部 `__REQUIRED__` 值，并在外置 DSH credential 文件中 provision 所引用的 API key（格式为 `version: 1`、`refs: ...`）。
+3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，再以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志。
+4. 为 plugin row 填写 absolute `configFile` 与 `bindingFile`，再执行 `dsh --profile web --dump-config` 和 `dsh --profile web --help` 验证。
+5. 从目标 worktree 启动 `dsh --profile web`，使用 `/wsr create implementation-workflow@0.3.0`、`/wsr list` 与 `/wsr status`。重启 Intake 时会保留 Manifest/current-slot 与 private binding state 以供恢复。
+
+默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
+
+完整步骤见 repository-owned [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。GitHub Release 直接附带同一份 quickstart/reference bytes，不维护第二份 release-only manual。
+
+Host-neutral embedding 从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。Observation 默认关闭；将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
 
 ## 获取源码
 

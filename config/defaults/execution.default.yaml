@@ -1,0 +1,42 @@
+schemaVersion: execution.config@1.0.0
+paths:
+  repositoryRoot: __REQUIRED__:paths.repositoryRoot
+  workspaceRoot: __REQUIRED__:paths.workspaceRoot
+  allowedWorktreeRoots:
+    - __REQUIRED__:paths.workspaceRoot
+  stateRoot: __REQUIRED__:paths.stateRoot
+  credentialStorePath: __REQUIRED__:paths.credentialStorePath
+workflowSource:
+  kind: github
+  repository: firestige/workflow-package
+  releasesBaseUrl: https://api.github.com/repos/firestige/workflow-package/releases
+  assetPattern: workflow-package-{name}-{version}.tar.gz
+runner:
+  implementationKey: runner.v1
+  host:
+    engine: langgraph
+  provider:
+    key: dsh
+    route: __REQUIRED__:runner.provider.route
+    modelId: __REQUIRED__:runner.provider.modelId
+    baseUrl: __REQUIRED__:runner.provider.baseUrl
+    credentialRef: __REQUIRED__:runner.provider.credentialRef
+    maxParallelToolCalls: 4
+observation:
+  enabled: false
+  timeoutMs: 1000
+  maxBatchRecords: 512
+  maxBatchBytes: 4194304
+  flushIntervalMs: 1000
+  shutdownFlushMs: 3000
+  serviceName: workflow-self-recursive-execution
+controls:
+  startupTimeoutMs: 30000
+  executionTimeoutMs: 3600000
+  shutdownTimeoutMs: 10000
+  maxConcurrentDeliveries: 4
+  allowExplicitRefresh: false
+  diagnosticMaxBytes: 4096
+intake:
+  maxCorrelationBytes: 256
+  maxOutputBytes: 8192

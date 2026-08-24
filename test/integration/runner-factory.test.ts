@@ -66,6 +66,7 @@ const dependencies = Object.freeze({
   workflow: Object.freeze({
     async request() { throw new Error("walking skeleton does not enter Workflow Wait"); },
   }),
+  observation: Object.freeze({ async observe() {} }),
   hostOperations: Object.freeze({}),
 });
 
@@ -135,6 +136,15 @@ describe("RunnerFactory", () => {
       code: "RUNNER_FACTORY_CONFIGURATION_INVALID",
     });
     expect(reads).toBe(0);
+  });
+
+  it("requires the externally wired one-way Observation port", async () => {
+    const factory = new RunnerFactory();
+    const config = await fixtureConfig();
+    const { observation: _observation, ...missing } = dependencies;
+    await expect(factory.create(config, Object.freeze(missing) as never)).rejects.toMatchObject({
+      code: "RUNNER_FACTORY_CONFIGURATION_INVALID",
+    });
   });
 
   it("contains exact Provider startup failure and publishes no adapter", async () => {

@@ -422,6 +422,7 @@ describe("managed Invocation", () => {
     const resumed = await fixture.manager.host.continueWithInput({
       episode: episode() as InvocationDispatch["episode"],
       response: {
+        kind: "ANSWER",
         requestIdentity: "request-1",
         content: true,
         contentIdentity: contentIdentity(true),
@@ -431,6 +432,34 @@ describe("managed Invocation", () => {
     expect(resumed).toMatchObject({ ok: true, value: { kind: "completed", interactionReceipts: [{ requestIdentity: "request-1" }] } });
     expect(fixture.provider.openCount).toBe(1);
     expect(fixture.provider.restored).toEqual(["native-session-1"]);
+    expect(fixture.provider.session.inputs[1]).toMatchObject({ kind: "interaction-response", response: { kind: "ANSWER", requestIdentity: "request-1" } });
+  });
+
+  it("preserves ACTION_FINISH_REQUESTED as a distinct same-session Action interaction input", async () => {
+    const fixture = await harness([
+      [{ kind: "input-request", requestIdentity: "request-finish", prompt: { text: "anything else?" }, responseSchema: { type: "string" } }],
+      [{ kind: "structured-completion", result: { accepted: true } }],
+    ]);
+    const first = await fixture.manager.host.start(dispatch(), sink().value);
+    if (!first.ok || first.value.kind !== "awaiting-input") throw new Error("expected pending Action input");
+
+    const resumed = await fixture.manager.host.continueWithInput({
+      episode: first.value.episode,
+      response: {
+        kind: "ACTION_FINISH_REQUESTED",
+        requestIdentity: first.value.request.identity,
+        content: "final answer",
+        contentIdentity: contentIdentity("final answer"),
+      },
+    }, sink().value);
+
+    expect(resumed).toMatchObject({ ok: true, value: { kind: "completed" } });
+    expect(fixture.provider.openCount).toBe(1);
+    expect(fixture.provider.restored).toEqual(["native-session-1"]);
+    expect(fixture.provider.session.inputs[1]).toMatchObject({
+      kind: "interaction-response",
+      response: { kind: "ACTION_FINISH_REQUESTED", requestIdentity: "request-finish", content: "final answer" },
+    });
   });
 
   it("returns unknown when exact native restore fails and never falls back to fresh", async () => {
@@ -442,7 +471,7 @@ describe("managed Invocation", () => {
 
     const resumed = await fixture.manager.host.continueWithInput({
       episode: episode() as InvocationDispatch["episode"],
-      response: { requestIdentity: "request-1", content: "answer", contentIdentity: contentIdentity("answer") } as never,
+      response: { kind: "ANSWER", requestIdentity: "request-1", content: "answer", contentIdentity: contentIdentity("answer") } as never,
     }, sink().value);
 
     expect(resumed).toMatchObject({ ok: true, value: { kind: "unknown", uncertainty: { owner: "invocation" } } });

@@ -99,6 +99,47 @@ describe("static dependency boundary", () => {
     ]);
   });
 
+  it("I3-W0-HOST-NEUTRAL rejects native dependencies from the public application contract", () => {
+    expect(boundaryViolations([
+      source(
+        "src/application/execution-application.ts",
+        "@deepseek-ai/cordis",
+        "@deepseek-ai/dsh-session",
+        "../providers/dsh/native-session.js",
+        "../composition/runner-factory.js",
+      ),
+    ])).toEqual([
+      "src/application/execution-application.ts cannot import host-native dependency @deepseek-ai/cordis",
+      "src/application/execution-application.ts cannot import host-native dependency @deepseek-ai/dsh-session",
+      "src/application/execution-application.ts cannot import host-native dependency src/providers/dsh/native-session.js",
+      "src/application/execution-application.ts cannot import composition",
+    ]);
+  });
+
+  it("I3-W1-HOST-NEUTRAL rejects native and Provider-private dependencies from configuration/bootstrap", () => {
+    expect(boundaryViolations([
+      source("src/configuration/loader.ts", "@deepseek-ai/dsh", "../providers/dsh/adapter.js"),
+      source("src/bootstrap/execution-bootstrap.ts", "@deepseek-ai/cordis", "../providers/dsh/native-session.js"),
+    ])).toEqual([
+      "src/configuration/loader.ts cannot import host-native dependency @deepseek-ai/dsh",
+      "src/configuration/loader.ts cannot import host-native dependency src/providers/dsh/adapter.js",
+      "src/bootstrap/execution-bootstrap.ts cannot import host-native dependency @deepseek-ai/cordis",
+      "src/bootstrap/execution-bootstrap.ts cannot import host-native dependency src/providers/dsh/native-session.js",
+    ]);
+  });
+
+  it("I3-W2-HOST-NEUTRAL rejects native Intake, DSH session, and Provider dependencies from Core/M01", () => {
+    expect(boundaryViolations([
+      source("src/core/request.ts", "@deepseek-ai/cordis", "../providers/dsh/native-session.js"),
+      source("src/delivery/admission.ts", "@deepseek-ai/dsh-session", "../providers/provider.js"),
+    ])).toEqual([
+      "src/core/request.ts cannot import host-native dependency @deepseek-ai/cordis",
+      "src/core/request.ts cannot import host-native dependency src/providers/dsh/native-session.js",
+      "src/delivery/admission.ts cannot import host-native dependency @deepseek-ai/dsh-session",
+      "src/delivery/admission.ts cannot import host-native dependency src/providers/provider.js",
+    ]);
+  });
+
   it("G00-R4-CLI typechecks and scans the current source tree", () => {
     expect(staticBoundaryMain(projectRoot)).toBe(0);
   });

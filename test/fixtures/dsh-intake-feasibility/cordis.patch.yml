@@ -1,0 +1,5 @@
+- insert:
+    - id: workflow-execution
+      name: "@workflow-self-recursive/dsh-intake-feasibility"
+      config:
+        configPath: "/tmp/execution-config.yaml"

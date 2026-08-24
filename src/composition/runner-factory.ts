@@ -20,6 +20,7 @@ import { FileInvocationJournalStore } from "../invocation/journal.js";
 import { createManagedInvocation, type InvocationResultValidator } from "../invocation/managed-invocation.js";
 import { DshProviderAdapterFactory, type DshProviderAdapterConfiguration } from "../providers/dsh/index.js";
 import type { ProviderAdapter, ProviderAdapterFactory, ProviderAdapterKey } from "../providers/provider.js";
+import type { RunnerObservationPort } from "../coordinator/runner-coordinator.js";
 import { createExecutionRuntimeAdapter } from "./create-execution-runtime-adapter.js";
 
 export interface RunnerFactoryConfig {
@@ -45,6 +46,7 @@ export interface RunnerFactoryConfig {
 export interface RunnerFactoryDependencies {
   readonly interaction: ActionInteractionBridge;
   readonly workflow: WorkflowControlBridge;
+  readonly observation: RunnerObservationPort;
   readonly hostOperations: Readonly<Record<string, HostOperationHandler>>;
 }
 
@@ -163,16 +165,18 @@ function admitConfiguration(candidate: RunnerFactoryConfig): RunnerFactoryConfig
 
 function admitDependencies(candidate: RunnerFactoryDependencies): RunnerFactoryDependencies {
   if (!Object.isFrozen(candidate)) throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact and immutable");
-  const root = exactData(candidate, ["interaction", "workflow", "hostOperations"]);
+  const root = exactData(candidate, ["interaction", "workflow", "observation", "hostOperations"]);
   const interaction = exactMethods(root?.interaction, ["publish", "requestInput"]);
   const workflow = exactMethods(root?.workflow, ["request"]);
+  const observation = exactMethods(root?.observation, ["observe"]);
   const hostOperations = exactHostOperations(root?.hostOperations);
-  if (root === undefined || interaction === undefined || workflow === undefined || hostOperations === undefined) {
+  if (root === undefined || interaction === undefined || workflow === undefined || observation === undefined || hostOperations === undefined) {
     throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact capabilities");
   }
   return Object.freeze({
     interaction: interaction as unknown as ActionInteractionBridge,
     workflow: workflow as unknown as WorkflowControlBridge,
+    observation: observation as unknown as RunnerObservationPort,
     hostOperations,
   });
 }
@@ -319,8 +323,6 @@ function custodyFacade(custody: HostCustody): HostCustody {
   });
 }
 
-const OBSERVATION = Object.freeze({ async observe(): Promise<void> {} });
-
 export class RunnerFactory {
   readonly #providers = new ExactProviderFactoryRegistry([new DshProviderAdapterFactory()]);
   readonly #resources = new WeakMap<ExecutionRuntimeAdapter, { provider: ProviderAdapter; disposed: boolean }>();
@@ -363,7 +365,7 @@ export class RunnerFactory {
         custody,
         interaction: admittedDependencies.interaction,
         workflow: admittedDependencies.workflow,
-        observation: OBSERVATION,
+        observation: admittedDependencies.observation,
         publicationTarget,
         implementationIdentity: config.implementationIdentity as ImplementationId,
       });

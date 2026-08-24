@@ -14,7 +14,14 @@ const projectRoot = path.resolve(import.meta.dirname, "../..");
 
 describe("implementation Harness", () => {
   it.each<[HarnessPhase, readonly string[]]>([
-    ["feasibility", ["pnpm", "exec", "vitest", "run", "test/tooling/feasibility.test.ts"]],
+    ["feasibility", [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "test/tooling/feasibility.test.ts",
+      "test/tooling/iteration-3-feasibility.test.ts",
+    ]],
     ["focused", ["pnpm", "exec", "vitest", "run"]],
     ["full", ["pnpm", "exec", "vitest", "run"]],
     ["coverage", ["pnpm", "exec", "vitest", "run", "--coverage"]],

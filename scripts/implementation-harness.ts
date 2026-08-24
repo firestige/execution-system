@@ -15,7 +15,14 @@ export type HarnessPhase = (typeof HARNESS_PHASES)[number];
 type Command = readonly [string, ...string[]];
 
 const COMMANDS: Readonly<Record<HarnessPhase, Command>> = {
-  feasibility: ["pnpm", "exec", "vitest", "run", "test/tooling/feasibility.test.ts"],
+  feasibility: [
+    "pnpm",
+    "exec",
+    "vitest",
+    "run",
+    "test/tooling/feasibility.test.ts",
+    "test/tooling/iteration-3-feasibility.test.ts",
+  ],
   focused: ["pnpm", "exec", "vitest", "run"],
   full: ["pnpm", "exec", "vitest", "run"],
   coverage: ["pnpm", "exec", "vitest", "run", "--coverage"],

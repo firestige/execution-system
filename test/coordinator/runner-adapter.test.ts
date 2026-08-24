@@ -102,7 +102,7 @@ function fixture(dispositions: HostDisposition[], retirement?: Partial<Record<"h
   } as unknown as CoordinatorCustody;
   const interaction = {
     publish: vi.fn(async () => ok(undefined)),
-    requestInput: vi.fn(async (request: ActionInputRequest) => ok({ requestIdentity: request.identity, content: { answer: "yes" }, contentIdentity: canonicalDigest({ answer: "yes" }) })),
+    requestInput: vi.fn(async (request: ActionInputRequest) => ok({ kind: "ANSWER" as const, requestIdentity: request.identity, content: { answer: "yes" }, contentIdentity: canonicalDigest({ answer: "yes" }) })),
   };
   const workflow = { request: vi.fn(async (request: any) => ok({ controlIdentity: request.controlIdentity, correlationIdentity: request.correlationIdentity, content: true, contentIdentity: canonicalDigest(true) })) };
   const observe = vi.fn(async () => undefined);
