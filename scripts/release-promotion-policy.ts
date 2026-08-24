@@ -38,6 +38,7 @@ export function assertFinalPromotionEligible(
   evidence: ReleaseQualificationEvidence,
   currentCommit: string,
   actualArtifactMetadataSha256?: string,
+  expectedCandidateTag?: string,
 ): void {
   if (!STABLE_VERSION.test(finalTag) || finalTag !== evidence.packageVersion) {
     throw new ReleasePromotionPolicyError("FINAL_VERSION_MISMATCH");
@@ -61,20 +62,24 @@ export function assertFinalPromotionEligible(
     && evidence.artifactMetadataSha256 !== actualArtifactMetadataSha256) {
     throw new ReleasePromotionPolicyError("QUALIFICATION_ARTIFACT_MISMATCH");
   }
+  if (expectedCandidateTag !== undefined && evidence.candidateTag !== expectedCandidateTag) {
+    throw new ReleasePromotionPolicyError("QUALIFICATION_CANDIDATE_MISMATCH");
+  }
 }
 
 export async function runReleasePromotionPolicy(args: readonly string[]): Promise<void> {
-  const [operation, tag, value, commit] = args;
+  const [operation, tag, value, commit, expectedCandidateTag] = args;
   if (operation === "candidate" && tag !== undefined && value !== undefined) {
     assertPrereleaseCandidate(tag, value);
     return;
   }
-  if (operation === "promote" && tag !== undefined && value !== undefined && commit !== undefined) {
+  if (operation === "promote" && tag !== undefined && value !== undefined && commit !== undefined
+    && expectedCandidateTag !== undefined) {
     const evidenceFile = path.resolve(value);
     const evidence = JSON.parse(await readFile(evidenceFile, "utf8")) as ReleaseQualificationEvidence;
     const metadata = await readFile(path.join(path.dirname(evidenceFile), "release-metadata.json"));
     const metadataSha256 = `sha256:${createHash("sha256").update(metadata).digest("hex")}`;
-    assertFinalPromotionEligible(tag, evidence, commit, metadataSha256);
+    assertFinalPromotionEligible(tag, evidence, commit, metadataSha256, expectedCandidateTag);
     return;
   }
   throw new ReleasePromotionPolicyError("RELEASE_POLICY_USAGE_INVALID");

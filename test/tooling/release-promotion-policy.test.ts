@@ -30,7 +30,7 @@ describe("Execution release promotion policy", () => {
       remotePrereleaseE2E: { status: "PASS" },
     } as const;
 
-    expect(() => assertFinalPromotionEligible("0.1.1", evidence, evidence.commit, evidence.artifactMetadataSha256)).not.toThrow();
+    expect(() => assertFinalPromotionEligible("0.1.1", evidence, evidence.commit, evidence.artifactMetadataSha256, evidence.candidateTag)).not.toThrow();
     expect(() => assertFinalPromotionEligible("0.1.1", {
       ...evidence,
       remotePrereleaseE2E: { status: "FAIL" },
@@ -49,6 +49,8 @@ describe("Execution release promotion policy", () => {
       .toThrowError("FINAL_VERSION_MISMATCH");
     expect(() => assertFinalPromotionEligible("0.1.1", evidence, evidence.commit, "sha256:" + "b".repeat(64)))
       .toThrowError("QUALIFICATION_ARTIFACT_MISMATCH");
+    expect(() => assertFinalPromotionEligible("0.1.1", evidence, evidence.commit, evidence.artifactMetadataSha256, "0.1.1-rc.2"))
+      .toThrowError("QUALIFICATION_CANDIDATE_MISMATCH");
   });
 
   it("executes the same candidate and promotion checks used by the workflows", async () => {
@@ -69,7 +71,7 @@ describe("Execution release promotion policy", () => {
 
     await expect(runReleasePromotionPolicy(["candidate", "0.1.1-rc.1", "0.1.1"])).resolves.toBeUndefined();
     await expect(runReleasePromotionPolicy([
-      "promote", "0.1.1", path.join(root, "release-qualification.json"), commit,
+      "promote", "0.1.1", path.join(root, "release-qualification.json"), commit, "0.1.1-rc.1",
     ])).resolves.toBeUndefined();
     await expect(runReleasePromotionPolicy([])).rejects.toThrowError("RELEASE_POLICY_USAGE_INVALID");
   });

@@ -66,9 +66,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FINAL_TAG: ${{ inputs.final_tag }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
         run: |
           test "$(git rev-parse HEAD)" = "${{ steps.candidate.outputs.sha }}"
-          pnpm release:policy promote "$FINAL_TAG" "$RUNNER_TEMP/qualified-release/release-qualification.json" "$(git rev-parse HEAD)"
+          pnpm release:policy promote "$FINAL_TAG" "$RUNNER_TEMP/qualified-release/release-qualification.json" "$(git rev-parse HEAD)" "$CANDIDATE_TAG"
           if gh release view "$FINAL_TAG" >/dev/null 2>&1; then
             echo "final tag already exists" >&2
             exit 1
