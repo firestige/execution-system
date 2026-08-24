@@ -25,6 +25,8 @@ export class DocumentationVerificationError extends Error {
 const GUIDE_FILES = Object.freeze([
   "docs/guides/dsh-execution-quickstart.md",
   "docs/guides/dsh-execution-quickstart.zh-CN.md",
+  "docs/guides/dsh-execution-local-e2e.md",
+  "docs/guides/dsh-execution-local-e2e.zh-CN.md",
   "docs/reference/execution-configuration.md",
   "docs/reference/execution-configuration.zh-CN.md",
 ]);
@@ -97,15 +99,11 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     verifyRelativeLinks(path.join(options.executionRoot, "packages/dsh-intake/README.md"), packageReadme),
   ]);
 
-  for (const guide of guideValues.slice(0, 2)) {
+  for (const guide of guideValues.slice(0, 4)) {
     includesAll(guide.value, [...IDENTITIES, ...COMMANDS], guide.relative);
-    includesAll(guide.value, ["node --version", "pnpm --version", "npm install --global pnpm", "dsh --version", "@deepseek-ai/dsh@0.1.1-rc.2", "execution-config init", "execution-config validate", "execution-config dump-effective", "--dump-config", "dsh --help", "dsh web", "plugin --profile web add", "plugin --profile web update", "plugin --profile web remove", "webserver", "ui-conversation", "ui-commands"], guide.relative);
+    includesAll(guide.value, ["node --version", "pnpm --version", "npm install --global pnpm", "dsh --version", "@deepseek-ai/dsh@0.1.1-rc.2", "--dump-config", "dsh --help", "dsh web", "plugin --profile web add", "plugin --profile web update", "plugin --profile web remove", "webserver", "ui-conversation", "ui-commands"], guide.relative);
     if (guide.value.includes("dsh --profile web --help")) {
       throw new DocumentationVerificationError("DOCUMENTATION_IDENTITY_MISMATCH", `${guide.relative}: interactive profile help must not be used as launcher help`);
-    }
-    if (!guide.value.includes("release:artifacts") || !guide.value.includes("release:verify")
-      || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
-      throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
     }
     const pnpmProbe = guide.value.indexOf("pnpm --version");
     const pnpmInstall = guide.value.indexOf("npm install --global pnpm");
@@ -118,7 +116,19 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
       throw new DocumentationVerificationError("DOCUMENTATION_PREREQUISITE_CHECK_NOT_MANUAL", guide.relative);
     }
   }
-  for (const guide of guideValues.slice(2)) {
+  for (const guide of guideValues.slice(0, 2)) {
+    includesAll(guide.value, ["gh release download", "firestige/execution-system", "execution-config init", "execution-config validate", "execution-config dump-effective"], guide.relative);
+    if (guide.value.includes("quickstart:prepare") || guide.value.includes("release:artifacts")) {
+      throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
+    }
+  }
+  for (const guide of guideValues.slice(2, 4)) {
+    includesAll(guide.value, ["quickstart:prepare", "tmp/local-e2e/release", "wsr-local/execution.json"], guide.relative);
+    if (guide.value.includes("gh release download") || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
+      throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
+    }
+  }
+  for (const guide of guideValues.slice(4)) {
     includesAll(guide.value, ["execution.config@1.0.0", "credentialStorePath", "credentialRef", "modelId", "baseUrl", "workflowSource", "observation", "controls", "READY", "CLOSED"], guide.relative);
   }
   includesAll(packageReadme, [

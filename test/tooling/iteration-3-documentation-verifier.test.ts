@@ -33,7 +33,7 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
     await expect(verifyIteration3Documentation({ superRoot: repositorySuperRoot, executionRoot: repositoryExecutionRoot })).resolves.toEqual({
       commands: 6,
       configExamples: 4,
-      guides: 4,
+      guides: 6,
     });
   });
 
@@ -50,7 +50,7 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
 
   it("rejects a pre-release E2E guide that installs Execution from a GitHub Release", async () => {
     const roots = await fixture();
-    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-local-e2e.md");
     const value = await readFile(file, "utf8");
     await writeFile(file, `${value}\ncurl https://github.com/firestige/execution-system/releases/download/0.1.1/plugin.tgz\n`);
 

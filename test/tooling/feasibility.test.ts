@@ -31,7 +31,7 @@ describe("I2-G00 selected substrate matrix", () => {
     };
 
     expect(process.versions.node).toBe("24.12.0");
-    expect(project.packageManager).toBe("pnpm@9.15.0");
+    expect(project.packageManager).toBe("pnpm@11.23.0");
 
     const git = spawnSync("git", ["--version"], { encoding: "utf8", shell: false });
     expect(git.status).toBe(0);

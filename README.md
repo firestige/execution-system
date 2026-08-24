@@ -18,7 +18,7 @@ This repository is part of workflow-self-recursive's architecture-first develope
 
 ## Release quickstart
 
-1. Before release, build the `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake` `0.1.1` artifacts from this checkout with `pnpm release:artifacts <directory>`.
+1. Before release, run `pnpm quickstart:prepare` to build and verify both `0.1.1` artifacts and initialize local E2E configuration in one operation.
 2. Copy `config/defaults/execution.default.yaml`, replace each `__REQUIRED__` value, and provision the referenced API key in the external DSH credential file (`version: 1`, `refs: ...`).
 3. In a DSH profile with an interactive app (the shipped `web` profile is the reference), first run `dsh plugin --profile web add --workspace-root <absolute-execution-system-tarball>`, then run the same command with `<absolute-dsh-intake-tarball>`. The flag is required by the workspace created by the current DSH preview.
 4. Set the plugin row's absolute `configFile` and `bindingFile`, then verify it with `dsh --profile web --dump-config` and `dsh --profile web --help`.
@@ -26,7 +26,7 @@ This repository is part of workflow-self-recursive's architecture-first develope
 
 The default Source is the configured `firestige/workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
 
-See the repository-owned [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md), [configuration reference](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md), and [DSH Intake package reference](packages/dsh-intake/README.md). The same quickstart/reference bytes are attached to the GitHub Release; there is no second release-only manual.
+See the repository-owned [local pre-release E2E guide](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.md), final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md), [configuration reference](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md), and [DSH Intake package reference](packages/dsh-intake/README.md). Release automation and user installation remain separate surfaces.
 
 For direct embedding, import `ExecutionApplicationFactory`, `DefaultExecutionApplicationFactory`, `ExecutionRequest`, `TaskPrompt`, and the configuration types from the package root. Calling the default factory's `create(configFile, dependencies)` is the single production bootstrap path. The exact DSH runtime is an optional peer: package-root import/type consumers need not install it, while executing the current `dsh` Provider requires the embedding profile to provide `@deepseek-ai/dsh@0.1.1-rc.2`. The release includes `config/schema/execution.config.schema.json`, versioned defaults/examples, compiled TypeScript declarations, and `execution-config init|copy|validate|dump-effective`. Observation is disabled by default; set `observation.enabled: true` with a loopback OTLP base `endpoint` to enable the non-controlling exporter.
 

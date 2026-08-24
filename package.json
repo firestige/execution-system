@@ -23,7 +23,7 @@
     "README.zh-CN.md",
     "LICENSE"
   ],
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@11.23.0",
   "engines": {
     "node": ">=24.12.0 <25"
   },
@@ -37,6 +37,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
+    "quickstart:prepare": "pnpm install --frozen-lockfile && node --import tsx scripts/prepare-local-e2e.ts",
     "release:artifacts": "node --import tsx scripts/build-release-artifacts.ts",
     "release:verify": "node --import tsx scripts/verify-release-artifacts.ts",
     "release:policy": "node --import tsx scripts/release-promotion-policy.ts",

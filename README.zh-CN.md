@@ -18,7 +18,7 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 
 ## Release 快速开始
 
-1. 发布前用 `pnpm release:artifacts <directory>` 从当前 checkout 构建 `@workflow-self-recursive/execution-system` 与 `@workflow-self-recursive/dsh-intake` 的 `0.1.1` artifact。
+1. 发布前运行 `pnpm quickstart:prepare`，一次完成两个 `0.1.1` artifact 的构建、验证和本地 E2E 配置初始化。
 2. 复制 `config/defaults/execution.default.yaml`，替换全部 `__REQUIRED__` 值，并在外置 DSH credential 文件中 provision 所引用的 API key（格式为 `version: 1`、`refs: ...`）。
 3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，再以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志。
 4. 为 plugin row 填写 absolute `configFile` 与 `bindingFile`，再执行 `dsh --profile web --dump-config` 和 `dsh --profile web --help` 验证。
@@ -26,7 +26,7 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 
 默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 
-完整步骤见 repository-owned [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。GitHub Release 直接附带同一份 quickstart/reference bytes，不维护第二份 release-only manual。
+完整步骤见 repository-owned [本地发布前 E2E 指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.zh-CN.md)、final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。Release automation 与用户安装保持为不同 surface。
 
 Host-neutral embedding 从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。Observation 默认关闭；将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
 
