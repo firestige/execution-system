@@ -267,21 +267,41 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     }, "PRODUCT_SECOND_INPUT_UNRESOLVED", 420_000);
     if (afterAnswer.kind !== "action-input-request") throw new Error("PRODUCT_SECOND_INPUT_NOT_REQUESTED");
     const eventsBeforeFinish = await events(cdp);
-    const outputBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "action-output").length;
     const inputBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "action-input-request").length;
     const terminalBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "terminal-result").length;
     const statusBeforeFinish = eventsBeforeFinish.filter((event) => event.kind === "delivery-status").length;
     await submitBrowserCommand(cdp, "/wsr action finish");
     await waitForKind(cdp, "delivery-status", statusBeforeFinish, 120_000, "chat");
-    await waitFor(async () => {
+    const afterFinish = await waitFor(async () => {
       const observed = await events(cdp!);
-      return observed.filter((event) => event.kind === "action-output").length > outputBeforeFinish
-        || observed.filter((event) => event.kind === "action-input-request").length > inputBeforeFinish
-        || observed.filter((event) => event.kind === "terminal-result").length > terminalBeforeFinish
-        ? true : undefined;
+      const input = observed.filter((event) => event.surface === "chat" && event.kind === "action-input-request");
+      if (input.length > inputBeforeFinish) return input.at(-1);
+      const terminal = observed.filter((event) => event.surface === "chat" && event.kind === "terminal-result");
+      if (terminal.length > terminalBeforeFinish) return terminal.at(-1);
+      try {
+        for (const name of await readdir(activeCoordinatorDirectory)) {
+          const coordinator = JSON.parse(await readFile(path.join(activeCoordinatorDirectory, name), "utf8"));
+          if (coordinator.phase === "terminal") return { kind: "terminal-result" };
+        }
+      } catch { /* Coordinator may still be advancing. */ }
+      return undefined;
     }, "PRODUCT_ACTION_FINISH_NOT_OBSERVED", 300_000);
 
     const manifestDirectory = path.join(durable, "state", "manifests");
+    if (afterFinish.kind === "terminal-result") {
+      const manifestsBeforeRecovery = new Set(await readdir(manifestDirectory));
+      const recoveryInputBefore = (await events(cdp)).filter((event) => event.surface === "chat" && event.kind === "action-input-request").length;
+      await submitBrowserCommand(cdp, "/wsr create system-design-workflow@0.3.0\nBefore any design work, call workflow_request_input once to ask for a recovery-check detail. Do not call workflow_complete until the external answer is received.");
+      activeSystemManifestName = await waitFor(async () => {
+        for (const name of await readdir(manifestDirectory)) {
+          if (manifestsBeforeRecovery.has(name)) continue;
+          const manifest = JSON.parse(await readFile(path.join(manifestDirectory, name), "utf8"));
+          if (manifest.resolvedPackage?.name === "system-design-workflow") return name;
+        }
+        return undefined;
+      }, "PRODUCT_RECOVERY_MANIFEST_NOT_CREATED", 120_000);
+      await waitForKind(cdp, "action-input-request", recoveryInputBefore, 420_000, "chat");
+    }
     const bindingDocumentBefore = JSON.parse(await readFile(bindingFile, "utf8"));
     const bindingBefore = bindingDocumentBefore.bindings?.find((entry: any) => entry.sessionKey === firstSession);
     if (bindingBefore === undefined) throw new Error("PRODUCT_SYSTEM_BINDING_MISSING");
