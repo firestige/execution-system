@@ -1,6 +1,8 @@
 import { mkdtemp, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +18,8 @@ import {
   redactEffectiveConfiguration,
 } from "../../src/configuration/index.js";
 import { runExecutionConfigCli } from "../../src/configuration/cli.js";
+
+const execFileAsync = promisify(execFile);
 
 async function deployment() {
   const root = await mkdtemp(join(tmpdir(), "execution-config-"));
@@ -93,6 +97,17 @@ async function loadDocument(extension: ".json" | ".yaml", document: unknown) {
 }
 
 describe("execution installation configuration", () => {
+  it("runs the configuration CLI through a package-manager-style bin symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "execution-config-bin-"));
+    const bin = join(root, "execution-config");
+    const output = join(root, "execution.yaml");
+    await symlink(join(import.meta.dirname, "../../src/configuration/cli.ts"), bin);
+
+    const result = await execFileAsync(process.execPath, ["--import", "tsx", bin, "init", output, "yaml"]);
+
+    expect(result.stdout).toContain("initialized from execution.default@execution.config@1.0.0");
+    expect(await readFile(output, "utf8")).toContain("schemaVersion: execution.config@1.0.0");
+  });
   it("normalizes equivalent YAML and JSON to one frozen value and stable identities", async () => {
     const paths = await deployment();
     const value = input(paths);

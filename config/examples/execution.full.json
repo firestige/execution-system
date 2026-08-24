@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "execution.config@1.0.0",
+  "paths": {
+    "repositoryRoot": "/srv/wsr/repository",
+    "workspaceRoot": "/srv/wsr/workspaces",
+    "allowedWorktreeRoots": ["/srv/wsr/workspaces"],
+    "stateRoot": "/var/lib/wsr/execution",
+    "credentialStorePath": "/var/lib/wsr/credentials.yml"
+  },
+  "workflowSource": {
+    "kind": "github",
+    "repository": "firestige/workflow-package",
+    "releasesBaseUrl": "https://api.github.com/repos/firestige/workflow-package/releases",
+    "assetPattern": "workflow-package-{name}-{version}.tar.gz"
+  },
+  "runner": {
+    "implementationKey": "runner.v1",
+    "host": { "engine": "langgraph" },
+    "provider": {
+      "key": "dsh",
+      "route": "deepseek",
+      "modelId": "deepseek-chat",
+      "baseUrl": "https://api.deepseek.com",
+      "credentialRef": "DEEPSEEK_API_KEY",
+      "maxParallelToolCalls": 8
+    }
+  },
+  "observation": {
+    "enabled": true,
+    "endpoint": "http://127.0.0.1:4318",
+    "timeoutMs": 2000,
+    "maxBatchRecords": 512,
+    "maxBatchBytes": 4194304,
+    "flushIntervalMs": 1000,
+    "shutdownFlushMs": 5000,
+    "serviceName": "workflow-self-recursive-execution"
+  },
+  "controls": {
+    "startupTimeoutMs": 60000,
+    "executionTimeoutMs": 7200000,
+    "shutdownTimeoutMs": 20000,
+    "maxConcurrentDeliveries": 8,
+    "allowExplicitRefresh": true,
+    "diagnosticMaxBytes": 8192
+  },
+  "intake": { "maxCorrelationBytes": 512, "maxOutputBytes": 16384 }
+}

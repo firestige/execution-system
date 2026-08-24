@@ -40,11 +40,11 @@
     "release:artifacts": "node --import tsx scripts/build-release-artifacts.ts",
     "release:verify": "node --import tsx scripts/verify-release-artifacts.ts",
     "release:workflow-assets": "node --import tsx scripts/build-workflow-release-assets.ts",
+    "verify:iteration3-docs": "node --import tsx scripts/verify-iteration-3-documentation.ts . ..",
     "verify:dsh-intake": "node --import tsx scripts/verify-dsh-intake-distribution.ts",
     "qualify:dsh-package-lifecycle": "node --import tsx scripts/qualify-dsh-package-lifecycle.ts"
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.1-rc.2",
     "@langchain/core": "1.2.9",
     "@langchain/langgraph": "1.4.12",
     "@langchain/langgraph-checkpoint-sqlite": "1.0.4",
@@ -60,7 +60,16 @@
     "yaml": "2.9.0",
     "zod": "4.2.0"
   },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": "0.1.1-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.1-rc.2",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.13.3",
     "@vitest/coverage-v8": "4.1.11",

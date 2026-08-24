@@ -26,7 +26,9 @@ This repository is part of workflow-self-recursive's architecture-first develope
 
 The default Source is the configured `firestige/workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
 
-See [the DSH Intake reference](packages/dsh-intake/README.md) for exact commands and multi-turn Action behavior.
+See the repository-owned [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md), [configuration reference](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md), and [DSH Intake package reference](packages/dsh-intake/README.md). The same quickstart/reference bytes are attached to the GitHub Release; there is no second release-only manual.
+
+For direct embedding, import `ExecutionApplicationFactory`, `DefaultExecutionApplicationFactory`, `ExecutionRequest`, `TaskPrompt`, and the configuration types from the package root. Calling the default factory's `create(configFile, dependencies)` is the single production bootstrap path. The exact DSH runtime is an optional peer: package-root import/type consumers need not install it, while executing the current `dsh` Provider requires the embedding profile to provide `@deepseek-ai/dsh@0.1.1-rc.2`. The release includes `config/schema/execution.config.schema.json`, versioned defaults/examples, compiled TypeScript declarations, and `execution-config init|copy|validate|dump-effective`. Observation is disabled by default; set `observation.enabled: true` with a loopback OTLP base `endpoint` to enable the non-controlling exporter.
 
 ## Get the source
 

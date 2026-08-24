@@ -1,6 +1,8 @@
 # DSH Intake for Workflow Self Recursive
 
-Preview Intake Adapter distribution. It owns `/wsr`, the Intake-only tool, the first-party instruction skill, and private conversation-to-Delivery bindings. Workflow execution remains owned by the separately installed host-neutral Execution package.
+Preview Intake Adapter distribution. It owns `/wsr`, the DSH-I-only `workflow_execution_intake` tool, the explicit `/workflow-execution` first-party instruction skill, and private conversation-to-Delivery bindings. Workflow execution remains owned by the separately installed host-neutral Execution package.
+
+Release package identities are `@workflow-self-recursive/execution-system` and `@workflow-self-recursive/dsh-intake`, both at `0.1.0` for this compatibility tuple.
 
 Install the two release artifacts in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag):
 
@@ -26,7 +28,7 @@ Check the launcher syntax with `dsh --help`, then verify the composed profile wi
 dsh --profile workflow-execution --dump-config
 ```
 
-The locked DSH preview does not use profile `--help` as a plugin-command catalog. The exact WSR command reference is below; plugin startup never creates a Delivery.
+The locked DSH preview does not use launcher or app help as a plugin-command catalog. Profile-level help belongs to the configured app and may keep that app running. The exact WSR command reference is below; plugin startup never creates a Delivery.
 
 Commands:
 
@@ -39,13 +41,18 @@ Commands:
 /wsr abandon <delivery-id>
 ```
 
+The abstract command grammar used by release parity checks is `/wsr create <name|name@latest|name@version>`, `/wsr recover [delivery-id]`, `/wsr status [delivery-id]`, and `/wsr abandon <delivery-id>`. Invoke the explicit skill as `/workflow-execution`; its instruction chooses one closed operation and calls `workflow_execution_intake` exactly once.
+
 The text and images in the current DSH turn are the Workflow prompt. There is no `--intent` argument. Ordinary answers sent while a bound Action awaits input are routed to that same Action; `/wsr action finish` requests the end of its multi-turn interaction and does not claim that the Action itself completed.
 
-Use DSH's package lifecycle for an exact compatible update, removal, or reinstall:
+Use DSH's package lifecycle for an exact compatible update, removal, or reinstall. Update Core before Intake; remove Intake before Core:
 
 ```sh
+dsh plugin --profile workflow-execution update --workspace-root @workflow-self-recursive/execution-system@<new-exact-version>
 dsh plugin --profile workflow-execution update --workspace-root @workflow-self-recursive/dsh-intake@<new-exact-version>
 dsh plugin --profile workflow-execution remove --workspace-root @workflow-self-recursive/dsh-intake
+dsh plugin --profile workflow-execution remove --workspace-root @workflow-self-recursive/execution-system
+dsh plugin --profile workflow-execution add --workspace-root @workflow-self-recursive/execution-system@<exact-version>
 dsh plugin --profile workflow-execution add --workspace-root @workflow-self-recursive/dsh-intake@<exact-version>
 ```
 

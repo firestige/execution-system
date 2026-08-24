@@ -4,7 +4,8 @@ import {
   initializeExecutionConfiguration,
   validateExecutionConfigurationFile,
 } from "./tooling.js";
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export async function runExecutionConfigCli(args: readonly string[]): Promise<string> {
   const [command, configFile, format] = args;
@@ -27,7 +28,10 @@ export async function runExecutionConfigCli(args: readonly string[]): Promise<st
   throw new TypeError("unknown execution-config command");
 }
 
-if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (
+  process.argv[1] !== undefined
+  && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   runExecutionConfigCli(process.argv.slice(2)).then(
     (output) => { process.stdout.write(output); },
     (error: unknown) => {

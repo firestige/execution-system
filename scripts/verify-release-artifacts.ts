@@ -14,6 +14,10 @@ const COMPATIBILITY = Object.freeze({
   workflowContract: "agentops.workflow-dsl@1.1.0",
   observationContract: "agentops.observation@1.0.0",
 });
+const PACKAGE_NAMES = Object.freeze<Record<string, string>>({
+  "workflow-self-recursive-execution-system-0.1.0.tgz": "@workflow-self-recursive/execution-system",
+  "workflow-self-recursive-dsh-intake-0.1.0.tgz": "@workflow-self-recursive/dsh-intake",
+});
 
 export class ReleaseArtifactVerificationError extends Error {
   constructor(readonly code: string) {
@@ -65,6 +69,20 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
     catch { throw new ReleaseArtifactVerificationError("RELEASE_ARTIFACT_SET_INVALID"); }
     if (bytes.byteLength !== artifact.bytes || sha256(bytes) !== artifact.sha256) {
       throw new ReleaseArtifactVerificationError("RELEASE_ARTIFACT_DIGEST_MISMATCH");
+    }
+    let publicationValue: unknown;
+    try { publicationValue = JSON.parse(await readFile(path.join(directory, `${artifact.name}.publication.json`), "utf8")); }
+    catch { throw new ReleaseArtifactVerificationError("RELEASE_PUBLICATION_RECORD_INVALID"); }
+    const publication = record(publicationValue, ["schemaVersion", "package", "compatibility", "artifact"], "RELEASE_PUBLICATION_RECORD_INVALID");
+    const packageRecord = record(publication.package, ["name", "version"], "RELEASE_PUBLICATION_RECORD_INVALID");
+    const publicationCompatibility = record(publication.compatibility, Object.keys(COMPATIBILITY), "RELEASE_PUBLICATION_RECORD_INVALID");
+    const publicationArtifact = record(publication.artifact, ["name", "bytes", "sha256", "inventory"], "RELEASE_PUBLICATION_RECORD_INVALID");
+    if (publication.schemaVersion !== "execution.artifact-publication@1.0.0"
+      || packageRecord.name !== PACKAGE_NAMES[artifact.name as string]
+      || packageRecord.version !== VERSION
+      || JSON.stringify(publicationCompatibility) !== JSON.stringify(compatibility)
+      || JSON.stringify(publicationArtifact) !== JSON.stringify(artifact)) {
+      throw new ReleaseArtifactVerificationError("RELEASE_PUBLICATION_RECORD_MISMATCH");
     }
   }
   return Object.freeze({ version: VERSION, artifactCount: artifacts.length });

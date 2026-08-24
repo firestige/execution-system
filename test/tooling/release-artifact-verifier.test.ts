@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -33,10 +33,28 @@ async function fixture() {
     ],
   };
   await writeFile(path.join(root, "release-metadata.json"), `${JSON.stringify(metadata)}\n`);
+  for (const artifact of metadata.artifacts) {
+    await writeFile(path.join(root, `${artifact.name}.publication.json`), `${JSON.stringify({
+      schemaVersion: "execution.artifact-publication@1.0.0",
+      package: artifact.name === names.core
+        ? { name: "@workflow-self-recursive/execution-system", version: "0.1.0" }
+        : { name: "@workflow-self-recursive/dsh-intake", version: "0.1.0" },
+      compatibility: metadata.compatibility,
+      artifact,
+    })}\n`);
+  }
   return { root, metadata };
 }
 
 describe("Iteration 3 release artifact verifier", () => {
+  it("keeps the exact DSH runtime as an optional peer for host-neutral package-root consumers", async () => {
+    const manifest = JSON.parse(await readFile(path.resolve(import.meta.dirname, "../../package.json"), "utf8"));
+    expect(manifest.dependencies?.["@deepseek-ai/dsh"]).toBeUndefined();
+    expect(manifest.optionalDependencies?.["@deepseek-ai/dsh"]).toBeUndefined();
+    expect(manifest.peerDependencies?.["@deepseek-ai/dsh"]).toBe("0.1.1-rc.2");
+    expect(manifest.peerDependenciesMeta?.["@deepseek-ai/dsh"]).toEqual({ optional: true });
+  });
+
   it("accepts only the exact compatibility tuple, artifact set, digests, and ownership inventory", async () => {
     const { root } = await fixture();
     await expect(verifyExecutionReleaseArtifacts(root)).resolves.toMatchObject({ version: "0.1.0", artifactCount: 2 });
@@ -61,5 +79,21 @@ describe("Iteration 3 release artifact verifier", () => {
     embedded.metadata.artifacts[0]!.inventory.push("package/workflow-packages/implementation-workflow/package.yaml");
     await writeFile(path.join(embedded.root, "release-metadata.json"), JSON.stringify(embedded.metadata));
     await expect(verifyExecutionReleaseArtifacts(embedded.root)).rejects.toMatchObject({ code: "RELEASE_ARTIFACT_INVENTORY_INVALID" });
+  });
+
+  it("requires one exact publication record for each independently distributed package", async () => {
+    const missing = await fixture();
+    await writeFile(path.join(missing.root, `${names.plugin}.publication.json`), "{}\n");
+    await expect(verifyExecutionReleaseArtifacts(missing.root)).rejects.toMatchObject({ code: "RELEASE_PUBLICATION_RECORD_INVALID" });
+
+    const drifted = await fixture();
+    const publicationFile = path.join(drifted.root, `${names.core}.publication.json`);
+    await writeFile(publicationFile, `${JSON.stringify({
+      schemaVersion: "execution.artifact-publication@1.0.0",
+      package: { name: "@workflow-self-recursive/execution-system", version: "0.1.0" },
+      compatibility: drifted.metadata.compatibility,
+      artifact: { ...drifted.metadata.artifacts[1], sha256: digest("other") },
+    })}\n`);
+    await expect(verifyExecutionReleaseArtifacts(drifted.root)).rejects.toMatchObject({ code: "RELEASE_PUBLICATION_RECORD_MISMATCH" });
   });
 });

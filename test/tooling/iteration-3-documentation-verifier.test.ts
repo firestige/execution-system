@@ -1,0 +1,49 @@
+import { cp, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { describe, expect, it } from "vitest";
+
+import { verifyIteration3Documentation } from "../../scripts/verify-iteration-3-documentation.js";
+
+async function fixture() {
+  const sourceExecution = path.resolve(import.meta.dirname, "../..");
+  const sourceSuper = path.resolve(sourceExecution, "..");
+  const root = await mkdtemp(path.join(tmpdir(), "iteration3-docs-"));
+  const superRoot = root;
+  const executionRoot = path.join(superRoot, "execution-system");
+  await Promise.all([
+    mkdir(executionRoot, { recursive: true }),
+    mkdir(superRoot, { recursive: true }),
+  ]);
+  await Promise.all([
+    cp(path.join(sourceExecution, "config"), path.join(executionRoot, "config"), { recursive: true }),
+    cp(path.join(sourceExecution, "packages/dsh-intake"), path.join(executionRoot, "packages/dsh-intake"), { recursive: true }),
+    cp(path.join(sourceSuper, "docs"), path.join(superRoot, "docs"), { recursive: true }),
+  ]);
+  return { executionRoot, superRoot };
+}
+
+describe("Iteration 3 release documentation verifier", () => {
+  it("binds repository guides, config examples, package help, skill, and defaults to one exact surface", async () => {
+    const executionRoot = path.resolve(import.meta.dirname, "../..");
+    const superRoot = path.resolve(executionRoot, "..");
+
+    await expect(verifyIteration3Documentation({ superRoot, executionRoot })).resolves.toEqual({
+      commands: 6,
+      configExamples: 4,
+      guides: 4,
+    });
+  });
+
+  it("rejects profile-level app help presented as non-interactive launcher help", async () => {
+    const roots = await fixture();
+    const file = path.join(roots.superRoot, "docs/guides/dsh-execution-quickstart.md");
+    const value = await readFile(file, "utf8");
+    await writeFile(file, value.replace("dsh --help", "dsh --profile workflow-execution --help"));
+
+    await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
+      code: "DOCUMENTATION_IDENTITY_MISMATCH",
+    });
+  });
+});

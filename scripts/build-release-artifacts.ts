@@ -8,6 +8,10 @@ import { verifyDshIntakeDistribution } from "./verify-dsh-intake-distribution.js
 
 const repository = path.resolve(import.meta.dirname, "..");
 const destination = path.resolve(process.argv[2] ?? path.join(repository, "tmp/release"));
+const packageNames = Object.freeze<Record<string, string>>({
+  "workflow-self-recursive-execution-system-0.1.0.tgz": "@workflow-self-recursive/execution-system",
+  "workflow-self-recursive-dsh-intake-0.1.0.tgz": "@workflow-self-recursive/dsh-intake",
+});
 
 function sha256(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -47,4 +51,15 @@ const metadata = Object.freeze({
   artifacts: Object.freeze(artifacts),
 });
 await writeFile(path.join(destination, "release-metadata.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+for (const artifact of artifacts) {
+  const packageName = packageNames[artifact.name];
+  if (packageName === undefined) throw new Error(`unexpected release artifact: ${artifact.name}`);
+  const publication = Object.freeze({
+    schemaVersion: "execution.artifact-publication@1.0.0",
+    package: Object.freeze({ name: packageName, version: metadata.version }),
+    compatibility: metadata.compatibility,
+    artifact,
+  });
+  await writeFile(path.join(destination, `${artifact.name}.publication.json`), `${JSON.stringify(publication, null, 2)}\n`, "utf8");
+}
 await verifyExecutionReleaseArtifacts(destination);
