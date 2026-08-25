@@ -1,47 +1,63 @@
-# DSH Intake for Workflow Self Recursive
+# WSR DSH Intake
 
-Preview Intake Adapter distribution. It owns `/wsr`, the DSH-I-only `workflow_execution_intake` tool, the explicit `/workflow-execution` first-party instruction skill, and private conversation-to-Delivery bindings. Workflow execution remains owned by the separately installed host-neutral Execution package.
+[![npm](https://img.shields.io/npm/v/wsr-dsh-intake)](https://www.npmjs.com/package/wsr-dsh-intake)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
 
-Candidate package identities are `wsr-execution` and `wsr-dsh-intake`, both at `0.1.1` for this compatibility tuple.
+**Run version-bound, auditable agent workflows from your DeepSeek Harness chat.**
 
-Install the two release artifacts into locked DSH's built-in `web` profile in order (the current DSH preview creates a pnpm workspace and therefore requires its workspace-root flag). Core's checkpoint dependency requires pnpm 11 to approve `better-sqlite3` under the profile's `allowBuilds` before package installation. The command below is for a fresh profile; on an existing profile, preserve all existing approvals and merge `better-sqlite3: true` into `$DSH_HOME/profiles/web/pnpm-workspace.yaml`. The Intake bundle supplies a bounded WSR chat node and read-only current-session sidebar tabs; a new custom profile contains only `dsh-base` and is not an interactive Intake surface:
+This is the DeepSeek Harness entry point of the [Workflow Self-Recursive Execution System](../..): it turns chat into Delivery — resolve one exact Workflow Package, bind an immutable Delivery Manifest, and run the workflow in an isolated Runner-owned execution context (`DSH-E`), never in the Intake context. The engine (`wsr-execution`) comes as this plugin's dependency.
+
+## What you get
+
+- **Sidebar tabs** — *Deliveries* and *Current status* panels for read-only control-plane queries (no chat command needed).
+- **Chat commands** — `/wsr create`, `/wsr recover`, `/wsr action finish`, `/wsr abandon` with rendered Workflow nodes in the timeline.
+- **Explicit skill** — `/workflow-execution` performs exactly one closed operation through the DSH-I-only `workflow_execution_intake` tool.
+- **Isolated execution** — every admitted Workflow Action runs in a Runner-owned DSH execution context; the Intake never controls execution.
+- **Crash recovery** — Manifest/current-slot and private bindings persist; restart resumes from the last durable boundary.
+
+## Install
 
 ```sh
+# 1. Approve the better-sqlite3 native build once (pnpm 11)
 dsh plugin --profile web config set --location=project --json allowBuilds '{"better-sqlite3":true}'
-dsh plugin --profile web add --workspace-root /absolute/path/wsr-execution-0.1.1.tgz
-dsh plugin --profile web add --workspace-root /absolute/path/wsr-dsh-intake-0.1.1.tgz
+# 2. Install this entry — the engine (wsr-execution) is its dependency
+dsh plugin --profile web add wsr-dsh-intake
 ```
 
-The plugin accepts exactly two absolute-path settings in its DSH profile row:
+Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2` (the shipped `web` profile is the reference interactive assembly; a custom profile contains only `dsh-base` and is not an interactive Intake surface). Core and Intake versions are locked together, so a single `add` installs both and a single `update` moves both.
+
+## Configure
+
+Point the plugin at durable state files outside the installation directory:
 
 ```yaml
+# $DSH_HOME/profiles/web/cordis.patch.yml — the workflow-execution row
 - id: workflow-execution
   config:
-    configFile: /absolute/path/execution.yaml
-    bindingFile: /absolute/path/dsh-intake-bindings.json
+    configFile: /absolute/path/wsr-local/execution.yaml
+    bindingFile: /absolute/path/wsr-local/dsh-intake-bindings.json
 ```
 
-`configFile` is the canonical `ExecutionInstallationConfig`; the plugin passes it to the public bootstrap without parsing or copying Provider, credential, Source, or OTLP settings. `bindingFile` contains adapter-private DSH session-to-Delivery correlations. Keep both outside the plugin installation directory so upgrades do not replace durable state.
+- `configFile` is the canonical `ExecutionInstallationConfig`; the plugin passes it to the public bootstrap without parsing or copying Provider, credential, Source, or OTLP settings. Initialize it with `execution-config init <path> yaml`, replace the `__REQUIRED__` values, and provision the referenced API key in an external DSH credential file.
+- `bindingFile` holds adapter-private DSH session-to-Delivery correlations.
 
-Check the launcher syntax with `dsh --help`, then verify the composed profile without starting a Workflow:
+Verify the composed profile without starting a Workflow: `dsh --profile web --dump-config` (must not contain the API key), then `dsh web`.
 
-```sh
-dsh --profile web --dump-config
-dsh web
-```
+## Quick start
 
-The locked DSH preview does not use launcher or app help as a plugin-command catalog. Profile-level help belongs to the configured app and may keep that app running. The exact WSR command reference is below; plugin startup never creates a Delivery.
-
-The surface boundary is deliberate. The sidebar tabs actively query Delivery list and current Delivery status and display only those read-only control-plane results. In the chat timeline, an interactive command enters a host-owned turn as the exact native user message; the Intake pre-step consumes that turn before any DSH-I model request. The generic command lifecycle stays hidden, while acknowledgement, running state, Action output/input request, bounded errors, and unsuccessful terminal results render as assistant-style Workflow nodes without claiming model authorship. A successful terminal marker remains durable control-plane truth but is omitted from chat so the final Action answer and its actions row end the turn. For structured completion, Action output prefers whitelisted user-visible text from `workflow_complete.result` over pre-completion narration. Tool names, call identities, and argument structures never enter the presentation payload, and the Client applies the same filter defensively to older events. Each visible Action answer uses DSH's clipboard primitive, copy icon, tooltip, sizing, and theme tokens to copy only the rendered answer. This makes the conversation non-blank, so New Session creates an isolated timeline and the earlier Workflow conversation remains separately reopenable. Neither surface creates an assistant message or controls Execution. Switching sessions switches the sidebar query target; malformed presentation text is replaced with `WSR_PRESENTATION_INVALID` rather than shown raw.
-
-DSH may be launched from any directory: the plugin never substitutes the process cwd. For the issue #93 transition, an operation that must select a worktree uses the invoking conversation's exact registered workspace as its provisional worktree. The plugin accepts it only when the invoking Agent is the current live instance, the DSH workspace registry resolves the session header `cwd` to an absolute canonical workspace, and that workspace records the session as a member. A missing or mismatched registration fails with `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`.
-
-This authority is invocation-scoped and exact: it admits neither a common parent nor a sibling path, and it does not widen `paths.allowedWorktreeRoots` for public application callers. [Issue #94](https://github.com/firestige/workflow-self-recursive/issues/94) owns the later replacement of this provisional workspace-as-worktree value with a Delivery-selected worktree and its independent lifecycle. Mutation commands and consumed Action replies remain visible once as user input in chat even when admission, Source, recovery, or Runner handling fails; sidebar `list` and `status` queries remain sidebar-only.
-
-Closed operations (the `list` and `status` slash aliases remain compatibility/automation surfaces, while sidebar tabs are the default user entry):
+From the target worktree, create a Delivery from chat:
 
 ```text
-/wsr list
+/wsr create implementation-workflow@0.3.0
+Implement the requested change and preserve existing user edits.
+```
+
+Watch progress in the same conversation, inspect the bound Delivery in the sidebar **Deliveries** / **Current status** tabs, answer multi-turn Actions in chat, and finish an interaction with `/wsr action finish`.
+
+## Commands
+
+```text
+/wsr list                         # privacy-safe Delivery and worktree state
 /wsr create <name|name@latest|name@version>
 /wsr recover [delivery-id]
 /wsr status [delivery-id]
@@ -49,19 +65,38 @@ Closed operations (the `list` and `status` slash aliases remain compatibility/au
 /wsr abandon <delivery-id>
 ```
 
-The abstract command grammar used by release parity checks is `/wsr create <name|name@latest|name@version>`, `/wsr recover [delivery-id]`, `/wsr status [delivery-id]`, and `/wsr abandon <delivery-id>`. Invoke the explicit skill as `/workflow-execution`; its instruction chooses one closed operation and calls `workflow_execution_intake` exactly once.
+Sidebar tabs are the default user entry; `list` and `status` remain compatibility/automation surfaces. The explicit skill `/workflow-execution` chooses one closed operation and calls `workflow_execution_intake` exactly once. The text and images in the current DSH turn are the Workflow prompt; ordinary answers sent while a bound Action awaits input are routed to that same Action.
 
-The text and images in the current DSH turn are the Workflow prompt. There is no `--intent` argument. Ordinary answers sent while a bound Action awaits input are routed to that same Action; `/wsr action finish` requests the end of its multi-turn interaction and does not claim that the Action itself completed.
+## Surface boundary
 
-Use DSH's package lifecycle for an exact compatible update, removal, or reinstall. Update Core before Intake; remove Intake before Core:
+The sidebar tabs display only read-only control-plane results. In the chat timeline, an interactive command enters a host-owned turn as the exact native user message; the Intake pre-step consumes that turn before any DSH-I model request. Acknowledgement, running state, Action output/input request, bounded errors, and unsuccessful terminal results render as assistant-style Workflow nodes without claiming model authorship; a successful terminal marker stays durable control-plane truth but is omitted from chat. Tool names, call identities, and argument structures never enter the presentation payload. Neither surface creates an assistant message or controls Execution. Malformed presentation text is replaced with `WSR_PRESENTATION_INVALID` rather than shown raw.
+
+## Worktree authority
+
+The plugin never substitutes the process cwd. For the [#93](https://github.com/firestige/workflow-self-recursive/issues/93) transition, an operation that must select a worktree uses the invoking conversation's exact registered workspace; it is accepted only when the invoking Agent is the current live instance, the DSH workspace registry resolves the session `cwd` to an absolute canonical workspace, and that workspace records the session as a member — otherwise `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`. This authority is invocation-scoped and exact; it admits neither a common parent nor a sibling path. [Issue #94](https://github.com/firestige/workflow-self-recursive/issues/94) owns the later Delivery-selected worktree and its independent lifecycle.
+
+## Update / remove
+
+Use DSH's package lifecycle for an exact compatible update or removal:
 
 ```sh
-dsh plugin --profile web update --workspace-root wsr-execution@<new-exact-version>
-dsh plugin --profile web update --workspace-root wsr-dsh-intake@<new-exact-version>
-dsh plugin --profile web remove --workspace-root wsr-dsh-intake
-dsh plugin --profile web remove --workspace-root wsr-execution
-dsh plugin --profile web add --workspace-root wsr-execution@<exact-version>
-dsh plugin --profile web add --workspace-root wsr-dsh-intake@<exact-version>
+dsh plugin --profile web update wsr-dsh-intake@<new-exact-version>
+dsh plugin --profile web remove wsr-dsh-intake
 ```
 
-WSR does not intercept those package operations. The Execution state root, Manifest/current-slot, Runner state, `configFile`, and `bindingFile` stay outside the plugin installation directory. Starting a compatible reinstall resumes the same persisted Delivery binding from its last durable boundary; interaction state not persisted before process termination or package removal may be lost. If `--dump-config` reports a broken profile patch, restore the complete row shown above and rerun it; there is no fallback to another config path.
+WSR does not intercept those package operations. The Execution state root, Manifest/current-slot, Runner state, `configFile`, and `bindingFile` stay outside the plugin installation directory; a compatible reinstall resumes the same persisted Delivery binding from its last durable boundary.
+
+## Known Limitations
+
+- **Developer preview** — `0.1.x` is an MVP candidate; compatibility-breaking changes are possible.
+- **Provisional worktree** — conversation workspace stands in until #94; authority is invocation-scoped.
+- **DSH-only interactive surface** — the shipped `web` profile is the reference; custom profiles are not an interactive Intake surface.
+
+## Related
+
+- [Execution System README](../..) — system architecture, delivery forms, embedding API.
+- [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive) — the closed loop of Execution / Evidence / Evolution systems.
+
+## License
+
+[Apache-2.0](../../LICENSE)

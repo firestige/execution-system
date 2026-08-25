@@ -16,6 +16,7 @@
     "lib/client.js",
     "skills",
     "cordis.patch.yml",
+    "README.zh-CN.md",
     "README.md"
   ],
   "dsh": {
