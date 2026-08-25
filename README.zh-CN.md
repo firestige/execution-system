@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-![Workflow Self-Recursive banner](social-preview.png)
+![Workflow Self-Recursive banner](docs/assets/banner.png)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
@@ -43,6 +43,9 @@ DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runn
 - **Delivery Observation** 将出站有界事实映射到单向、尽力而为的 OTLP profile，但不控制执行。
 
 默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
+
+![架构图](docs/assets/architecture.png)
+
 
 ## 安装（DSH 入口，一条命令）
 

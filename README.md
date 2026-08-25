@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-![Workflow Self-Recursive banner](social-preview.png)
+![Workflow Self-Recursive banner](docs/assets/banner.png)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
@@ -43,6 +43,9 @@ Three modules carry the responsibility:
 - **Delivery Observation** maps outbound bounded facts to a one-way, best-effort OTLP profile without controlling execution.
 
 The default Source is the configured `firestige/workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
+
+![Architecture](docs/assets/architecture.png)
+
 
 ## Install (DSH entry, one command)
 
