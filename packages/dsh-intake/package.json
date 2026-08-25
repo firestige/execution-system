@@ -46,5 +46,29 @@
   "license": "Apache-2.0",
   "dependencies": {
     "wsr-execution": "0.1.1"
+  },
+  "description": "DSH plugin that brings version-bound workflows into your chat: /wsr commands, the workflow_execution_intake tool, Deliveries & Current status sidebar tabs, and isolated Runner-owned execution. · 在 DeepSeek Harness 对话中运行版本绑定、可审计的工作流：/wsr 命令、workflow_execution_intake 工具、Deliveries/Current 侧边栏，以及 Runner 隔离执行。",
+  "keywords": [
+    "wsr",
+    "workflow-self-recursive",
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "plugin",
+    "workflow",
+    "agent",
+    "intake",
+    "command"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firestige/execution-system.git"
+  },
+  "homepage": "https://github.com/firestige/execution-system",
+  "bugs": {
+    "url": "https://github.com/firestige/execution-system/issues"
+  },
+  "author": {
+    "name": "firestige"
   }
 }

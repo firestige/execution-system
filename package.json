@@ -80,5 +80,33 @@
     "tsx": "4.23.12",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
-  }
+  },
+  "description": "Host-neutral execution boundary for workflow-self-recursive: resolves and validates one exact Workflow Package, binds an immutable Delivery Manifest, coordinates the Delivery, and emits bounded OTLP observations. · 与宿主无关的 Agent 工作流执行边界：解析并校验确定的 Workflow Package，绑定不可变 Delivery Manifest，协调交付并发出有界观测。",
+  "keywords": [
+    "wsr",
+    "workflow-self-recursive",
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "workflow",
+    "workflow-engine",
+    "agent",
+    "langgraph",
+    "otlp",
+    "delivery",
+    "manifest",
+    "execution"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/firestige/execution-system.git"
+  },
+  "homepage": "https://github.com/firestige/execution-system",
+  "bugs": {
+    "url": "https://github.com/firestige/execution-system/issues"
+  },
+  "author": {
+    "name": "firestige"
+  },
+  "license": "Apache-2.0"
 }
