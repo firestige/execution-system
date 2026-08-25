@@ -27,9 +27,20 @@ const checkOnly = process.argv.includes("--check");
 const outputFile = process.argv.slice(2).filter((arg) => arg !== "--check")[0] ?? path.join(repository, "CHANGELOG.md");
 
 function gitLog(range: string): string[] {
-  const args = ["log", "--no-merges", "--format=%s", ...(range === "" ? [] : [range])];
+  const args = ["log", "--no-merges", "--format=%H%x09%s", "--name-only", ...(range === "" ? [] : [range])];
   const out = execFileSync("git", args, { cwd: repository, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
-  return out.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const messages: string[] = [];
+  for (const block of out.split("\n\n")) {
+    const lines = block.split("\n").filter((line) => line.length > 0);
+    if (lines.length === 0) continue;
+    // A commit that only touches CHANGELOG.md is the regeneration meta-commit
+    // itself; excluding it keeps the committed file equal to what git history
+    // produces (otherwise the check always drifts by the last regen commit).
+    const files = lines.slice(1);
+    if (files.length === 1 && files[0] === "CHANGELOG.md") continue;
+    messages.push(lines[0]!.split("\t")[1] ?? lines[0]!);
+  }
+  return messages;
 }
 
 function gitTags(): string[] {
