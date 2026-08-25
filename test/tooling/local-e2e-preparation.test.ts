@@ -14,7 +14,7 @@ describe("local E2E preparation", () => {
     expect(input).toMatchObject({
       executionRoot,
       worktree: path.resolve(executionRoot, ".."),
-      packageVersion: "0.1.1",
+      packageVersion: "0.1.2",
       defaults: { schemaVersion: "execution.config@1.0.0" },
     });
     expect(input.releaseDirectory).toBe(path.join(input.worktree, "tmp/local-e2e/release"));

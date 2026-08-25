@@ -221,10 +221,10 @@ describe("Wave 6 DSH Intake plugin", () => {
 
     expect(manifest).toMatchObject({
       name: "wsr-dsh-intake",
-      version: "0.1.1",
+      version: "0.1.2",
       exports: { "./client": "./lib/client.js" },
       dsh: { bundle: { patch: "./cordis.patch.yml" }, compatibility: {
-        executionSystem: "0.1.1", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
+        executionSystem: "0.1.2", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
         agents: "0.1.1-rc.2", skillFilesystem: "0.1.1-rc.2", toolSkill: "0.1.1-rc.2", tools: "0.1.1-rc.2",
       }, client: { inject: ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar"], platform: "web" } },
     });
