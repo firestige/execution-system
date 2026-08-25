@@ -36,7 +36,7 @@ function gitLog(range: string): string[] {
     .trim().split("\n").filter((line) => line.length > 0);
   const messages: string[] = [];
   for (const line of lines) {
-    const [hash, subject = ""] = line.split("\t");
+    const [hash = "", subject = ""] = line.split("\t");
     const files = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", hash], {
       cwd: repository, encoding: "utf8",
     }).trim().split("\n").filter((file) => file.length > 0);
