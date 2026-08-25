@@ -27,18 +27,21 @@ const checkOnly = process.argv.includes("--check");
 const outputFile = process.argv.slice(2).filter((arg) => arg !== "--check")[0] ?? path.join(repository, "CHANGELOG.md");
 
 function gitLog(range: string): string[] {
-  const args = ["log", "--no-merges", "--format=%H%x09%s", "--name-only", ...(range === "" ? [] : [range])];
-  const out = execFileSync("git", args, { cwd: repository, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+  // hash + subject from one call; per-commit files via diff-tree (no
+  // dependency on git log --name-only block formatting). A commit whose only
+  // changed file is CHANGELOG.md is the regen meta-commit and is excluded so
+  // the committed file equals what git history produces.
+  const args = ["log", "--no-merges", "--format=%H%x09%s", ...(range === "" ? [] : [range])];
+  const lines = execFileSync("git", args, { cwd: repository, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 })
+    .trim().split("\n").filter((line) => line.length > 0);
   const messages: string[] = [];
-  for (const block of out.split("\n\n")) {
-    const lines = block.split("\n").filter((line) => line.length > 0);
-    if (lines.length === 0) continue;
-    // A commit that only touches CHANGELOG.md is the regeneration meta-commit
-    // itself; excluding it keeps the committed file equal to what git history
-    // produces (otherwise the check always drifts by the last regen commit).
-    const files = lines.slice(1);
+  for (const line of lines) {
+    const [hash, subject = ""] = line.split("\t");
+    const files = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", hash], {
+      cwd: repository, encoding: "utf8",
+    }).trim().split("\n").filter((file) => file.length > 0);
     if (files.length === 1 && files[0] === "CHANGELOG.md") continue;
-    messages.push(lines[0]!.split("\t")[1] ?? lines[0]!);
+    messages.push(subject);
   }
   return messages;
 }
