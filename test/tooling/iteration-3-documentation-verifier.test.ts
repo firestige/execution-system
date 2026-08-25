@@ -19,6 +19,7 @@ async function fixture() {
   ]);
   await Promise.all([
     cp(path.join(sourceExecution, "config"), path.join(executionRoot, "config"), { recursive: true }),
+    cp(path.join(sourceExecution, "LICENSE"), path.join(executionRoot, "LICENSE")),
     cp(path.join(sourceExecution, "packages/dsh-intake"), path.join(executionRoot, "packages/dsh-intake"), { recursive: true }),
     cp(path.join(sourceSuper, "docs"), path.join(superRoot, "docs"), { recursive: true }),
   ]);
