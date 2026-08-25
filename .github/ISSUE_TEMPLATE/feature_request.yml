@@ -1,0 +1,39 @@
+name: Feature request
+description: 建议 Execution System / DSH Intake 的新能力或改进。 / Suggest a new capability or improvement.
+title: "[feature] 一句话摘要 / one-line summary"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 背景 / Context
+        Execution System 是宿主无关的系统，DSH 只是入口之一（嵌入库 / DSH 插件入口 / CLI）。
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation / 动机
+      description: 你遇到的问题或想要的场景 / the problem or the scenario you want
+      placeholder: "当 ... 时，我希望 ..."
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired behavior / 期望行为
+      description: 具体到接口/命令/行为 / as concrete as interface / command / behavior
+      placeholder: "..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / 备选方案
+      description: 你尝试过的其他方式 / other approaches you tried
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 属于哪个面 / Which surface
+      options:
+        - label: 宿主无关核心（wsr-execution 嵌入 / CLI）
+        - label: DSH 插件入口（wsr-dsh-intake 命令 / 侧边栏 / 展示）
+        - label: 契约 / 文档 / 发布流程

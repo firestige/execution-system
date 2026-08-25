@@ -1,0 +1,54 @@
+name: Bug report
+description: 报告 Execution System / DSH Intake 的问题。 / Report a problem with the Execution System or DSH Intake.
+title: "[bug] 一句话摘要 / one-line summary"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 请先核对 / Before you file
+        - 版本兼容：确认 `dsh --version` 为 `0.1.1-rc.2`、Node 为 `>=24.12 <25`。
+        - 已读 [README](../blob/main/README.md) 的 Known Limitations（开发者预览，可能存在破坏兼容性变更）。
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: DSH 版本、Node 版本、profile、平台 / DSH version, Node version, profile, platform
+      placeholder: |
+        - dsh: 0.1.1-rc.2
+        - node: v24.12.0
+        - profile: web
+        - os: macOS / Linux / Windows
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: 从安装到出问题的完整步骤 / Complete steps from install to the problem
+      placeholder: |
+        1. dsh plugin --profile web add wsr-dsh-intake
+        2. /wsr create implementation-workflow@0.3.0
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / 实际行为
+      description: 错误信息、`--dump-config` 输出（请先抹掉 API key）等 / error message, `--dump-config` output (redact API keys) etc.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 自查 / Self-check
+      options:
+        - label: 已用最新发布版本（`npm view wsr-dsh-intake version`）复现 / reproduced on the latest published version
+        - label: 错误信息与日志已脱敏（无 API key / 无真实路径）/ logs redacted (no API keys / no real paths)

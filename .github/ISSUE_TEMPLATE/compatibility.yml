@@ -1,0 +1,47 @@
+name: Compatibility issue
+description: 安装 / 升级 / DSH 版本兼容性问题。 / Install, upgrade, or DSH-version compatibility problems.
+title: "[compat] 一句话摘要 / one-line summary"
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 版本联动 / Version lock
+        Core 与 Intake 版本联动：`wsr-dsh-intake@X` 依赖 `wsr-execution@X`，一次 `add` 装齐、一次 `update` 同升。若手动拆装，请核对两边版本一致。
+  - type: input
+    id: dsh_version
+    attributes:
+      label: DSH version / DSH 版本
+      description: 目标兼容线为 `0.1.1-rc.2`
+      placeholder: "0.1.1-rc.2"
+    validations:
+      required: true
+  - type: input
+    id: node_version
+    attributes:
+      label: Node version / Node 版本
+      placeholder: ">=24.12 <25"
+    validations:
+      required: true
+  - type: input
+    id: package_versions
+    attributes:
+      label: Installed versions / 已装版本
+      description: `npm view wsr-execution version` 与 `npm view wsr-dsh-intake version`
+      placeholder: "wsr-execution: 0.1.2 / wsr-dsh-intake: 0.1.2"
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error / 错误信息
+      description: 完整报错（脱敏）/ full error output (redacted)
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Install / upgrade commands used / 使用的安装/升级命令
+      description: 从安装到出问题的命令序列 / the exact command sequence
+    validations:
+      required: true
