@@ -45,9 +45,9 @@ function gitTags(): string[] {
 /** Semantic-version comparison: 0.1.1 > 0.1.1-rc.1 > 0.1.0 > 0.1.0-rc.1. */
 function compareSemver(left: string, right: string): number {
   const parse = (value: string): [number, number, number, string] => {
-    const [core, prerelease = ""] = value.split("-");
-    const [major, minor, patch] = core.split(".").map((part) => Number.parseInt(part, 10) || 0);
-    return [major, minor, patch, prerelease];
+    const [coreRaw = "", prerelease = ""] = value.split("-");
+    const [majorRaw = "0", minorRaw = "0", patchRaw = "0"] = coreRaw.split(".");
+    return [parseInt(majorRaw, 10) || 0, parseInt(minorRaw, 10) || 0, parseInt(patchRaw, 10) || 0, prerelease];
   };
   const [lmaj, lmin, lpat, lpre] = parse(left);
   const [rmaj, rmin, rpat, rpre] = parse(right);
