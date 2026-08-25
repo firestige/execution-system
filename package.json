@@ -46,7 +46,9 @@
     "release:workflow-assets": "node --import tsx scripts/build-workflow-release-assets.ts",
     "verify:iteration3-docs": "node --import tsx scripts/verify-iteration-3-documentation.ts . ..",
     "verify:dsh-intake": "node --import tsx scripts/verify-dsh-intake-distribution.ts",
-    "qualify:dsh-package-lifecycle": "node --import tsx scripts/qualify-dsh-package-lifecycle.ts"
+    "qualify:dsh-package-lifecycle": "node --import tsx scripts/qualify-dsh-package-lifecycle.ts",
+    "changelog:generate": "node --import tsx scripts/generate-changelog.ts",
+    "changelog:check": "node --import tsx scripts/generate-changelog.ts --check"
   },
   "dependencies": {
     "@langchain/core": "1.2.9",
