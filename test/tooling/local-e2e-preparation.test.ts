@@ -10,11 +10,12 @@ import { validateExecutionInstallationConfig } from "../../src/configuration/ind
 describe("local E2E preparation", () => {
   it("resolves the repository-owned default preparation layout", async () => {
     const executionRoot = path.resolve(import.meta.dirname, "../..");
+    const coreManifest = JSON.parse(await readFile(path.join(executionRoot, "package.json"), "utf8")) as { readonly version: string };
     const input = await resolveLocalE2EPreparationInput(executionRoot);
     expect(input).toMatchObject({
       executionRoot,
       worktree: path.resolve(executionRoot, ".."),
-      packageVersion: "0.1.2",
+      packageVersion: coreManifest.version,
       defaults: { schemaVersion: "execution.config@1.0.0" },
     });
     expect(input.releaseDirectory).toBe(path.join(input.worktree, "tmp/local-e2e/release"));

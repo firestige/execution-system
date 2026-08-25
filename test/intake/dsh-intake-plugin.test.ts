@@ -213,18 +213,22 @@ describe("Wave 6 DSH Intake plugin", () => {
 
   it("publishes the exact DSH bundle, public dependency, and first-party skill without Package content", async () => {
     const packageRoot = path.resolve(import.meta.dirname, "../../packages/dsh-intake");
+    const coreManifest = JSON.parse(await readFile(path.join(import.meta.dirname, "../../package.json"), "utf8")) as { readonly version: string };
     const manifest = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) as any;
     const patch = await readFile(path.join(packageRoot, "cordis.patch.yml"), "utf8");
     const skill = await readFile(path.join(packageRoot, "skills/workflow-execution/SKILL.md"), "utf8");
     const source = await readFile(path.join(packageRoot, "src/plugin.js"), "utf8");
     const client = await readFile(path.join(packageRoot, "lib/client.js"), "utf8");
 
+    // Version expectations follow the core manifest so a version bump does
+    // not require editing this test; this also asserts the documented
+    // core/intake version-lock (build-release-artifacts enforces the same).
     expect(manifest).toMatchObject({
       name: "wsr-dsh-intake",
-      version: "0.1.2",
+      version: coreManifest.version,
       exports: { "./client": "./lib/client.js" },
       dsh: { bundle: { patch: "./cordis.patch.yml" }, compatibility: {
-        executionSystem: "0.1.2", dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
+        executionSystem: coreManifest.version, dsh: "0.1.1-rc.2", commands: "0.1.1-rc.2",
         agents: "0.1.1-rc.2", skillFilesystem: "0.1.1-rc.2", toolSkill: "0.1.1-rc.2", tools: "0.1.1-rc.2",
       }, client: { inject: ["@deepseek-ai/dsh-client-runtime", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-sidebar"], platform: "web" } },
     });
