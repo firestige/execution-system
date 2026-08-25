@@ -160,7 +160,7 @@ export function presentationForDshOperation(api, correlation, operation, result,
 
 export async function createPluginRuntime(config, options = {}) {
   const admitted = profile(config);
-  const api = await (options.moduleLoader?.() ?? import("@workflow-self-recursive/execution-system"));
+  const api = await (options.moduleLoader?.() ?? import("wsr-execution"));
   const attachmentBytes = new Map();
   const bindings = options.bindings ?? new IntakeSessionBindingRepository(admitted.bindingFile);
   await bindings.start();
@@ -401,7 +401,7 @@ export async function apply(ctx, config) {
         try {
           const operation = parseWsrCommand(invocation.rawInput);
           query = operation.operation === "list" || operation.operation === "status";
-          const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+          const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("wsr-execution");
           if (!query) {
             await recordWsrCommandInput(invocation.agent, invocation.rawInput, invocation.attachments);
             presentToDshSession(invocation.agent, createIntakePresentation(
@@ -420,7 +420,7 @@ export async function apply(ctx, config) {
           if (!query) presentToDshSession(invocation.agent, presentation);
           return { kind: result.kind === "ERROR" ? "error" : "success", text: serializeIntakePresentation(presentation, 4096) };
         } catch (cause) {
-          const { createIntakePresentation, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+          const { createIntakePresentation, serializeIntakePresentation } = await import("wsr-execution");
           const code = typeof cause?.code === "string" ? cause.code : "DSH_INTAKE_FAILED";
           const presentation = createIntakePresentation(`presentation-${randomUUID()}`, "error", { code, message: code });
           if (!query) presentToDshSession(invocation.agent, presentation);
@@ -441,7 +441,7 @@ export async function apply(ctx, config) {
         const turn = turnFromAgent(agent);
         const operation = mapIntakeToolOperation(args);
         const result = await runtime.invokeForSession({ sessionKey: String(agent.id), agent, operation, turnText: turn.text, images: turn.images, attachmentStore, signal: execution.signal });
-        const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+        const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("wsr-execution");
         return { result: serializeIntakePresentation(presentationForDshOperation(
           { createIntakePresentation, presentationForIntakeResult }, `presentation-${randomUUID()}`, operation, result, 4096,
         ), 4096) };

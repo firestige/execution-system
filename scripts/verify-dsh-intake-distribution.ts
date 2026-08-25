@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PACKAGE_NAME = "@workflow-self-recursive/dsh-intake";
+const PACKAGE_NAME = "wsr-dsh-intake";
 const SKILL_NAME = "workflow-execution";
 const TOOL_IDENTITY = "workflow_execution_intake";
 const PRESENTATION_SLOT = "conversation.chat.commandview";
@@ -64,7 +64,7 @@ export async function verifyDshIntakeDistribution(directory: string): Promise<Re
   }
 
   const patch = await requiredText(path.join(root, "cordis.patch.yml"), "DSH_INTAKE_PROVIDER_INVALID");
-  if (!/id: workflow-execution[\s\S]*name: ['"]@workflow-self-recursive\/dsh-intake['"]/u.test(patch)
+  if (!/id: workflow-execution[\s\S]*name: ['"]wsr-dsh-intake['"]/u.test(patch)
     || !/id: skill-filesystem[\s\S]*customSkillDirs:/u.test(patch)
     || !/id: tool-skill\s+disabled: false/u.test(patch)) {
     throw new DshIntakeDistributionVerificationError("DSH_INTAKE_PROVIDER_INVALID");

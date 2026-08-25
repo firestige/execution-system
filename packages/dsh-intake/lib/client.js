@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: "@workflow-self-recursive/dsh-intake",
+  id: "wsr-dsh-intake",
   factory: (require) => {
     const module = { exports: {} };
     const exports = module.exports;
@@ -13,11 +13,11 @@ window.__ModuleLoader__.load({
     const EMPTY_SESSION = Object.freeze({ chat: Object.freeze({ order: Object.freeze([]), nodes: new Map() }) });
     const subscribeEmpty = () => () => undefined;
     const readEmptySession = () => EMPTY_SESSION;
-    const ANSWER_ACTIONS_STYLE = "@workflow-self-recursive/dsh-intake/answer-actions";
+    const ANSWER_ACTIONS_STYLE = "wsr-dsh-intake/answer-actions";
 
     if (typeof document !== "undefined" && document.querySelector(`style[data-plugin-css=${JSON.stringify(ANSWER_ACTIONS_STYLE)}]`) === null) {
       const style = document.createElement("style");
-      style.dataset.plugin = "@workflow-self-recursive/dsh-intake";
+      style.dataset.plugin = "wsr-dsh-intake";
       style.dataset.pluginCss = ANSWER_ACTIONS_STYLE;
       style.textContent = ".wsr-answer-actions{align-items:center;gap:10px;height:28px;display:flex;margin-top:8px}.wsr-answer-action{width:28px;height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:transparent;border:none;border-radius:28px;justify-content:center;align-items:center;padding:6px;display:inline-flex}.wsr-answer-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}";
       document.head.appendChild(style);

@@ -109,8 +109,8 @@ jobs:
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           pnpm qualify:dsh-interactive \
-            "$RUNNER_TEMP/local-release/workflow-self-recursive-execution-system-$VERSION.tgz" \
-            "$RUNNER_TEMP/local-release/workflow-self-recursive-dsh-intake-$VERSION.tgz" \
+            "$RUNNER_TEMP/local-release/wsr-execution-$VERSION.tgz" \
+            "$RUNNER_TEMP/local-release/wsr-dsh-intake-$VERSION.tgz" \
             "$GITHUB_WORKSPACE/execution-system"
 
       - name: Create RC prerelease after local qualification
@@ -140,8 +140,8 @@ jobs:
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           pnpm qualify:dsh-interactive \
-            "$RUNNER_TEMP/remote-release/workflow-self-recursive-execution-system-$VERSION.tgz" \
-            "$RUNNER_TEMP/remote-release/workflow-self-recursive-dsh-intake-$VERSION.tgz" \
+            "$RUNNER_TEMP/remote-release/wsr-execution-$VERSION.tgz" \
+            "$RUNNER_TEMP/remote-release/wsr-dsh-intake-$VERSION.tgz" \
             "$GITHUB_WORKSPACE/execution-system"
 
       - name: Publish immutable qualification evidence to the prerelease

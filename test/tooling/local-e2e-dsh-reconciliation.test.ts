@@ -105,8 +105,8 @@ describe("local E2E DSH profile reconciliation", () => {
     await mkdir(profileDirectory, { recursive: true });
     await writeFile(path.join(profileDirectory, "package.json"), JSON.stringify({
       dependencies: {
-        "@workflow-self-recursive/execution-system": "0.1.1",
-        "@workflow-self-recursive/dsh-intake": "0.1.1",
+        "wsr-execution": "0.1.1",
+        "wsr-dsh-intake": "0.1.1",
       },
     }));
     await writeFile(patchFile, `${prefix}- id: workflow-execution\n  config:\n    configFile: /old/config.json\n    bindingFile: /old/bindings.json\n- id: unrelated\n  disabled: true\n`);
@@ -133,8 +133,8 @@ describe("local E2E DSH profile reconciliation", () => {
     expect(calls.slice(0, 7)).toEqual([
       ["plugin", "--profile", "web", "config", "get", "--json", "allowBuilds"],
       ["plugin", "--profile", "web", "config", "set", "--location=project", "--json", "allowBuilds", '{"better-sqlite3":true}'],
-      ["plugin", "--profile", "web", "remove", "--workspace-root", "@workflow-self-recursive/dsh-intake"],
-      ["plugin", "--profile", "web", "remove", "--workspace-root", "@workflow-self-recursive/execution-system"],
+      ["plugin", "--profile", "web", "remove", "--workspace-root", "wsr-dsh-intake"],
+      ["plugin", "--profile", "web", "remove", "--workspace-root", "wsr-execution"],
       ["plugin", "--profile", "web", "add", "--workspace-root", path.join(root, "core.tgz")],
       ["plugin", "--profile", "web", "add", "--workspace-root", path.join(root, "plugin.tgz")],
       ["--profile", "web", "--dump-config"],

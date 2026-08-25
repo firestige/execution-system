@@ -53,8 +53,8 @@ describe("local E2E preparation", () => {
       version: "0.1.1",
       configFile: path.join(durableDirectory, "execution.json"),
       credentialFile: path.join(durableDirectory, "credentials.yml"),
-      coreArchive: path.join(releaseDirectory, "workflow-self-recursive-execution-system-0.1.1.tgz"),
-      pluginArchive: path.join(releaseDirectory, "workflow-self-recursive-dsh-intake-0.1.1.tgz"),
+      coreArchive: path.join(releaseDirectory, "wsr-execution-0.1.1.tgz"),
+      pluginArchive: path.join(releaseDirectory, "wsr-dsh-intake-0.1.1.tgz"),
     });
     const config = JSON.parse(await readFile(result.configFile, "utf8"));
     expect(config.paths).toEqual({

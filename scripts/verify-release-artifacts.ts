@@ -39,12 +39,12 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
     throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID");
   }
   const version = metadata.version as string;
-  const pluginArchiveName = `workflow-self-recursive-dsh-intake-${version}.tgz`;
-  const coreArchiveName = `workflow-self-recursive-execution-system-${version}.tgz`;
+  const pluginArchiveName = `wsr-dsh-intake-${version}.tgz`;
+  const coreArchiveName = `wsr-execution-${version}.tgz`;
   const artifactsExpected = Object.freeze([pluginArchiveName, coreArchiveName]);
   const packageNames = Object.freeze<Record<string, string>>({
-    [pluginArchiveName]: "@workflow-self-recursive/dsh-intake",
-    [coreArchiveName]: "@workflow-self-recursive/execution-system",
+    [pluginArchiveName]: "wsr-dsh-intake",
+    [coreArchiveName]: "wsr-execution",
   });
   const compatibility = record(metadata.compatibility, Object.keys(COMPATIBILITY), "RELEASE_COMPATIBILITY_MISMATCH");
   if (Object.entries(COMPATIBILITY).some(([key, value]) => compatibility[key] !== value)) {

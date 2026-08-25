@@ -220,7 +220,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     const client = await readFile(path.join(packageRoot, "lib/client.js"), "utf8");
 
     expect(manifest).toMatchObject({
-      name: "@workflow-self-recursive/dsh-intake",
+      name: "wsr-dsh-intake",
       version: "0.1.1",
       exports: { "./client": "./lib/client.js" },
       dsh: { bundle: { patch: "./cordis.patch.yml" }, compatibility: {
@@ -230,7 +230,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     });
     expect(manifest.peerDependencies).toBeUndefined();
     expect(patch).toContain("id: workflow-execution");
-    expect(patch).toContain("name: '@workflow-self-recursive/dsh-intake'");
+    expect(patch).toContain("name: 'wsr-dsh-intake'");
     expect(patch).toContain("id: skill-filesystem");
     expect(patch).toContain("customSkillDirs");
     expect(patch).toMatch(/id: skill-filesystem[\s\S]*?disabled: false/u);
@@ -238,7 +238,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(skill).toContain("workflow_execution_intake");
     expect(skill).toContain("exactly once");
     expect(skill).toContain("/wsr action finish");
-    expect(source).toContain('import("@workflow-self-recursive/execution-system")');
+    expect(source).toContain('import("wsr-execution")');
     expect(client).toContain('conversation.chat.commandview');
     expect(client).toContain('sidebar.footer.action');
     expect(client).toContain('key: "wsr"');

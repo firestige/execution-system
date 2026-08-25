@@ -18,11 +18,11 @@ if (coreManifest.version !== pluginManifest.version
   throw new Error("RELEASE_PACKAGE_VERSION_MISMATCH");
 }
 const version = coreManifest.version;
-const coreArchiveName = `workflow-self-recursive-execution-system-${version}.tgz`;
-const pluginArchiveName = `workflow-self-recursive-dsh-intake-${version}.tgz`;
+const coreArchiveName = `wsr-execution-${version}.tgz`;
+const pluginArchiveName = `wsr-dsh-intake-${version}.tgz`;
 const packageNames = Object.freeze<Record<string, string>>({
-  [coreArchiveName]: "@workflow-self-recursive/execution-system",
-  [pluginArchiveName]: "@workflow-self-recursive/dsh-intake",
+  [coreArchiveName]: "wsr-execution",
+  [pluginArchiveName]: "wsr-dsh-intake",
 });
 
 function sha256(bytes: Uint8Array): string {

@@ -19,7 +19,7 @@ describe("DSH Intake distribution format verifier", () => {
     const root = await fixture();
     try {
       await expect(verifyDshIntakeDistribution(root)).resolves.toEqual({
-        packageName: "@workflow-self-recursive/dsh-intake",
+        packageName: "wsr-dsh-intake",
         skillName: "workflow-execution",
         toolIdentity: "workflow_execution_intake",
         operations: ["list", "create", "recover", "status", "action-finish", "abandon"],

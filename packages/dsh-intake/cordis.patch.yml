@@ -1,6 +1,6 @@
 - insert:
     - id: workflow-execution
-      name: '@workflow-self-recursive/dsh-intake'
+      name: 'wsr-dsh-intake'
       config:
         configFile: /__REQUIRED__/execution-config.yaml
         bindingFile: /__REQUIRED__/dsh-intake-bindings.json

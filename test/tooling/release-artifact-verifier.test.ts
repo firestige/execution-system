@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import { verifyExecutionReleaseArtifacts } from "../../scripts/verify-release-artifacts.js";
 
 const names = {
-  core: "workflow-self-recursive-execution-system-0.1.0.tgz",
-  plugin: "workflow-self-recursive-dsh-intake-0.1.0.tgz",
+  core: "wsr-execution-0.1.0.tgz",
+  plugin: "wsr-dsh-intake-0.1.0.tgz",
 } as const;
 
 function digest(value: string): string {
@@ -37,8 +37,8 @@ async function fixture() {
     await writeFile(path.join(root, `${artifact.name}.publication.json`), `${JSON.stringify({
       schemaVersion: "execution.artifact-publication@1.0.0",
       package: artifact.name === names.core
-        ? { name: "@workflow-self-recursive/execution-system", version: "0.1.0" }
-        : { name: "@workflow-self-recursive/dsh-intake", version: "0.1.0" },
+        ? { name: "wsr-execution", version: "0.1.0" }
+        : { name: "wsr-dsh-intake", version: "0.1.0" },
       compatibility: metadata.compatibility,
       artifact,
     })}\n`);
@@ -90,7 +90,7 @@ describe("Iteration 3 release artifact verifier", () => {
     const publicationFile = path.join(drifted.root, `${names.core}.publication.json`);
     await writeFile(publicationFile, `${JSON.stringify({
       schemaVersion: "execution.artifact-publication@1.0.0",
-      package: { name: "@workflow-self-recursive/execution-system", version: "0.1.0" },
+      package: { name: "wsr-execution", version: "0.1.0" },
       compatibility: drifted.metadata.compatibility,
       artifact: { ...drifted.metadata.artifacts[1], sha256: digest("other") },
     })}\n`);

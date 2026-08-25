@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
+
 const require = createRequire(import.meta.url);
-const PACKAGE_NAME = "@workflow-self-recursive/dsh-intake";
+const PACKAGE_NAME = "wsr-dsh-intake";
 
 export interface DshPackageLifecycleQualificationOptions {
   readonly oldArchive: string;
@@ -140,6 +142,11 @@ export async function qualifyDshPackageLifecycle(
       writeFile(slotFile, slotBytes),
       writeFile(manifestFile, manifestBytes),
     ]);
+
+    // The Intake plugin declares `wsr-execution` as a dependency, whose
+    // better-sqlite3 native build must be approved in the profile before any
+    // install (mirrors the documented `dsh plugin config set allowBuilds` step).
+    await ensureDshProfileInstallationPolicy(profile, (args) => invokeDsh(executable, dshHome, profile, args.slice(3)));
 
     invokeDsh(executable, dshHome, profile, ["add", "--workspace-root", oldArchive]);
     const installedVersions = [await installedVersion(profileDirectory)];

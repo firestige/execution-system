@@ -130,8 +130,8 @@ export async function prepareLocalE2E(
   return Object.freeze({
     version,
     releaseDirectory,
-    coreArchive: path.join(releaseDirectory, `workflow-self-recursive-execution-system-${version}.tgz`),
-    pluginArchive: path.join(releaseDirectory, `workflow-self-recursive-dsh-intake-${version}.tgz`),
+    coreArchive: path.join(releaseDirectory, `wsr-execution-${version}.tgz`),
+    pluginArchive: path.join(releaseDirectory, `wsr-dsh-intake-${version}.tgz`),
     configFile,
     credentialFile,
     stateDirectory,
@@ -233,8 +233,8 @@ export async function reconcileLocalE2EDshProfile(
   if (input.reinstallProfile === true) {
     await rm(resolveDshProfileModulesDirectory(dshHome, profile), { recursive: true, force: true });
   }
-  const corePackage = "@workflow-self-recursive/execution-system";
-  const pluginPackage = "@workflow-self-recursive/dsh-intake";
+  const corePackage = "wsr-execution";
+  const pluginPackage = "wsr-dsh-intake";
   const removePrefix = ["plugin", "--profile", profile, "remove", "--workspace-root"] as const;
   await ensureDshProfileInstallationPolicy(profile, (args) => run("dsh", args, worktree, dshHome));
   if (dependencies[pluginPackage] !== undefined) await run("dsh", [...removePrefix, pluginPackage], worktree, dshHome);

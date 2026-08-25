@@ -22,7 +22,7 @@ async function packPlugin(root: string, version: string): Promise<string> {
     cwd: source,
     stdio: "pipe",
   });
-  return path.join(destination, `workflow-self-recursive-dsh-intake-${version}.tgz`);
+  return path.join(destination, `wsr-dsh-intake-${version}.tgz`);
 }
 
 describe("DSH package lifecycle qualification", () => {

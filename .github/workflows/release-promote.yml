@@ -83,8 +83,8 @@ jobs:
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           pnpm qualify:dsh-interactive \
-            "$RUNNER_TEMP/qualified-release/workflow-self-recursive-execution-system-$VERSION.tgz" \
-            "$RUNNER_TEMP/qualified-release/workflow-self-recursive-dsh-intake-$VERSION.tgz" \
+            "$RUNNER_TEMP/qualified-release/wsr-execution-$VERSION.tgz" \
+            "$RUNNER_TEMP/qualified-release/wsr-dsh-intake-$VERSION.tgz" \
             "$GITHUB_WORKSPACE"
 
       - name: Create final tag and Release as the last operation

@@ -1,5 +1,5 @@
 {
-  "name": "@workflow-self-recursive/execution-system",
+  "name": "wsr-execution",
   "version": "0.1.1",
   "private": false,
   "type": "module",

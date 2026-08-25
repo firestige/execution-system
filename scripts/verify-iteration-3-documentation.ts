@@ -49,8 +49,8 @@ const COMMANDS = Object.freeze([
   "/wsr abandon <delivery-id>",
 ]);
 const IDENTITIES = Object.freeze([
-  "@workflow-self-recursive/execution-system",
-  "@workflow-self-recursive/dsh-intake",
+  "wsr-execution",
+  "wsr-dsh-intake",
   "workflow-execution",
   "workflow_execution_intake",
   "/workflow-execution",
@@ -136,8 +136,8 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     includesAll(guide.value, ["execution.config@1.0.0", "credentialStorePath", "credentialRef", "modelId", "baseUrl", "workflowSource", "observation", "controls", "READY", "CLOSED"], guide.relative);
   }
   includesAll(packageReadme, [
-    "@workflow-self-recursive/execution-system",
-    "@workflow-self-recursive/dsh-intake",
+    "wsr-execution",
+    "wsr-dsh-intake",
     "workflow-execution",
     "workflow_execution_intake",
     "/workflow-execution",
