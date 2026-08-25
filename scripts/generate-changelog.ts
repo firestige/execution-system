@@ -150,7 +150,10 @@ if (checkOnly) {
   let existing = "";
   try { existing = await readFile(outputFile, "utf8"); } catch { /* missing file fails the check */ }
   if (existing.trim() !== generated.trim()) {
+    const sections = (text: string): string => text.split("\n").filter((line) => line.startsWith("## [")).join(" | ");
     console.error(`CHANGELOG drift: ${outputFile} does not match git history. Run 'pnpm changelog:generate' and commit the result.`);
+    console.error(`  generated sections: ${sections(generated)}`);
+    console.error(`  existing sections:  ${sections(existing)}`);
     process.exit(1);
   }
   console.log("CHANGELOG matches git history.");
