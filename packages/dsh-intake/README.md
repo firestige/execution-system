@@ -75,6 +75,58 @@ The sidebar tabs display only read-only control-plane results. In the chat timel
 
 The plugin never substitutes the process cwd. For the [#93](https://github.com/firestige/workflow-self-recursive/issues/93) transition, an operation that must select a worktree uses the invoking conversation's exact registered workspace; it is accepted only when the invoking Agent is the current live instance, the DSH workspace registry resolves the session `cwd` to an absolute canonical workspace, and that workspace records the session as a member — otherwise `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`. This authority is invocation-scoped and exact; it admits neither a common parent nor a sibling path. [Issue #94](https://github.com/firestige/workflow-self-recursive/issues/94) owns the later Delivery-selected worktree and its independent lifecycle.
 
+## Model Experience
+
+### `workflow_execution_intake` tool — constant catalog entry
+
+#### What the model sees
+
+The tool is registered unconditionally on the DSH-I tool catalog. The model sees the name, the description *"Invoke exactly one closed Workflow Intake operation for the current DSH-I turn."*, and the parameters `operation` (enum `list | create | recover | status | action-finish | abandon`), `selector` (required only for `create`), and `deliveryId` (required only for `abandon`). Its result renders as the serialized intake presentation; tool names, call identities, and argument structures never enter the presentation payload.
+
+#### Token effect
+
+Constant. The schema and description occupy the catalog on every DSH-I request regardless of usage; no mode flips add or remove this entry.
+
+#### KV Cache effect
+
+Stable. The catalog's tool-schema portion is unchanged across requests and does not invalidate an otherwise-reusable prefix.
+
+### `/workflow-execution` skill — conditional, user-invoked only
+
+#### What the model sees
+
+The skill is `disable-model-invocation: true` and `user-invocable: true`: the model cannot invoke it on its own; when the user types `/workflow-execution`, the instruction enters the context and directs exactly one closed operation through the intake tool. While unused it contributes nothing.
+
+#### Token effect
+
+Conditional. The instruction appears only on an explicit user invocation.
+
+#### KV Cache effect
+
+Conditional insertion. An invocation inserts the instruction at the section boundary; otherwise the prefix is untouched.
+
+### `/wsr` commands — recorded as user input, consumed before the model
+
+#### What the model sees
+
+An interactive command enters a host-owned turn as the exact native user message (`recordInput: true`); the Intake pre-step consumes that turn before any DSH-I model request, so the model does not answer the command itself. Ordinary answers sent while a bound Action awaits input are routed to that Action, not to a new model turn about it.
+
+#### Token effect
+
+The recorded user message is part of the request input; the command's internal lifecycle and presentation nodes are UI events and never enter the model context.
+
+#### KV Cache effect
+
+Append-only. The recorded message appends to the request; it does not replace earlier tokens.
+
+## Security & Disclaimer
+
+- **Community project** — Workflow Self-Recursive is an independent community project and has no affiliation with or endorsement from DeepSeek AI.
+- **Credentials** — the API key is provisioned in an external DSH credential file referenced by `configFile`; the plugin passes the config to the public bootstrap without parsing or copying Provider/credential settings, and `--dump-config` never contains the key.
+- **Authority** — worktree authority is invocation-scoped and exact (#93/#94); the plugin admits neither a common parent nor a sibling path.
+- **No install script, no telemetry** — the package ships no install hooks; Observation is disabled by default and is a bounded, best-effort OTLP export when enabled.
+- **Developer preview** — `0.1.x` targets trusted local use by individuals and small teams; compatibility-breaking changes are possible. Install at your own risk.
+
 ## Update / remove
 
 Use DSH's package lifecycle for an exact compatible update or removal:
