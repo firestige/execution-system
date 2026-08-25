@@ -144,6 +144,25 @@ describe("Execution Core admission", () => {
     expect(await core.begin(request(outside))).toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
   });
 
+  it("admits an exact conversation workspace authority without widening to its parent", async () => {
+    const f = await fixture();
+    const outside = join(f.root, "outside-workspace");
+    await mkdir(join(outside, ".git"), { recursive: true });
+    const canonicalOutside = await realpath(outside);
+    const core = new ExecutionCoreAdmission(f.environment, f.admission);
+
+    expect(await core.begin(request(canonicalOutside))).toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
+    expect(await core.begin(request(canonicalOutside), { exactWorktreeRoot: f.root }))
+      .toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
+
+    const result = await core.begin(request(canonicalOutside), { exactWorktreeRoot: canonicalOutside });
+    expect(result.kind).toBe("NEW");
+    if (result.kind === "NEW") {
+      expect(result.command.canonicalWorktree).toBe(canonicalOutside);
+      await result.holder.release();
+    }
+  });
+
   it("validates TaskPrompt and refresh only after NEW, then releases a rejected holder", async () => {
     const f = await fixture();
     const core = new ExecutionCoreAdmission(f.environment, f.admission);

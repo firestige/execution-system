@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,6 +26,22 @@ export interface DshProductQualificationOptions {
   readonly sourceConfigFile: string;
 }
 
+export function dshProductQualificationPaths(root: string) {
+  const qualificationRoot = path.resolve(root);
+  const workspaceRoot = path.join(qualificationRoot, "workspace-root");
+  return Object.freeze({
+    launchDirectory: path.join(qualificationRoot, "dsh-launch"),
+    workspaceRoot,
+    helloWorktree: path.join(workspaceRoot, "hello-worktree"),
+    systemWorktree: path.join(workspaceRoot, "system-worktree"),
+    outsideWorktree: path.join(qualificationRoot, "out-of-scope-worktree"),
+  });
+}
+
+export function containsInternalActionProtocol(text: string): boolean {
+  return /tool-call|workflow_complete|"arguments"|call_[A-Za-z0-9_-]+/u.test(text);
+}
+
 async function startDsh(dshHome: string, worktree: string): Promise<Readonly<{ child: ChildProcess; url: URL }>> {
   const child = spawn(process.execPath, [dshExecutable(), "--profile", "web", "--port", "0", "--no-open"], {
     cwd: worktree,
@@ -43,32 +59,59 @@ async function stop(child: ChildProcess | undefined): Promise<void> {
 }
 
 async function selectWorkspace(cdp: CdpConnection, url: URL, worktree: string): Promise<string> {
-  await waitFor(async () => {
-    const ready = await evaluate(cdp, `(() => {
-      const button = [...document.querySelectorAll('button')].find((candidate) => /^(继续|Continue|稍后配置|Later|Skip for now)$/u.test(candidate.textContent?.trim() ?? ''));
-      if (button) { button.click(); return false; }
-      return document.querySelector('#root')?.hasAttribute('inert') === false && /选择工作区|Select workspace/u.test(document.body?.innerText ?? '');
-    })()`);
-    return ready === true ? true : undefined;
-  }, "PRODUCT_BROWSER_ONBOARDING_UNAVAILABLE", 40_000);
   const created = await rpc(url, "workspace.create", { path: worktree });
   if (created.ok !== true || typeof created.value?.workspace?.workspaceId !== "string") throw new Error("PRODUCT_WORKSPACE_CREATE_FAILED");
-  await waitFor(async () => await evaluate(cdp, `(() => {
-    const button = [...document.querySelectorAll('button')].find((candidate) => /^(选择工作区|Select workspace)$/u.test(candidate.textContent?.trim() ?? ''));
-    if (!button) return false;
-    button.click();
-    return true;
-  })()`) === true ? true : undefined, "PRODUCT_WORKSPACE_PICKER_UNAVAILABLE");
   const title = created.value.workspace.title as string;
-  await waitFor(async () => await evaluate(cdp, `(() => {
-    const title = ${JSON.stringify(title)};
-    const candidate = [...document.querySelectorAll('button,[role="button"]')].find((element) =>
-      (element.textContent?.trim() ?? '').includes(title) && !/^(选择工作区|Select workspace)$/u.test(element.textContent?.trim() ?? ''));
-    if (!candidate) return false;
-    candidate.click();
-    return true;
-  })()`) === true ? true : undefined, "PRODUCT_WORKSPACE_OPTION_UNAVAILABLE", 40_000);
+  const state = await waitFor(async () => {
+    const ready = await evaluate(cdp, `(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) => /^(继续|Continue|稍后配置|Later|Skip for now)$/u.test(candidate.textContent?.trim() ?? ''));
+      if (button) { button.click(); return undefined; }
+      if (document.querySelector('#root')?.hasAttribute('inert') !== false) return undefined;
+      if ([...document.querySelectorAll('button')].some((candidate) => /^(选择工作区|Select workspace)$/u.test(candidate.textContent?.trim() ?? ''))) return 'picker';
+      if (document.querySelector('[data-wsr-sidebar="true"]')) return 'active';
+      return undefined;
+    })()`);
+    return ready === "picker" || ready === "active" ? ready : undefined;
+  }, "PRODUCT_BROWSER_ONBOARDING_UNAVAILABLE", 40_000);
+  if (state === "picker") {
+    await waitFor(async () => await evaluate(cdp, `(() => {
+      const button = [...document.querySelectorAll('button')].find((candidate) => /^(选择工作区|Select workspace)$/u.test(candidate.textContent?.trim() ?? ''));
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`) === true ? true : undefined, "PRODUCT_WORKSPACE_PICKER_UNAVAILABLE");
+    await waitFor(async () => await evaluate(cdp, `(() => {
+      const title = ${JSON.stringify(title)};
+      const candidate = [...document.querySelectorAll('button,[role="button"]')].find((element) =>
+        (element.textContent?.trim() ?? '').includes(title) && !/^(选择工作区|Select workspace)$/u.test(element.textContent?.trim() ?? ''));
+      if (!candidate) return false;
+      candidate.click();
+      return true;
+    })()`) === true ? true : undefined, "PRODUCT_WORKSPACE_OPTION_UNAVAILABLE", 40_000);
+  } else {
+    await cdp.call("Page.reload", { ignoreCache: true });
+    await waitFor(async () => {
+      const response = await cdp.call("Runtime.evaluate", { expression: "document.readyState", returnByValue: true }) as any;
+      return response.result?.value === "complete" ? true : undefined;
+    }, "PRODUCT_WORKSPACE_SWITCH_RELOAD_TIMEOUT", 40_000);
+    await dismissBlockingPrompts(cdp);
+    await waitFor(async () => await evaluate(cdp, `(() => {
+      const openSidebar = [...document.querySelectorAll('button')].find((candidate) => /^(打开侧边栏|Open sidebar)$/u.test(candidate.getAttribute('aria-label') ?? ''));
+      if (openSidebar) openSidebar.click();
+      const title = ${JSON.stringify(title)};
+      const createSession = [...document.querySelectorAll('button')].find((candidate) => {
+        const label = candidate.getAttribute('aria-label') ?? '';
+        return label.includes(title) && /新建会话|New session/u.test(label);
+      });
+      if (!createSession) return false;
+      createSession.click();
+      return true;
+    })()`) === true ? true : undefined, "PRODUCT_WORKSPACE_SESSION_SWITCH_UNAVAILABLE", 40_000);
+  }
   await dismissBlockingPrompts(cdp);
+  await waitFor(async () => await evaluate(cdp,
+    `document.body?.innerText?.includes(${JSON.stringify(title)}) === true`) === true ? true : undefined,
+  "PRODUCT_WORKSPACE_SELECTION_FAILED", 40_000);
   return created.value.workspace.workspaceId;
 }
 
@@ -105,13 +148,57 @@ async function reopenWorkspace(cdp: CdpConnection, url: URL, workspaceId: string
   "PRODUCT_RESTART_WORKSPACE_SELECTION_FAILED", 40_000);
 }
 
+async function reopenConversation(cdp: CdpConnection, title: string): Promise<void> {
+  await dismissBlockingPrompts(cdp);
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const openSidebar = [...document.querySelectorAll('button')].find((candidate) =>
+      /^(打开侧边栏|Open sidebar)$/u.test(candidate.getAttribute('aria-label') ?? ''));
+    if (openSidebar) openSidebar.click();
+    const title = ${JSON.stringify(title)};
+    const candidate = [...document.querySelectorAll('button,[role="button"]')].find((element) =>
+      (element.textContent?.trim() ?? '') === title || (element.getAttribute('aria-label') ?? '').includes(title));
+    if (!candidate) return false;
+    candidate.click();
+    return true;
+  })()`) === true ? true : undefined, "PRODUCT_EXISTING_SESSION_UNAVAILABLE", 40_000);
+  await waitFor(async () => await evaluate(cdp,
+    `document.body?.innerText?.includes(${JSON.stringify(title)}) === true`) === true ? true : undefined,
+  "PRODUCT_EXISTING_SESSION_NOT_OPENED", 40_000);
+}
+
 async function sessionId(url: URL, workspaceId: string): Promise<string> {
   return waitFor(async () => {
     const listed = await rpc(url, "workspace.list", {});
     const selected = listed.value?.items?.find((entry: any) => entry.workspaceId === workspaceId);
-    const id = selected?.sessionIds?.at(-1);
+    const id = selected?.sessionIds?.at(0);
     return listed.ok === true && typeof id === "string" ? id : undefined;
   }, "PRODUCT_SESSION_UNAVAILABLE", 40_000);
+}
+
+async function startFreshSession(cdp: CdpConnection, url: URL, workspaceId: string): Promise<string> {
+  const before = await rpc(url, "workspace.list", {});
+  const workspace = before.value?.items?.find((entry: any) => entry.workspaceId === workspaceId);
+  if (before.ok !== true || !Array.isArray(workspace?.sessionIds)) throw new Error("PRODUCT_NEW_SESSION_BASELINE_UNAVAILABLE");
+  const previous = new Set<string>(workspace.sessionIds);
+  await waitFor(async () => {
+    const listed = await rpc(url, "session.list", {});
+    const oldSession = listed.value?.items?.find((entry: any) => previous.has(entry.sessionId));
+    return listed.ok === true && oldSession?.blank === false ? true : undefined;
+  }, "PRODUCT_SESSION_REMAINED_BLANK", 40_000);
+  await waitFor(async () => await evaluate(cdp, `(() => {
+    const button = [...document.querySelectorAll('button')].find((candidate) =>
+      /新(?:建)?会话|new session/iu.test(candidate.textContent?.trim() ?? '')
+      || /新(?:建)?会话|new session/iu.test(candidate.getAttribute('aria-label') ?? ''));
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`) === true ? true : undefined, "PRODUCT_NEW_SESSION_ACTION_UNAVAILABLE", 40_000);
+  return waitFor(async () => {
+    const listed = await rpc(url, "workspace.list", {});
+    const selected = listed.value?.items?.find((entry: any) => entry.workspaceId === workspaceId);
+    const created = selected?.sessionIds?.find((id: unknown) => typeof id === "string" && !previous.has(id));
+    return listed.ok === true && typeof created === "string" ? created : undefined;
+  }, "PRODUCT_NEW_SESSION_NOT_CREATED", 40_000);
 }
 
 async function observe(cdp: CdpConnection): Promise<void> {
@@ -121,6 +208,8 @@ async function observe(cdp: CdpConnection): Promise<void> {
         kind: element.getAttribute('data-wsr-kind'),
         correlation: element.getAttribute('data-wsr-correlation'),
         surface: element.getAttribute('data-wsr-surface'),
+        chatRole: element.getAttribute('data-wsr-chat-role'),
+        tag: element.tagName.toLowerCase(),
         text: element.textContent
       };
       if (!window.__wsrProductEvents.some((candidate) => JSON.stringify(candidate) === JSON.stringify(event))) window.__wsrProductEvents.push(event);
@@ -128,7 +217,7 @@ async function observe(cdp: CdpConnection): Promise<void> {
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true }); true`);
 }
 
-async function events(cdp: CdpConnection): Promise<Array<{ kind: string; correlation: string; surface: string; text: string }>> {
+async function events(cdp: CdpConnection): Promise<Array<{ kind: string; correlation: string; surface: string; chatRole: string | null; tag: string; text: string }>> {
   return await evaluate(cdp, "window.__wsrProductEvents ?? []");
 }
 
@@ -181,11 +270,20 @@ async function attach(cdp: CdpConnection, filename: string): Promise<void> {
   "PRODUCT_ATTACHMENT_NOT_VISIBLE", 40_000);
 }
 
+async function initializeQualificationWorktree(worktree: string, title: string): Promise<void> {
+  await mkdir(worktree, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: worktree });
+  execFileSync("git", ["config", "user.email", "qualification@example.invalid"], { cwd: worktree });
+  execFileSync("git", ["config", "user.name", "Qualification"], { cwd: worktree });
+  await writeFile(path.join(worktree, "README.md"), `# ${title}\n\nA minimal repository for product E2E.\n`);
+  execFileSync("git", ["add", "README.md"], { cwd: worktree });
+  execFileSync("git", ["commit", "-qm", "baseline"], { cwd: worktree });
+}
+
 export async function qualifyDshProductE2e(options: DshProductQualificationOptions) {
   const root = await mkdtemp(path.join(tmpdir(), "execution-dsh-product-"));
+  const layout = dshProductQualificationPaths(root);
   const dshHome = path.join(root, "dsh-home");
-  const workspaceRoot = path.join(root, "workspace-root");
-  const worktree = path.join(workspaceRoot, "worktree");
   const durable = path.join(root, "durable");
   const configFile = path.join(durable, "execution.json");
   const bindingFile = path.join(durable, "intake-bindings.json");
@@ -194,13 +292,17 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
   let chrome: ChildProcess | undefined;
   let cdp: CdpConnection | undefined;
   try {
-    await Promise.all([mkdir(worktree, { recursive: true }), mkdir(path.join(durable, "state"), { recursive: true })]);
-    execFileSync("git", ["init", "-q"], { cwd: worktree });
-    execFileSync("git", ["config", "user.email", "qualification@example.invalid"], { cwd: worktree });
-    execFileSync("git", ["config", "user.name", "Qualification"], { cwd: worktree });
-    await writeFile(path.join(worktree, "README.md"), "# Wave 6 qualification\n\nA minimal repository for product E2E.\n");
-    execFileSync("git", ["add", "README.md"], { cwd: worktree });
-    execFileSync("git", ["commit", "-qm", "baseline"], { cwd: worktree });
+    await Promise.all([
+      mkdir(layout.launchDirectory, { recursive: true }),
+      mkdir(path.join(durable, "state"), { recursive: true }),
+      initializeQualificationWorktree(layout.helloWorktree, "Hello qualification"),
+      initializeQualificationWorktree(layout.systemWorktree, "System design qualification"),
+      initializeQualificationWorktree(layout.outsideWorktree, "Exact registered workspace qualification"),
+    ]);
+    const [canonicalLaunchDirectory, canonicalWorkspaceRoot, canonicalHelloWorktree, canonicalSystemWorktree, canonicalOutsideWorktree] = await Promise.all([
+      realpath(layout.launchDirectory), realpath(layout.workspaceRoot), realpath(layout.helloWorktree),
+      realpath(layout.systemWorktree), realpath(layout.outsideWorktree),
+    ]);
     await writeFile(attachmentFile, Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       "base64",
@@ -208,16 +310,16 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     const sourceConfig = JSON.parse(await readFile(path.resolve(options.sourceConfigFile), "utf8"));
     sourceConfig.paths = {
       ...sourceConfig.paths,
-      repositoryRoot: worktree,
-      workspaceRoot,
-      allowedWorktreeRoots: [workspaceRoot],
+      repositoryRoot: canonicalWorkspaceRoot,
+      workspaceRoot: canonicalWorkspaceRoot,
+      allowedWorktreeRoots: [canonicalWorkspaceRoot],
       stateRoot: path.join(durable, "state"),
     };
     sourceConfig.controls = { ...sourceConfig.controls, executionTimeoutMs: 600_000 };
     await writeFile(configFile, `${JSON.stringify(sourceConfig, null, 2)}\n`);
-    await ensureDshProfileInstallationPolicy("web", (args) => runDsh(dshHome, worktree, args));
-    runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", path.resolve(options.coreArchive)]);
-    runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", path.resolve(options.pluginArchive)]);
+    await ensureDshProfileInstallationPolicy("web", (args) => runDsh(dshHome, canonicalLaunchDirectory, args));
+    runDsh(dshHome, canonicalLaunchDirectory, ["plugin", "--profile", "web", "add", "--workspace-root", path.resolve(options.coreArchive)]);
+    runDsh(dshHome, canonicalLaunchDirectory, ["plugin", "--profile", "web", "add", "--workspace-root", path.resolve(options.pluginArchive)]);
     await writeFile(path.join(dshHome, "profiles/web/cordis.patch.yml"), [
       "- id: workflow-execution",
       "  config:",
@@ -226,13 +328,51 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       "",
     ].join("\n"));
 
-    const started = await startDsh(dshHome, worktree);
+    const started = await startDsh(dshHome, canonicalLaunchDirectory);
     dsh = started.child;
     const browser = await launchBrowser(root, started.url);
     chrome = browser.child;
     cdp = browser.cdp;
-    const workspaceId = await selectWorkspace(cdp, started.url, worktree);
-    const firstSession = await sessionId(started.url, workspaceId);
+    const outsideWorkspaceId = await selectWorkspace(cdp, started.url, canonicalOutsideWorktree);
+    const outsideSession = await sessionId(started.url, outsideWorkspaceId);
+    await observe(cdp);
+
+    const admissionCommand = "/wsr create missing-workflow-for-workspace-admission@0.0.0\nThis exact registered workspace request must remain visible.";
+    await submitBrowserCommand(cdp, admissionCommand);
+    const admissionResult = await waitForKind(cdp, "error", 0, 40_000, "chat");
+    if (admissionResult.text.includes("WORKTREE_OUT_OF_SCOPE") || admissionResult.text.includes("DSH_INTAKE_WORKSPACE_UNAUTHORIZED")) {
+      throw new Error(`PRODUCT_REGISTERED_WORKSPACE_NOT_ADMITTED:${admissionResult.text}`);
+    }
+    if (admissionResult.chatRole !== "assistant" || admissionResult.tag !== "article") throw new Error("PRODUCT_CHAT_OUTPUT_NOT_ASSISTANT_STYLE");
+    await waitFor(async () => await evaluate(cdp!, `(() => {
+      return [...document.querySelectorAll('*')].some((element) => element.textContent === ${JSON.stringify(admissionCommand)});
+    })()`) === true ? true : undefined, "PRODUCT_FAILED_COMMAND_INPUT_MISSING", 40_000);
+    const isolatedCommands = await evaluate(cdp, `([...document.querySelectorAll('*')]
+      .filter((element) => element.textContent?.trim() === '/wsr')
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        className: element.className,
+        parentText: element.parentElement?.textContent,
+        grandparentText: element.parentElement?.parentElement?.textContent,
+      })))`);
+    if (isolatedCommands.some((element: any) => element.parentText?.trim() === "/wsr"
+      && element.grandparentText?.trim() === "/wsr")) {
+      throw new Error(`PRODUCT_INTERNAL_COMMAND_ROW_VISIBLE:${JSON.stringify(isolatedCommands)}`);
+    }
+    const admissionHistory = await rpc(started.url, "session.history", { sessionId: outsideSession });
+    if (admissionHistory.ok !== true || !admissionHistory.value?.events?.some((entry: any) => entry.event?.type === "user/message"
+      && entry.event?.data?.content?.some((block: any) => block.type === "text" && block.text === admissionCommand))) {
+      throw new Error("PRODUCT_FAILED_COMMAND_USER_MESSAGE_MISSING");
+    }
+    const freshOutsideSession = await startFreshSession(cdp, started.url, outsideWorkspaceId);
+    if (freshOutsideSession === outsideSession) throw new Error("PRODUCT_NEW_SESSION_REUSED_HISTORY");
+    await waitFor(async () => await evaluate(cdp!, `(() => {
+      const text = document.body?.innerText ?? '';
+      return !text.includes(${JSON.stringify(admissionCommand)});
+    })()`) === true ? true : undefined, "PRODUCT_NEW_SESSION_HISTORY_LEAKED", 40_000);
+
+    const helloWorkspaceId = await selectWorkspace(cdp, started.url, canonicalHelloWorktree);
+    const helloSession = await sessionId(started.url, helloWorkspaceId);
     await observe(cdp);
 
     await clickWsrTab(cdp, "Deliveries");
@@ -246,8 +386,25 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     for (const kind of ["command-accepted", "action-output", "terminal-result"]) {
       if (!helloEvents.some((event) => event.kind === kind)) throw new Error(`PRODUCT_HELLO_LIFECYCLE_MISSING:${kind}`);
     }
+    const helloActionOutput = helloEvents.filter((event) => event.kind === "action-output").map((event) => event.text).join("\n");
+    if (containsInternalActionProtocol(helloActionOutput)) {
+      throw new Error(`PRODUCT_HELLO_INTERNAL_PROTOCOL_VISIBLE:${helloActionOutput}`);
+    }
     if (!helloEvents.some((event) => event.text.includes(path.basename(attachmentFile)))
       && !helloEvents.some((event) => /attachment/i.test(event.text))) throw new Error("PRODUCT_HELLO_ATTACHMENT_NOT_OBSERVED");
+    const helloManifestDirectory = path.join(durable, "state", "manifests");
+    const helloManifest = await waitFor(async () => {
+      for (const name of await readdir(helloManifestDirectory)) {
+        const candidate = JSON.parse(await readFile(path.join(helloManifestDirectory, name), "utf8"));
+        if (candidate.resolvedPackage?.name === "hello-world-workflow") return candidate;
+      }
+      return undefined;
+    }, "PRODUCT_HELLO_MANIFEST_NOT_CREATED", 40_000);
+    if (helloManifest.canonicalWorktree !== canonicalHelloWorktree) throw new Error("PRODUCT_HELLO_WORKTREE_MISMATCH");
+
+    const systemWorkspaceId = await selectWorkspace(cdp, started.url, canonicalSystemWorktree);
+    const systemSession = await sessionId(started.url, systemWorkspaceId);
+    await observe(cdp);
 
     let firstInput: Awaited<ReturnType<typeof waitForEitherKind>> | undefined;
     let activeSystemManifestName: string | undefined;
@@ -257,14 +414,30 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       const manifestDirectory = path.join(durable, "state", "manifests");
       const manifestsBefore = new Set(await readdir(manifestDirectory));
       await submitBrowserCommand(cdp, `/wsr create system-design-workflow@0.3.0\nThis qualification requires a grilling dialogue before completion. Before design work, you MUST call workflow_request_input to ask one question: which implementation stack to use. After the first external answer, ask one question: which local port to use. After the second external answer, ask one final confirmation question exactly: Have we reached agreement on this design? Do not call workflow_complete until the user explicitly confirms agreement. Qualification attempt ${String(attempt)}.`);
-      const manifestName = await waitFor(async () => {
-        for (const name of await readdir(manifestDirectory)) {
-          if (manifestsBefore.has(name)) continue;
-          const manifest = JSON.parse(await readFile(path.join(manifestDirectory, name), "utf8"));
-          if (manifest.resolvedPackage?.name === "system-design-workflow") return name;
-        }
-        return undefined;
-      }, "PRODUCT_SYSTEM_MANIFEST_NOT_CREATED", 120_000);
+      let manifestName: string;
+      try {
+        manifestName = await waitFor(async () => {
+          for (const name of await readdir(manifestDirectory)) {
+            if (manifestsBefore.has(name)) continue;
+            const manifest = JSON.parse(await readFile(path.join(manifestDirectory, name), "utf8"));
+            if (manifest.resolvedPackage?.name === "system-design-workflow") return name;
+          }
+          return undefined;
+        }, "PRODUCT_SYSTEM_MANIFEST_NOT_CREATED", 120_000);
+      } catch (cause) {
+        const [diagnosticHistory, diagnosticSessions, diagnosticWorkspaces, diagnosticDom] = await Promise.all([
+          rpc(started.url, "session.history", { sessionId: systemSession }),
+          rpc(started.url, "session.list", {}),
+          rpc(started.url, "workspace.list", {}),
+          evaluate(cdp, "({ text: (document.body?.innerText ?? '').slice(-6000) })"),
+        ]);
+        throw new Error(`PRODUCT_SYSTEM_MANIFEST_NOT_CREATED:${JSON.stringify({
+          history: diagnosticHistory.value?.events?.slice(-20),
+          sessions: diagnosticSessions.value?.items,
+          workspaces: diagnosticWorkspaces.value?.items,
+          dom: diagnosticDom,
+        })}`, { cause });
+      }
       const coordinatorDirectory = path.join(durable, "state", "runner", path.basename(manifestName, ".json"), "coordinator");
       const disposition = await waitFor(async () => {
         const input = (await events(cdp!)).filter((event) => event.surface === "chat" && event.kind === "action-input-request");
@@ -272,7 +445,10 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
         try {
           for (const name of await readdir(coordinatorDirectory)) {
             const coordinator = JSON.parse(await readFile(path.join(coordinatorDirectory, name), "utf8"));
-            if (coordinator.phase === "terminal") return { kind: "terminal-result", correlation: "durable", surface: "durable", text: "terminal" };
+            if (coordinator.phase === "terminal") return {
+              kind: "terminal-result", correlation: "durable", surface: "durable",
+              chatRole: null, tag: "durable", text: "terminal",
+            };
           }
         } catch { /* Coordinator may not be materialized yet. */ }
         return undefined;
@@ -352,7 +528,7 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       await waitForKind(cdp, "action-input-request", recoveryInputBefore, 420_000, "chat");
     }
     const bindingDocumentBefore = JSON.parse(await readFile(bindingFile, "utf8"));
-    const bindingBefore = bindingDocumentBefore.bindings?.find((entry: any) => entry.sessionKey === firstSession);
+    const bindingBefore = bindingDocumentBefore.bindings?.find((entry: any) => entry.sessionKey === systemSession);
     if (bindingBefore === undefined) throw new Error("PRODUCT_SYSTEM_BINDING_MISSING");
     const manifestNames = await readdir(manifestDirectory);
     let systemManifestPath: string | undefined;
@@ -362,9 +538,16 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       if (manifest.deliveryId === bindingBefore.deliveryId && manifest.resolvedPackage?.name === "system-design-workflow") systemManifestPath = candidate;
     }
     if (systemManifestPath === undefined) throw new Error("PRODUCT_SYSTEM_MANIFEST_MISSING");
+    const activeSystemManifest = JSON.parse(await readFile(systemManifestPath, "utf8"));
+    if (activeSystemManifest.canonicalWorktree !== canonicalSystemWorktree) throw new Error("PRODUCT_SYSTEM_WORKTREE_MISMATCH");
     const systemManifestBefore = await readFile(systemManifestPath);
-    const firstHistory = await rpc(started.url, "session.history", { sessionId: firstSession });
+    const firstHistory = await rpc(started.url, "session.history", { sessionId: systemSession });
     if (firstHistory.ok !== true) throw new Error("PRODUCT_SESSION_HISTORY_UNAVAILABLE");
+    const sessionListBeforeRestart = await rpc(started.url, "session.list", {});
+    const systemSessionTitle = sessionListBeforeRestart.value?.items?.find((entry: any) => entry.sessionId === systemSession)?.projections?.values?.title;
+    if (sessionListBeforeRestart.ok !== true || typeof systemSessionTitle !== "string" || systemSessionTitle.length === 0) {
+      throw new Error("PRODUCT_SYSTEM_SESSION_TITLE_UNAVAILABLE");
+    }
 
     cdp.close();
     cdp = undefined;
@@ -372,18 +555,19 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     chrome = undefined;
     await stop(dsh);
     dsh = undefined;
-    const restarted = await startDsh(dshHome, worktree);
+    const restarted = await startDsh(dshHome, canonicalLaunchDirectory);
     dsh = restarted.child;
     const secondBrowser = await launchBrowser(root, restarted.url);
     chrome = secondBrowser.child;
     cdp = secondBrowser.cdp;
-    await reopenWorkspace(cdp, restarted.url, workspaceId);
+    await reopenWorkspace(cdp, restarted.url, systemWorkspaceId);
+    await reopenConversation(cdp, systemSessionTitle);
     await observe(cdp);
     await clickWsrTab(cdp, "Current status");
     const recovered = await waitForKind(cdp, "delivery-status", 0, 120_000, "sidebar");
     if (!/delivery|awaiting|running|recovery/i.test(recovered.text)) throw new Error(`PRODUCT_RECOVERY_STATUS_INVALID:${recovered.text}`);
     const bindingDocumentAfter = JSON.parse(await readFile(bindingFile, "utf8"));
-    const bindingAfter = bindingDocumentAfter.bindings?.find((entry: any) => entry.sessionKey === firstSession);
+    const bindingAfter = bindingDocumentAfter.bindings?.find((entry: any) => entry.sessionKey === systemSession);
     const bindingIdentity = (binding: any) => JSON.stringify({
       sessionKey: binding?.sessionKey,
       correlation: binding?.correlation,
@@ -407,6 +591,13 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
         plugin: await artifactDigest(path.resolve(options.pluginArchive)),
       }),
       empty: Object.freeze({ kind: empty.kind, text: empty.text }),
+      workspaceAuthority: Object.freeze({
+        launchDirectory: canonicalLaunchDirectory,
+        exactRegistered: Object.freeze({ sessionId: outsideSession, worktree: canonicalOutsideWorktree, admittedBeyondConfiguredRoots: true, result: admissionResult.text, inputPreserved: true }),
+        freshSession: Object.freeze({ sessionId: freshOutsideSession, historyIsolated: true }),
+        hello: Object.freeze({ sessionId: helloSession, worktree: helloManifest.canonicalWorktree }),
+        systemDesign: Object.freeze({ sessionId: systemSession, worktree: activeSystemManifest.canonicalWorktree }),
+      }),
       hello: Object.freeze({ terminal: helloTerminal.text, kinds: [...new Set(helloEvents.map((event) => event.kind))] }),
       systemDesign: Object.freeze({ inputRequest: firstInput.text, grilling, actionFinishObserved: true }),
       recovery: Object.freeze({ status: recovered.text, manifestIdentityPreserved: true, bindingIdentityPreserved: true }),

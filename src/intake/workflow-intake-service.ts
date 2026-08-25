@@ -12,7 +12,7 @@ export type WorkflowIntakeOperation =
     turn: Readonly<{ text: string; attachments: TaskPrompt["attachments"] }>;
     correlation: string;
   }>
-  | Readonly<{ operation: "recover"; worktree: string; deliveryId?: string; correlation: string }>
+  | Readonly<{ operation: "recover"; worktree?: string; deliveryId?: string; correlation: string }>
   | Readonly<{ operation: "status"; worktree?: string; deliveryId?: string; correlation: string }>
   | Readonly<{ operation: "action-finish"; turn?: Readonly<{ text: string; attachments: TaskPrompt["attachments"] }>; correlation: string }>
   | Readonly<{ operation: "abandon"; deliveryId: string; correlation: string }>;
@@ -28,7 +28,7 @@ export interface IntakeDeliveryInventoryItem {
 
 export interface WorkflowIntakeControlPort {
   list(): Promise<readonly IntakeDeliveryInventoryItem[]>;
-  recover(request: Readonly<{ worktree: string; deliveryId?: string; correlation: string }>): Promise<ExecutionResult>;
+  recover(request: Readonly<{ worktree?: string; deliveryId?: string; correlation: string }>): Promise<ExecutionResult>;
   status(request: Readonly<{ worktree?: string; deliveryId?: string; correlation: string }>): Promise<ExecutionResult>;
   finishAction(request: Readonly<{ correlation: string; prompt?: TaskPrompt }>): Promise<ExecutionResult>;
 }
@@ -70,10 +70,16 @@ export class WorkflowIntakeService {
   static readonly operations = Object.freeze(["list", "create", "recover", "status", "action-finish", "abandon"] as const);
   readonly #application: ExecutionApplication;
   readonly #control?: WorkflowIntakeControlPort;
+  readonly #execute: (request: ExecutionRequest) => Promise<ExecutionResult>;
 
-  constructor(options: Readonly<{ application: ExecutionApplication; control?: WorkflowIntakeControlPort }>) {
+  constructor(options: Readonly<{
+    application: ExecutionApplication;
+    control?: WorkflowIntakeControlPort;
+    execute?: (request: ExecutionRequest) => Promise<ExecutionResult>;
+  }>) {
     this.#application = options.application;
     this.#control = options.control;
+    this.#execute = options.execute ?? options.application.execute.bind(options.application);
   }
 
   async invoke(candidate: WorkflowIntakeOperation): Promise<WorkflowIntakeResult> {
@@ -91,16 +97,18 @@ export class WorkflowIntakeService {
         prompt,
         intakeCorrelation: base.correlation,
       });
-      return this.#application.execute(request);
+      return this.#execute(request);
     }
     if (base.operation === "list") {
       if (record(candidate, ["operation", "correlation"]) === undefined) return error("INTAKE_OPERATION_INVALID");
       return this.#control === undefined ? error("INTAKE_CONTROL_UNAVAILABLE") : Object.freeze({ kind: "LIST", deliveries: await this.#control.list() });
     }
     if (base.operation === "recover") {
-      if (record(candidate, ["operation", "worktree", "correlation"], ["operation", "worktree", "deliveryId", "correlation"]) === undefined || typeof base.worktree !== "string"
-        || (base.deliveryId !== undefined && typeof base.deliveryId !== "string")) return error("INTAKE_OPERATION_INVALID");
-      return this.#control?.recover({ worktree: base.worktree, ...(base.deliveryId === undefined ? {} : { deliveryId: base.deliveryId }), correlation: base.correlation }) ?? error("INTAKE_CONTROL_UNAVAILABLE");
+      if (record(candidate, ["operation", "correlation"], ["operation", "worktree", "deliveryId", "correlation"]) === undefined
+        || (base.worktree !== undefined && typeof base.worktree !== "string")
+        || (base.deliveryId !== undefined && typeof base.deliveryId !== "string")
+        || (base.worktree === undefined && base.deliveryId === undefined)) return error("INTAKE_OPERATION_INVALID");
+      return this.#control?.recover({ ...(base.worktree === undefined ? {} : { worktree: base.worktree }), ...(base.deliveryId === undefined ? {} : { deliveryId: base.deliveryId }), correlation: base.correlation }) ?? error("INTAKE_CONTROL_UNAVAILABLE");
     }
     if (base.operation === "status") {
       if (record(candidate, ["operation", "correlation"], ["operation", "worktree", "deliveryId", "correlation"]) === undefined

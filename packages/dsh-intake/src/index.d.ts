@@ -23,6 +23,25 @@ export class IntakeSessionBindingRepository {
 
 export function parseWsrCommand(value: string): Readonly<Record<string, string>>;
 export function mapIntakeToolOperation(value: unknown): Readonly<Record<string, string>>;
+export function resolveConversationWorkspace(context: unknown, agent: unknown): Promise<Readonly<{
+  sessionKey: string;
+  workspaceId: string;
+  path: string;
+}>>;
+export function recordConsumedActionReply(agent: unknown, message: unknown): void;
+export function recordWsrCommandInput(
+  agent: unknown,
+  rawInput: string,
+  attachments?: readonly unknown[],
+  createId?: () => string,
+): Promise<unknown>;
+export function presentationForDshOperation(
+  api: Readonly<{ createIntakePresentation: (...args: any[]) => any; presentationForIntakeResult: (...args: any[]) => any }>,
+  correlation: string,
+  operation: Readonly<Record<string, string>>,
+  result: Readonly<Record<string, unknown>>,
+  maxBytes?: number,
+): unknown;
 export function presentToDshSession(agent: unknown, presentation: Readonly<{
   schemaVersion: "wsr.presentation@1.0.0";
   correlation: string;
