@@ -1,4 +1,5 @@
-packages: []
+packages:
+  - "packages/*"
 
 allowBuilds:
   "@deepseek-ai/dsh-subprocess-local": true
@@ -8,3 +9,6 @@ allowBuilds:
   "koffi": true
   "node-pty": true
   "protobufjs": true
+
+minimumReleaseAgeExclude:
+  - wsr-execution@0.1.2
