@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -167,5 +168,26 @@ describe("Iteration 4 release automation", () => {
     expect(rendered.notes).toContain("- release automation");
     expect(rendered.notes).toContain("`node`: `>=24.12.0 <25`");
     expect(rendered.changelogSectionSha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  });
+
+  it("covers package-manager installation policy and executes the source-publication guards", async () => {
+    const workspace = await readFile(path.join(repository, "pnpm-workspace.yaml"), "utf8");
+    expect(workspace).toContain('"better-sqlite3": true');
+    expect(workspace).toContain("minimumReleaseAgeExclude:");
+    expect(workspace).toContain("wsr-execution@0.1.2");
+
+    const cleanEnvironment = { ...process.env };
+    delete cleanEnvironment.WSR_RELEASE_PACK_MODE;
+    expect(() => execFileSync("pnpm", ["release:prepack-guard"], {
+      cwd: repository, env: cleanEnvironment, stdio: "pipe",
+    })).toThrow();
+    expect(() => execFileSync("pnpm", ["release:prepack-guard"], {
+      cwd: repository,
+      env: { ...cleanEnvironment, WSR_RELEASE_PACK_MODE: "verified-builder" },
+      stdio: "pipe",
+    })).not.toThrow();
+    expect(() => execFileSync("pnpm", ["release:prepublish-guard"], {
+      cwd: repository, env: cleanEnvironment, stdio: "pipe",
+    })).toThrow();
   });
 });
