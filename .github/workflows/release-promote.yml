@@ -13,7 +13,8 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
+  id-token: write
 
 concurrency:
   group: execution-release-promotion
@@ -44,6 +45,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -87,12 +90,27 @@ jobs:
             "$RUNNER_TEMP/qualified-release/wsr-dsh-intake-$VERSION.tgz" \
             "$GITHUB_WORKSPACE"
 
+      - name: Publish exact qualified npm pair before stable
+        run: |
+          node -e 'const [major,minor]=process.argv[1].split(".").map(Number); if(major<11||(major===11&&minor<5)) process.exit(1)' "$(npm --version)"
+          pnpm release:publish-npm "$RUNNER_TEMP/qualified-release" --execute
+
+      - name: Mint short-lived release App token for final publish only
+        id: release-app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.WSR_RELEASE_APP_ID }}
+          private-key: ${{ secrets.WSR_RELEASE_APP_PRIVATE_KEY }}
+          owner: firestige
+          repositories: execution-system
+          permission-contents: write
+
       - name: Create final tag and Release as the last operation
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           FINAL_TAG: ${{ inputs.final_tag }}
         run: |
           gh release create "$FINAL_TAG" "$RUNNER_TEMP/qualified-release/"* \
             --target "$(git rev-parse HEAD)" \
             --title "Execution System $FINAL_TAG" \
-            --notes "Promoted from fully qualified prerelease ${{ inputs.candidate_tag }}."
+            --notes-file "$RUNNER_TEMP/qualified-release/release-notes.md"

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "wsr.release-component@1.0.0",
+  "repository": "firestige/execution-system",
+  "releaseBranch": "main",
+  "triggerBranch": "release/next",
+  "assetMode": "npm-pair",
+  "acceptanceCommand": "pnpm release:check-coordinates && pnpm test:full && pnpm test:coverage && pnpm typecheck && pnpm build && pnpm check:generated && pnpm harness static && pnpm harness feasibility && pnpm verify:dsh-intake",
+  "buildCommand": "pnpm release:artifacts",
+  "verifyCommand": "pnpm release:verify",
+  "publisherAdapter": "npm-pair+dsh+github-release",
+  "remoteInstallMode": "dsh-web-clean-profile",
+  "stablePolicy": "qualified-candidate-exact-assets",
+  "capabilities": ["github-release", "npm-pair", "dsh-install"]
+}

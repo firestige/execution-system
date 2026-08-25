@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workflow-self-recursive.dev/schemas/release-component-1.0.0.schema.json",
+  "title": "WSR release component configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "repository", "releaseBranch", "triggerBranch", "assetMode",
+    "acceptanceCommand", "buildCommand", "verifyCommand", "publisherAdapter",
+    "remoteInstallMode", "stablePolicy", "capabilities"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "wsr.release-component@1.0.0" },
+    "repository": { "type": "string", "pattern": "^firestige/[a-z0-9-]+$" },
+    "releaseBranch": { "const": "main" },
+    "triggerBranch": { "type": "string", "pattern": "^release/[a-z0-9._-]+$" },
+    "assetMode": { "type": "string", "minLength": 1 },
+    "acceptanceCommand": { "type": "string", "minLength": 1 },
+    "buildCommand": { "type": "string", "minLength": 1 },
+    "verifyCommand": { "type": "string", "minLength": 1 },
+    "publisherAdapter": { "type": "string", "minLength": 1 },
+    "remoteInstallMode": { "type": "string", "minLength": 1 },
+    "stablePolicy": { "const": "qualified-candidate-exact-assets" },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

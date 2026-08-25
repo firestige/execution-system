@@ -20,11 +20,12 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain("local_manual_e2e_evidence:");
   });
 
-  it("qualifies the RC from the super-project authority workspace at the exact Execution pin", async () => {
+  it("qualifies the RC from a selected super-project authority ref at the exact Execution pin", async () => {
     const candidate = await readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8");
 
     expect(candidate).toContain("repository: firestige/workflow-self-recursive");
-    expect(candidate).toContain("ref: fix/iter3-interactive-intake-e2e");
+    expect(candidate).toContain("ref: ${{ inputs.authority_ref }}");
+    expect(candidate).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(candidate).toContain("submodules: recursive");
     expect(candidate).toContain('test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"');
     expect(candidate).toContain("Install frozen contract checker dependencies");
@@ -32,12 +33,11 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain('"$GITHUB_WORKSPACE/execution-system"');
   });
 
-  it("qualifies the Iteration 3 component PR against its exact super-project candidate pins", async () => {
+  it("keeps ordinary component PR qualification on the stable super-project authority", async () => {
     const ci = await readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8");
 
-    expect(ci).toContain("github.head_ref == 'fix/iter3-interactive-intake'");
-    expect(ci).toContain("'fix/iter3-interactive-intake-e2e'");
-    expect(ci).toContain("|| 'main'");
+    expect(ci).toContain("ref: main");
+    expect(ci).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(ci).toContain("submodules: recursive");
     expect(ci).toContain("fetch-depth: 0");
     expect(ci).not.toContain("ref: ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb");

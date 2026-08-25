@@ -21,6 +21,7 @@ async function packPlugin(root: string, version: string): Promise<string> {
   execFileSync("npm", ["pack", "--silent", "--pack-destination", destination], {
     cwd: source,
     stdio: "pipe",
+    env: { ...process.env, WSR_RELEASE_PACK_MODE: "verified-builder" },
   });
   return path.join(destination, `wsr-dsh-intake-${version}.tgz`);
 }

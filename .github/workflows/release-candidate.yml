@@ -11,6 +11,10 @@ on:
         description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
         required: true
         type: string
+      authority_ref:
+        description: Superproject release/next ref pinned to this exact component candidate
+        required: true
+        type: string
   workflow_call:
     inputs:
       candidate_tag:
@@ -19,6 +23,10 @@ on:
         type: string
       local_manual_e2e_evidence:
         description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
+        required: true
+        type: string
+      authority_ref:
+        description: Superproject release/next ref pinned to this exact component candidate
         required: true
         type: string
 
@@ -34,11 +42,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Verify release trigger branch
+        run: test "$GITHUB_REF_NAME" = "release/next"
+
       - name: Checkout super-project qualification authority workspace
         uses: actions/checkout@v6
         with:
           repository: firestige/workflow-self-recursive
-          ref: fix/iter3-interactive-intake-e2e
+          ref: ${{ inputs.authority_ref }}
           fetch-depth: 0
           submodules: recursive
 
@@ -122,7 +133,7 @@ jobs:
           gh release create "$CANDIDATE_TAG" "$RUNNER_TEMP/local-release/"* \
             --prerelease --target "$GITHUB_SHA" \
             --title "Execution System $CANDIDATE_TAG" \
-            --notes "Release candidate. Not a final release; remote-install qualification is pending."
+            --notes-file "$RUNNER_TEMP/local-release/release-notes.md"
 
       - name: Redownload exact prerelease assets
         working-directory: execution-system

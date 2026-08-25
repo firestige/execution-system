@@ -48,6 +48,10 @@
   "dependencies": {
     "wsr-execution": "0.1.2"
   },
+  "scripts": {
+    "prepack": "node -e \"if(process.env.WSR_RELEASE_PACK_MODE!=='verified-builder')throw new Error('DIRECT_SOURCE_PACK_PROHIBITED')\"",
+    "prepublishOnly": "node -e \"throw new Error('DIRECT_SOURCE_PUBLISH_PROHIBITED_USE_QUALIFIED_TGZ')\""
+  },
   "description": "DSH plugin that brings version-bound workflows into your chat: /wsr commands, the workflow_execution_intake tool, Deliveries & Current status sidebar tabs, and isolated Runner-owned execution. · 在 DeepSeek Harness 对话中运行版本绑定、可审计的工作流：/wsr 命令、workflow_execution_intake 工具、Deliveries/Current 侧边栏，以及 Runner 隔离执行。",
   "keywords": [
     "wsr",
