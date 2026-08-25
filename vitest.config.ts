@@ -10,6 +10,7 @@ export default defineConfig({
       include: ["src/**/*.ts", "scripts/**/*.ts"],
       exclude: [
         "scripts/generate-workflow-contract.ts",
+        "scripts/generate-changelog.ts",
         "scripts/build-release-artifacts.ts",
         "scripts/build-workflow-release-assets.ts",
         "scripts/qualify-dsh-product-e2e.ts",

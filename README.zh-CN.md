@@ -1,8 +1,40 @@
-# execution-system
+# Workflow Self-Recursive — Execution System
 
 [English](README.md) | 中文
 
-execution-system 是 workflow-self-recursive 的 Execution System —— 一个与宿主无关的小型执行边界：它解析并校验一个确定的 Workflow Package，将绑定信息写入不可变的 Delivery Manifest，协调当前交付并发出有界观测事实。它嵌入在每个仓库/工作区中，当 Evidence 或遥测不可用时仍会继续运行。
+![Workflow Self-Recursive banner](social-preview.png)
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
+[![npm](https://img.shields.io/npm/v/wsr-dsh-intake)](https://www.npmjs.com/package/wsr-dsh-intake)
+[![CI](https://github.com/firestige/execution-system/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/execution-system/actions)
+
+**把每一次 Agent 对话变成一条可审计、可恢复、版本绑定的交付。**
+
+Execution System 是 [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive) 的 Execution System —— 与宿主无关的小型执行边界：它解析并校验一个**确定的** Workflow Package，把绑定信息写入**不可变的 Delivery Manifest**，在 Runner 隔离的执行上下文中协调整个交付；进程崩溃后可从最后一个持久化边界**恢复**；执行过程通过 OTLP 发出**有界观测**——观测从不控制执行。
+
+## 交付形态
+
+Execution System 是宿主无关的产品，不是某个插件。DSH 只是入口之一：
+
+| 形态 | 包 | 适用 |
+|---|---|---|
+| **嵌入库** | `wsr-execution` | 宿主无关嵌入 —— 导入 `ExecutionApplicationFactory`，用 `create(configFile, dependencies)` 引导 |
+| **DSH 插件入口** | `wsr-dsh-intake` | DeepSeek Harness 用户 —— 在对话与侧边栏中运行工作流 |
+| **CLI** | `execution-config`（随 `wsr-execution`）| 配置 init / copy / validate / dump-effective |
+
+DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runner 所有、隔离的 DSH 执行上下文（`DSH-E`）中运行，绝不在 Intake 上下文（`DSH-I`）中。
+
+## 为什么需要它
+
+| 裸 Agent 对话的问题 | 实际会发生什么 | Execution System 如何解决 |
+|---|---|---|
+| 执行是黑盒 | 模型做了什么、用了哪个版本的工作流定义，事后无法核对 | 每次交付绑定一个确定版本 + SHA-256，写入不可变 Manifest |
+| 中断即丢失 | 进程退出/重启后，长任务状态无处可寻 | Manifest/当前槽位持久化，`/wsr recover` 从最后持久化边界恢复 |
+| 版本漂移 | 同一请求在不同时刻可能执行不同定义 | Exact/latest selector，本地 READY store 保持权威 |
+| 观测与执行耦合 | 遥测故障可能拖垮执行 | 单向、best-effort OTLP；Evidence 或遥测不可用时 Execution 继续运行 |
+
+## 工作原理
 
 三个 Module 承担上述职责：
 
@@ -10,27 +42,81 @@ execution-system 是 workflow-self-recursive 的 Execution System —— 一个�
 - **Runtime Interaction** 拥有规范工作区排他性、当前 Delivery 槽位、Manifest 持久化、Runtime 调用、恢复与最终处理。
 - **Delivery Observation** 将出站有界事实映射到单向、尽力而为的 OTLP profile，但不控制执行。
 
-公开的 `ExecutionApplication` 与宿主无关，不安装 DSH Intake plugin 也可以直接嵌入。独立打包的 DSH Intake Adapter 是首个产品入口；通过 M01 admission 的 Workflow Action 均在 Runner 所有、与 Intake 隔离的 DSH 执行 Context 中运行。
-
-## Developer preview
-
-本仓库是 workflow-self-recursive 架构优先开发者预览版的一部分，适用于个人或小团队的可信本地环境。`0.1.1` 是 MVP candidate，后续可能有破坏兼容性的变更。
-
-## Release 快速开始
-
-1. 发布前运行 `pnpm quickstart:prepare`，一次完成两个 `0.1.1` artifact 的构建、验证和本地 E2E 配置初始化。
-2. 复制 `config/defaults/execution.default.yaml`，替换全部 `__REQUIRED__` 值，并在外置 DSH credential 文件中 provision 所引用的 API key（格式为 `version: 1`、`refs: ...`）。
-3. 在带交互 app 的 DSH profile 中安装（发行版以自带 `web` profile 为准）：先把 `better-sqlite3: true` 合入 pnpm 11 `allowBuilds`，再执行 `dsh plugin --profile web add --workspace-root <Execution-System-tarball-绝对路径>`，随后以同一命令安装 `<DSH-Intake-tarball-绝对路径>`。当前 DSH preview 创建的 workspace 需要该标志；`pnpm quickstart:prepare` 会自动完成 policy merge。
-4. 为 plugin row 填写 absolute `configFile` 与 `bindingFile`，再执行 `dsh --profile web --dump-config` 和 `dsh --profile web --help` 验证。
-5. 从目标 worktree 启动 `dsh --profile web`。只读查询使用 sidebar 的 Deliveries 与 Current status tabs；chat 用于 `/wsr create implementation-workflow@0.3.0`、普通 Action 答复与 `/wsr action finish`。`/wsr list` 和 `/wsr status` operation 继续保留给 compatibility 与 automation。重启 Intake 时会保留 Manifest/current-slot 与 private binding state 以供恢复。
-
 默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 
-Workflow Package Release 以单 Package 为范围：tag 为 `workflow-package/<name>/v<version>`，且只包含 archive、对应的 package-release descriptor 与 SHA-256 checksum。exact 与 latest selector 枚举同一个 configured Release 集合；latest 只在目标 Package 内按 SemVer 排序并排除 GitHub/SemVer prerelease，exact 则可以选择 prerelease。不可变的 initial `0.3.0` cohort descriptor 也由同一枚举算法解释。本地 READY 与 sticky-latest 在任何 Source 请求之前保持优先。使用 `pnpm release:workflow-assets <package-directory> <destination> <40-character-revision>` 构建单个 Release。
+## 安装（DSH 入口，一条命令）
 
-完整步骤见 repository-owned [本地发布前 E2E 指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.zh-CN.md)、final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.zh-CN.md)、[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.zh-CN.md)与 [DSH Intake package reference](packages/dsh-intake/README.md)。Release automation 与用户安装保持为不同 surface。
+```sh
+# 1. 批准一次 better-sqlite3 原生构建（pnpm 11）
+dsh plugin --profile web config set --location=project --json allowBuilds '{"better-sqlite3":true}'
+# 2. 安装 Intake 入口 —— 引擎（wsr-execution）作为其依赖自动装上
+dsh plugin --profile web add wsr-dsh-intake
+```
 
-Host-neutral embedding 从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。Observation 默认关闭；将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
+要求 Node `>=24.12 <25` 与 DSH `0.1.1-rc.2`。Core 与 Intake 版本联动（`wsr-dsh-intake@0.1.2` 依赖 `wsr-execution@0.1.2`），一次 `add` 装齐、一次 `update` 同升。
+
+## 快速开始
+
+1. 为插件指向持久状态文件（位于安装目录之外）：
+
+   ```yaml
+   # $DSH_HOME/profiles/web/cordis.patch.yml —— workflow-execution 行
+   - id: workflow-execution
+     config:
+       configFile: /absolute/path/wsr-local/execution.yaml
+       bindingFile: /absolute/path/wsr-local/dsh-intake-bindings.json
+   ```
+
+   用 `execution-config init <path> yaml` 初始化配置，替换全部 `__REQUIRED__` 值，并在外部 DSH credential 文件中 provision 所引用的 API key。
+
+2. 从目标 worktree 启动 DSH Web，在对话中创建 Delivery：
+
+   ```text
+   /wsr create implementation-workflow@0.3.0
+   Implement the requested change and preserve existing user edits.
+   ```
+
+3. 在同一个对话中观察进度，用侧边栏 **Deliveries** / **Current status** 面板检查绑定的 Delivery，在对话中答复多轮 Action，并用 `/wsr action finish` 结束一次交互。
+
+## 命令
+
+```text
+/wsr list                         # 隐私安全的 Delivery 与工作区状态
+/wsr create <name|name@latest|name@version>
+/wsr recover [delivery-id]
+/wsr status [delivery-id]
+/wsr action finish
+/wsr abandon <delivery-id>
+```
+
+显式第一方 skill `/workflow-execution` 通过 DSH-I 专用工具 `workflow_execution_intake` 恰好执行一次闭环操作。
+
+## 兼容性
+
+| 维度 | 要求 |
+|---|---|
+| Node.js | `>=24.12.0 <25` |
+| DeepSeek Harness | `0.1.1-rc.2`（`@deepseek-ai/dsh`）|
+| Workflow Package 契约 | `agentops.workflow-dsl@1.1.0` |
+| 观测契约 | `agentops.observation@1.0.0` |
+| 检查点存储 | `better-sqlite3`（原生构建，经 `allowBuilds` 批准）|
+
+## 已知限制与待办
+
+- **开发者预览** —— `0.1.x` 是面向个人与小团队可信本地使用的 MVP candidate；可能存在破坏兼容性的变更。
+- **会话工作区作为临时 worktree** —— 在 [#94](https://github.com/firestige/workflow-self-recursive/issues/94) 之前，需要选择 worktree 的操作使用调用会话的已注册工作区；权威是调用级且精确的。
+- **观测默认关闭** —— 将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
+- **仅 DSH 交互面** —— 发行版以自带 `web` profile 为交互组装；自定义 profile 只含 `dsh-base`，不是交互式 Intake 面。
+
+## 面向维护者
+
+- **发布 qualification** —— 见[发布流程](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md)。`pnpm quickstart:prepare` 一次完成两个 artifact 的构建、验证与本地 E2E 配置初始化。
+- **Changelog** —— 由 `pnpm changelog:generate` 从 git history 自动生成；`pnpm changelog:check`（CI 门禁）拒绝手工篡改。
+- **本地发布前 E2E** —— [指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.md)；最终 [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md)；[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md)；[DSH Intake package reference](packages/dsh-intake/README.md)。
+
+### 直接嵌入
+
+宿主无关嵌入从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。
 
 ## 获取源码
 
