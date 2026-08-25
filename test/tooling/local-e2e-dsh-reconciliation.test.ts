@@ -1,12 +1,64 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { reconcileLocalE2EDshProfile } from "../../scripts/prepare-local-e2e.js";
+import {
+  reconcileLocalE2EDshProfile,
+  resolveLocalE2EProfileReinstall,
+} from "../../scripts/prepare-local-e2e.js";
 
 describe("local E2E DSH profile reconciliation", () => {
+  it("enables profile reinstall only through the explicit CLI switch", () => {
+    expect(resolveLocalE2EProfileReinstall([])).toBe(false);
+    expect(resolveLocalE2EProfileReinstall(["--reinstall-dsh-profile"])).toBe(true);
+  });
+
+  it("preserves existing profile modules unless reinstall is explicitly requested", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "local-e2e-dsh-preserve-modules-"));
+    const dshHome = path.join(root, "dsh-home");
+    const profileDirectory = path.join(dshHome, "profiles/web");
+    const modulesMarker = path.join(profileDirectory, "node_modules/.modules.yaml");
+    const configFile = path.join(root, "execution.json");
+    const bindingFile = path.join(root, "bindings.json");
+    await mkdir(path.dirname(modulesMarker), { recursive: true });
+    await writeFile(modulesMarker, "nodeLinker: isolated\n");
+    await writeFile(path.join(profileDirectory, "cordis.patch.yml"), "[]\n");
+
+    await reconcileLocalE2EDshProfile({
+      dshHome, profile: "web", worktree: root, coreArchive: "core.tgz", pluginArchive: "plugin.tgz",
+      configFile, bindingFile,
+    }, async (_command, args) => args[0] === "plugin" ? "" : `${configFile}\n${bindingFile}\n`);
+
+    expect(await readFile(modulesMarker, "utf8")).toBe("nodeLinker: isolated\n");
+  });
+
+  it("removes only existing profile modules when reinstall is explicitly requested", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "local-e2e-dsh-reinstall-modules-"));
+    const dshHome = path.join(root, "dsh-home");
+    const profileDirectory = path.join(dshHome, "profiles/web");
+    const modulesDirectory = path.join(profileDirectory, "node_modules");
+    const configFile = path.join(root, "execution.json");
+    const bindingFile = path.join(root, "bindings.json");
+    await mkdir(modulesDirectory, { recursive: true });
+    await writeFile(path.join(modulesDirectory, ".modules.yaml"), "nodeLinker: isolated\n");
+    await writeFile(path.join(profileDirectory, "package.json"), "{\"dependencies\":{}}\n");
+    await writeFile(path.join(profileDirectory, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    await writeFile(path.join(profileDirectory, "cordis.yml"), "- id: web-runtime\n");
+    await writeFile(path.join(profileDirectory, "cordis.patch.yml"), "[]\n");
+
+    await reconcileLocalE2EDshProfile({
+      dshHome, profile: "web", worktree: root, coreArchive: "core.tgz", pluginArchive: "plugin.tgz",
+      configFile, bindingFile, reinstallProfile: true,
+    }, async (_command, args) => args[0] === "plugin" ? "" : `${configFile}\n${bindingFile}\n`);
+
+    await expect(stat(modulesDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(path.join(profileDirectory, "package.json"), "utf8")).toBe("{\"dependencies\":{}}\n");
+    expect(await readFile(path.join(profileDirectory, "pnpm-lock.yaml"), "utf8")).toBe("lockfileVersion: '9.0'\n");
+    expect(await readFile(path.join(profileDirectory, "cordis.yml"), "utf8")).toBe("- id: web-runtime\n");
+  });
+
   it("installs exact local artifacts into a fresh profile and appends only the owned override", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "local-e2e-dsh-fresh-"));
     const dshHome = path.join(root, "dsh-home");

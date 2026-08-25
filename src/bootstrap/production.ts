@@ -266,6 +266,7 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
 }
 
 export interface ExecutionApplicationControl extends WorkflowIntakeControlPort {
+  executeFromConversationWorkspace(request: ExecutionRequest, exactWorkspace: string): Promise<ExecutionResult>;
   attach(deliveryId: string, correlation: string): void;
   waitForDelivery(correlation: string, timeoutMs: number): Promise<Readonly<{ deliveryId: string; worktree: string }> | undefined>;
   answerAction(request: Readonly<{ correlation: string; prompt: TaskPrompt }>): Promise<ExecutionResult>;
@@ -349,6 +350,14 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     let closePromise: Promise<void> | undefined;
     let diagnostic: Readonly<{ code: string; phase: "RECOVERING"; installationIdentity: string }> | undefined;
 
+    async function executeRequest(request: ExecutionRequest, exactWorktreeRoot?: string): Promise<ExecutionResult> {
+      const state = lifecycle.status().state;
+      if (state !== "READY") return failure(state === "CLOSING" || state === "CLOSED" ? "APPLICATION_CLOSING" : "APPLICATION_NOT_READY");
+      const admitted = await core.begin(request, exactWorktreeRoot === undefined ? undefined : { exactWorktreeRoot });
+      if (admitted.kind === "NEW") interactions.expect(admitted.command.canonicalWorktree, admitted.command.intakeCorrelation);
+      return admitted.kind === "NEW" ? delivery.activate(admitted) : admitted;
+    }
+
     const application: ExecutionApplication = Object.freeze({
       start(): Promise<void> {
         if (startPromise !== undefined) return startPromise;
@@ -389,11 +398,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
         return startPromise;
       },
       async execute(request: ExecutionRequest): Promise<ExecutionResult> {
-        const state = lifecycle.status().state;
-        if (state !== "READY") return failure(state === "CLOSING" || state === "CLOSED" ? "APPLICATION_CLOSING" : "APPLICATION_NOT_READY");
-        const admitted = await core.begin(request);
-        if (admitted.kind === "NEW") interactions.expect(admitted.command.canonicalWorktree, admitted.command.intakeCorrelation);
-        return admitted.kind === "NEW" ? delivery.activate(admitted) : admitted;
+        return executeRequest(request);
       },
       async inspect(worktree: string): Promise<ExecutionResult> {
         const state = lifecycle.status().state;
@@ -430,6 +435,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       },
     });
     const control: ExecutionApplicationControl = Object.freeze({
+      executeFromConversationWorkspace: (request: ExecutionRequest, exactWorkspace: string) => executeRequest(request, exactWorkspace),
       async list() {
         const items: IntakeDeliveryInventoryItem[] = [];
         for (const slot of await slots.enumerate()) {
@@ -445,7 +451,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
         }
         return Object.freeze(items);
       },
-      async recover(request: Readonly<{ worktree: string; deliveryId?: string; correlation: string }>) {
+      async recover(request: Readonly<{ worktree?: string; deliveryId?: string; correlation: string }>) {
         const slotsNow = await slots.enumerate();
         const matches = request.deliveryId === undefined
           ? slotsNow.filter((slot) => slot.worktree === request.worktree)

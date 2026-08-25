@@ -6,7 +6,7 @@ import { IntakeSessionBindingRepository } from "./binding-repository.js";
 import { parseWsrCommand } from "./command.js";
 
 export const name = "workflow-execution";
-export const inject = ["commands", "tools", "attachments", "agents"];
+export const inject = ["commands", "tools", "attachments", "agents", "workspaceRegistry"];
 
 function profile(candidate) {
   if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)
@@ -69,6 +69,47 @@ function turnFromAgent(agent) {
   return Object.freeze({ text: textOf(message?.content), images: Object.freeze((message?.content ?? []).filter((block) => block?.type === "image")) });
 }
 
+function workspaceUnauthorized() {
+  return Object.assign(new TypeError("DSH_INTAKE_WORKSPACE_UNAUTHORIZED"), { code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+}
+
+export async function resolveConversationWorkspace(ctx, agent) {
+  const sessionKey = agent !== null && typeof agent === "object" && typeof agent.id === "string" && agent.id.length > 0
+    ? agent.id
+    : undefined;
+  if (ctx === null || typeof ctx !== "object" || typeof ctx.agents?.get !== "function"
+    || typeof ctx.workspaceRegistry?.resolveByPath !== "function" || typeof sessionKey !== "string" || sessionKey.length === 0) {
+    throw workspaceUnauthorized();
+  }
+  const liveAgent = ctx.agents.get(sessionKey);
+  const cwd = agent?.session?.header?.cwd;
+  if (liveAgent !== agent || typeof cwd !== "string" || !path.isAbsolute(cwd)) {
+    throw workspaceUnauthorized();
+  }
+  let workspace;
+  try { workspace = await ctx.workspaceRegistry.resolveByPath(cwd); }
+  catch { throw workspaceUnauthorized(); }
+  if (workspace === undefined || typeof workspace.id !== "string" || typeof workspace.path !== "string"
+    || !path.isAbsolute(workspace.path) || !Array.isArray(workspace.sessionIds)
+    || !workspace.sessionIds.some((candidate) => String(candidate) === sessionKey)) {
+    throw workspaceUnauthorized();
+  }
+  let canonicalCwd;
+  let canonicalWorkspace;
+  try { [canonicalCwd, canonicalWorkspace] = await Promise.all([realpath(cwd), realpath(workspace.path)]); }
+  catch { throw workspaceUnauthorized(); }
+  if (canonicalCwd !== canonicalWorkspace || workspace.path !== canonicalWorkspace) throw workspaceUnauthorized();
+  return Object.freeze({ sessionKey, workspaceId: String(workspace.id), path: canonicalWorkspace });
+}
+
+export function recordConsumedActionReply(agent, message) {
+  if (agent === null || typeof agent !== "object" || typeof agent.session?.append !== "function"
+    || message === null || typeof message !== "object" || message.source?.kind !== "user") {
+    throw new TypeError("DSH_INTAKE_USER_INPUT_INVALID");
+  }
+  agent.session.append("user/message", message, { surfaceOp: "append" });
+}
+
 const PRESENTATION_VERSION = "wsr.presentation@1.0.0";
 const PRESENTATION_KINDS = new Set(["command-accepted", "delivery-running", "delivery-list", "delivery-status", "action-output", "action-input-request", "terminal-result", "error"]);
 
@@ -104,6 +145,19 @@ export function presentToDshSession(agent, presentation, createId = () => `cmd-w
   agent.session.append("command/done", { commandId, kind: presentation?.kind === "error" ? "error" : "success", text });
 }
 
+export function presentationForDshOperation(api, correlation, operation, result, maxBytes = 4096) {
+  if (operation?.operation === "create" && result?.kind === "RECOVERY") {
+    return api.createIntakePresentation(correlation, "delivery-status", {
+      worktree: result.worktree,
+      deliveryId: result.deliveryId,
+      state: result.state,
+      created: false,
+      reason: "CURRENT_DELIVERY_EXISTS",
+    });
+  }
+  return api.presentationForIntakeResult(correlation, result, maxBytes);
+}
+
 export async function createPluginRuntime(config, options = {}) {
   const admitted = profile(config);
   const api = await (options.moduleLoader?.() ?? import("@workflow-self-recursive/execution-system"));
@@ -136,7 +190,13 @@ export async function createPluginRuntime(config, options = {}) {
     try { await application.close(); } catch { /* preserve the first startup failure */ }
     throw cause;
   }
-  const service = new api.WorkflowIntakeService(Object.freeze({ application, control }));
+  const service = new api.WorkflowIntakeService(Object.freeze({
+    application,
+    control,
+    ...(typeof control.executeFromConversationWorkspace !== "function" ? {} : {
+      execute: (request) => control.executeFromConversationWorkspace(request, request.worktree),
+    }),
+  }));
   const active = new Set();
   let accepting = true;
   let closePromise;
@@ -162,15 +222,33 @@ export async function createPluginRuntime(config, options = {}) {
 
   async function invokeForSession(input) {
     if (!accepting) return error("APPLICATION_CLOSING");
-    const worktree = await realpath(input.worktree);
     const candidateBinding = await bindings.bySession(input.sessionKey);
     const existing = candidateBinding?.state === "BOUND" ? candidateBinding : undefined;
     const correlation = existing?.correlation ?? `intake-${randomUUID()}`;
     const attachments = await captureImages(input.images ?? [], input.attachmentStore, input.signal);
     const turn = Object.freeze({ text: input.turnText ?? "", attachments });
     const operation = input.operation;
+    async function conversationWorktree() {
+      try {
+        if (options.resolveConversationWorkspace !== undefined) {
+          if (input.agent === null || typeof input.agent !== "object" || String(input.agent.id) !== input.sessionKey) {
+            return undefined;
+          }
+          const authority = await options.resolveConversationWorkspace(input.agent);
+          if (authority === null || typeof authority !== "object" || authority.sessionKey !== input.sessionKey
+            || typeof authority.workspaceId !== "string" || typeof authority.path !== "string" || !path.isAbsolute(authority.path)) {
+            return undefined;
+          }
+          const canonical = await realpath(authority.path);
+          return canonical === authority.path ? canonical : undefined;
+        }
+        return typeof input.worktree === "string" ? await realpath(input.worktree) : undefined;
+      } catch { return undefined; }
+    }
     if (operation.operation === "create") {
       if (candidateBinding !== undefined) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
+      const worktree = await conversationWorktree();
+      if (worktree === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
       sessionByCorrelation.set(correlation, input.sessionKey);
       const execution = track(service.invoke(Object.freeze({ operation: "create", selector: operation.selector, worktree, directive: operation.directive, turn, correlation })));
       const first = await Promise.race([
@@ -205,6 +283,8 @@ export async function createPluginRuntime(config, options = {}) {
     if (operation.operation === "list") return service.invoke(Object.freeze({ operation: "list", correlation }));
     if (operation.operation === "recover") {
       if (existing !== undefined) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
+      const worktree = operation.deliveryId === undefined ? await conversationWorktree() : undefined;
+      if (operation.deliveryId === undefined && worktree === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
       const recoverable = (await control.list()).filter((item) => operation.deliveryId === undefined
         ? item.worktree === worktree
         : item.deliveryId === operation.deliveryId);
@@ -212,7 +292,7 @@ export async function createPluginRuntime(config, options = {}) {
         const claimed = await bindings.byDelivery(recoverable[0].deliveryId);
         if (claimed?.state === "BOUND") return error("DELIVERY_INTAKE_BOUND");
       }
-      const result = await service.invoke(Object.freeze({ operation: "recover", worktree, ...(operation.deliveryId === undefined ? {} : { deliveryId: operation.deliveryId }), correlation }));
+      const result = await service.invoke(Object.freeze({ operation: "recover", ...(worktree === undefined ? {} : { worktree }), ...(operation.deliveryId === undefined ? {} : { deliveryId: operation.deliveryId }), correlation }));
       if (result.kind === "RECOVERY") {
         await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: result.deliveryId, worktree: result.worktree }));
         sessionByCorrelation.set(correlation, input.sessionKey);
@@ -221,7 +301,9 @@ export async function createPluginRuntime(config, options = {}) {
     }
     if (operation.operation === "status") {
       const deliveryId = operation.deliveryId ?? existing?.deliveryId;
-      return service.invoke(Object.freeze({ operation: "status", worktree, ...(deliveryId === undefined ? {} : { deliveryId }), correlation }));
+      const worktree = deliveryId === undefined ? await conversationWorktree() : undefined;
+      if (deliveryId === undefined && worktree === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
+      return service.invoke(Object.freeze({ operation: "status", ...(worktree === undefined ? {} : { worktree }), ...(deliveryId === undefined ? {} : { deliveryId }), correlation }));
     }
     if (operation.operation === "action-finish") {
       if (existing === undefined) return error("DELIVERY_UNKNOWN");
@@ -266,6 +348,25 @@ function commandTurn(rawInput) {
   return `/wsr ${normalized}`;
 }
 
+export async function recordWsrCommandInput(agent, rawInput, attachments = [], createId = () => `message-workflow-execution-${randomUUID()}`) {
+  if (agent === null || typeof agent !== "object" || typeof agent.followup !== "function" || typeof agent.whenIdle !== "function"
+    || typeof rawInput !== "string" || !Array.isArray(attachments) || typeof createId !== "function") {
+    throw new TypeError("DSH_INTAKE_USER_INPUT_INVALID");
+  }
+  const message = Object.freeze({
+    id: createId(),
+    role: "user",
+    source: Object.freeze({ kind: "user", workflowCommand: "wsr" }),
+    content: Object.freeze([
+      Object.freeze({ type: "text", text: commandTurn(rawInput) }),
+      ...attachments,
+    ]),
+  });
+  agent.followup(message);
+  await agent.whenIdle();
+  return message;
+}
+
 export function mapIntakeToolOperation(args) {
   const operationNames = ["list", "create", "recover", "status", "action-finish", "abandon"];
   if (args === null || typeof args !== "object" || Array.isArray(args)
@@ -284,16 +385,16 @@ export async function apply(ctx, config) {
     const agent = ctx.agents.get(sessionKey);
     if (agent === undefined) throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
     presentToDshSession(agent, presentation);
-  }, sessionAvailable: (sessionKey) => ctx.agents.get(sessionKey) !== undefined });
+  }, sessionAvailable: (sessionKey) => ctx.agents.get(sessionKey) !== undefined,
+  resolveConversationWorkspace: async (agent) => resolveConversationWorkspace(ctx, agent) });
   const active = new Set();
   const attachmentStore = ctx.attachments;
-  const worktree = () => process.cwd();
   const run = (task) => { active.add(task); void task.finally(() => active.delete(task)).catch(() => undefined); return task; };
   const command = ctx.commands.register({
     name: "wsr",
     description: "Create, list, recover, inspect, finish, or abandon a Workflow Delivery",
     input: { hint: "list | create <selector> | recover [delivery-id] | status [delivery-id] | action finish | abandon <delivery-id>", images: true },
-    recordInput: false,
+    recordInput: true,
     async handler(invocation) {
       return run((async () => {
         let query = false;
@@ -301,9 +402,12 @@ export async function apply(ctx, config) {
           const operation = parseWsrCommand(invocation.rawInput);
           query = operation.operation === "list" || operation.operation === "status";
           const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
-          if (!query) presentToDshSession(invocation.agent, createIntakePresentation(
-            String(invocation.commandId), "command-accepted", {},
-          ));
+          if (!query) {
+            await recordWsrCommandInput(invocation.agent, invocation.rawInput, invocation.attachments);
+            presentToDshSession(invocation.agent, createIntakePresentation(
+              String(invocation.commandId), "command-accepted", {},
+            ));
+          }
           if (invocation.attachments.length > 0 && !["create", "action-finish"].includes(operation.operation)) {
             const presentation = createIntakePresentation(
               `presentation-${randomUUID()}`, "error", { code: "WSR_COMMAND_INVALID", message: "WSR_COMMAND_INVALID" },
@@ -311,8 +415,8 @@ export async function apply(ctx, config) {
             if (!query) presentToDshSession(invocation.agent, presentation);
             return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
           }
-          const result = await runtime.invokeForSession({ sessionKey: String(invocation.agent.id), worktree: worktree(), operation, turnText: commandTurn(invocation.rawInput), images: invocation.attachments, attachmentStore, signal: invocation.signal });
-          const presentation = presentationForIntakeResult(`presentation-${randomUUID()}`, result, 4096);
+          const result = await runtime.invokeForSession({ sessionKey: String(invocation.agent.id), agent: invocation.agent, operation, turnText: commandTurn(invocation.rawInput), images: invocation.attachments, attachmentStore, signal: invocation.signal });
+          const presentation = presentationForDshOperation({ createIntakePresentation, presentationForIntakeResult }, `presentation-${randomUUID()}`, operation, result, 4096);
           if (!query) presentToDshSession(invocation.agent, presentation);
           return { kind: result.kind === "ERROR" ? "error" : "success", text: serializeIntakePresentation(presentation, 4096) };
         } catch (cause) {
@@ -336,17 +440,31 @@ export async function apply(ctx, config) {
         if (agent === undefined) throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
         const turn = turnFromAgent(agent);
         const operation = mapIntakeToolOperation(args);
-        const result = await runtime.invokeForSession({ sessionKey: String(agent.id), worktree: worktree(), operation, turnText: turn.text, images: turn.images, attachmentStore, signal: execution.signal });
-        const { presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
-        return { result: serializeIntakePresentation(presentationForIntakeResult(`presentation-${randomUUID()}`, result, 4096), 4096) };
+        const result = await runtime.invokeForSession({ sessionKey: String(agent.id), agent, operation, turnText: turn.text, images: turn.images, attachmentStore, signal: execution.signal });
+        const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("@workflow-self-recursive/execution-system");
+        return { result: serializeIntakePresentation(presentationForDshOperation(
+          { createIntakePresentation, presentationForIntakeResult }, `presentation-${randomUUID()}`, operation, result, 4096,
+        ), 4096) };
       },
-    }));
+  }));
   const preStep = ctx.on?.("agent/pre-step", async (payload, next) => {
-    if (await runtime.bindings.bySession(String(payload.agent.id)) === undefined) return next();
     const messages = payload.messages.filter((message) => message.source?.kind === "user");
+    const command = messages.find((message) => message.source?.workflowCommand === "wsr");
+    if (command !== undefined) {
+      recordConsumedActionReply(payload.agent, command);
+      return { kind: "reject" };
+    }
+    if (await runtime.bindings.bySession(String(payload.agent.id)) === undefined) return next();
     if (messages.length !== 1) return next();
-    const result = await runtime.answerForSession({ sessionKey: String(payload.agent.id), text: textOf(messages[0].content), images: messages[0].content.filter((block) => block.type === "image"), attachmentStore, signal: payload.signal });
-    return result.kind === "ERROR" && result.code === "ACTION_NOT_AWAITING_INPUT" ? next() : { kind: "reject" };
+    try {
+      const result = await runtime.answerForSession({ sessionKey: String(payload.agent.id), text: textOf(messages[0].content), images: messages[0].content.filter((block) => block.type === "image"), attachmentStore, signal: payload.signal });
+      if (result.kind === "ERROR" && result.code === "ACTION_NOT_AWAITING_INPUT") return next();
+      recordConsumedActionReply(payload.agent, messages[0]);
+      return { kind: "reject" };
+    } catch (cause) {
+      recordConsumedActionReply(payload.agent, messages[0]);
+      throw cause;
+    }
   });
   ctx.effect(function* () {
     yield async () => {

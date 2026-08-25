@@ -1,3 +1,5 @@
+import { realpath } from "node:fs/promises";
+
 import type {
   ExecutionContended,
   ExecutionFailure,
@@ -23,12 +25,24 @@ function failure(code: ExecutionFailure["code"]): ExecutionFailure {
 export class ExecutionCoreAdmission {
   constructor(readonly environment: ExecutionEnvironment, readonly admission: DeliveryAdmissionService) {}
 
-  async begin(candidate: unknown): Promise<CoreAdmissionResult> {
+  async begin(candidate: unknown, authority?: Readonly<{ exactWorktreeRoot: string }>): Promise<CoreAdmissionResult> {
     let requestedWorktree: string;
     try { requestedWorktree = captureRequestWorktree(candidate); }
     catch { return failure("INVALID_EXECUTION_REQUEST"); }
     let canonicalWorktree: string;
-    try { canonicalWorktree = await canonicalizeWorktree(requestedWorktree, this.environment.allowedWorktreeRoots); }
+    try {
+      let allowedRoots = this.environment.allowedWorktreeRoots;
+      if (authority !== undefined) {
+        if (authority === null || typeof authority !== "object" || Array.isArray(authority)
+          || Reflect.ownKeys(authority).length !== 1 || typeof authority.exactWorktreeRoot !== "string") {
+          throw new WorktreeAdmissionError("WORKTREE_OUT_OF_SCOPE");
+        }
+        const [requested, exactRoot] = await Promise.all([realpath(requestedWorktree), realpath(authority.exactWorktreeRoot)]);
+        if (requested !== exactRoot) throw new WorktreeAdmissionError("WORKTREE_OUT_OF_SCOPE");
+        allowedRoots = [exactRoot];
+      }
+      canonicalWorktree = await canonicalizeWorktree(requestedWorktree, allowedRoots);
+    }
     catch (cause) {
       return failure(cause instanceof WorktreeAdmissionError ? cause.code : "INVALID_WORKTREE");
     }
@@ -54,4 +68,3 @@ export class ExecutionCoreAdmission {
     return this.admission.cancelPreDelivery(admissionId);
   }
 }
-

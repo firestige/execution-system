@@ -255,6 +255,29 @@ describe("Wave 6 production bootstrap", () => {
     })).resolves.toMatchObject({ kind: "ERROR", code: "APPLICATION_CLOSING" });
   });
 
+  it("keeps registered-conversation admission on the private Intake control and exact path", async () => {
+    const { configFile, dependencies, worktree } = await fixture();
+    const conversationWorkspace = path.join(path.dirname(path.dirname(worktree)), "registered-conversation");
+    await mkdir(conversationWorkspace);
+    execFileSync("git", ["init", "-q"], { cwd: conversationWorkspace });
+    const canonicalConversation = await realpath(conversationWorkspace);
+    const request = {
+      worktree: canonicalConversation,
+      selector: "missing@1.0.0",
+      prompt: { text: "run", attachments: [] },
+    } as const;
+    const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+    const control = getExecutionApplicationControl(application);
+    await application.start();
+
+    await expect(application.execute(request)).resolves.toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
+    await expect(control.executeFromConversationWorkspace(request, path.dirname(canonicalConversation)))
+      .resolves.toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
+    await expect(control.executeFromConversationWorkspace(request, canonicalConversation))
+      .resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
+    await application.close();
+  });
+
   it("composes M01 through the pinned Runner and closes every Runner-owned DSH-E", async () => {
     const observedPaths: string[] = [];
     const observationEndpoint = createServer((request, response) => {

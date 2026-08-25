@@ -175,6 +175,8 @@ export async function dismissBlockingPrompts(cdp: CdpConnection): Promise<void> 
 }
 
 export async function submitBrowserCommand(cdp: CdpConnection, line: string): Promise<void> {
+  /* v8 ignore next -- real Chrome qualification covers asynchronous onboarding dismissal before submission. */
+  await dismissBlockingPrompts(cdp);
   await waitFor(async () => await evaluate(cdp, `(() => {
     const input = document.querySelector('textarea,[contenteditable="true"]');
     if (!input) return false;

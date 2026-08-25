@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -9,7 +9,11 @@ import {
   createPluginRuntime,
   mapIntakeToolOperation,
   parseWsrCommand,
+  presentationForDshOperation,
   presentToDshSession,
+  recordConsumedActionReply,
+  recordWsrCommandInput,
+  resolveConversationWorkspace,
 } from "../../packages/dsh-intake/src/index.js";
 import {
   WorkflowIntakeService,
@@ -36,6 +40,163 @@ afterEach(async () => {
 });
 
 describe("Wave 6 DSH Intake plugin", () => {
+  it("accepts only the registry-owned canonical workspace for the exact live conversation session", async () => {
+    const launchDirectory = process.cwd();
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-authority-"));
+    roots.push(root);
+    const workspaceSpelling = path.join(root, "conversation-a");
+    await mkdir(workspaceSpelling);
+    const workspacePath = await realpath(workspaceSpelling);
+    const canonicalRoot = await realpath(root);
+    const sessionId = "session-a";
+    const agent = { id: sessionId, session: { header: { cwd: workspacePath } } };
+    const workspace = Object.freeze({ id: "workspace-a", path: workspacePath, sessionIds: Object.freeze([sessionId]) });
+    const context = {
+      agents: { get: (id: string) => id === sessionId ? agent : undefined },
+      workspaceRegistry: { resolveByPath: async (candidate: string) => candidate === workspacePath ? workspace : undefined },
+    };
+
+    await expect(resolveConversationWorkspace(context, agent)).resolves.toEqual({
+      sessionKey: sessionId,
+      workspaceId: "workspace-a",
+      path: workspacePath,
+    });
+    expect(workspacePath).not.toBe(launchDirectory);
+
+    await expect(resolveConversationWorkspace({
+      ...context,
+      agents: { get: () => ({ ...agent }) },
+    }, agent)).rejects.toMatchObject({ code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+    await expect(resolveConversationWorkspace({
+      ...context,
+      workspaceRegistry: { resolveByPath: async () => ({ ...workspace, sessionIds: [] }) },
+    }, agent)).rejects.toMatchObject({ code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+    await expect(resolveConversationWorkspace({
+      ...context,
+      workspaceRegistry: { resolveByPath: async () => undefined },
+    }, agent)).rejects.toMatchObject({ code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+    await expect(resolveConversationWorkspace({
+      ...context,
+      workspaceRegistry: { resolveByPath: async () => ({ ...workspace, id: "common-parent", path: canonicalRoot }) },
+    }, agent)).rejects.toMatchObject({ code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+  });
+
+  it("resolves conversation workspace only for operations whose selection depends on it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-workspace-decision-"));
+    roots.push(root);
+    const workspaceSpelling = path.join(root, "workspace");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(workspaceSpelling);
+    const workspace = await fs.realpath(workspaceSpelling);
+    const requests: unknown[] = [];
+    const application = Object.freeze({
+      async start() {},
+      async execute(request: unknown) { requests.push(request); return { kind: "ERROR", code: "WORKFLOW_NOT_FOUND", message: "WORKFLOW_NOT_FOUND" }; },
+      async inspect() { throw new Error("not used"); },
+      async cancel(deliveryId: string) { return { kind: "TERMINAL", deliveryId, worktree: workspace, outcome: "CANCELLED" }; },
+      status() { return { state: "READY" }; },
+      async close() {},
+    });
+    const control = Object.freeze({
+      async list() { return []; }, attach() {}, async waitForDelivery() { return undefined; },
+      async recover(request: any) { return { kind: "RECOVERY", worktree: workspace, deliveryId: request.deliveryId, state: "RUNNING_CORRELATED" }; },
+      async status(request: any) { return { kind: "RECOVERY", worktree: workspace, deliveryId: request.deliveryId, state: "RUNNING_CORRELATED" }; },
+      async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
+    });
+    const resolved: string[] = [];
+    const runtime: any = await createPluginRuntime({
+      configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json"),
+    }, {
+      moduleLoader: async () => coreApi,
+      factory: Object.freeze({ async create() { return application; } }),
+      control,
+      async resolveConversationWorkspace(agent: { id: string }) {
+        const sessionKey = String(agent.id);
+        resolved.push(sessionKey);
+        if (sessionKey === "rejected-session") throw Object.assign(new Error("unauthorized"), { code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+        return Object.freeze({ sessionKey, workspaceId: "workspace-1", path: workspace });
+      },
+    } as any);
+
+    await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("list"), images: [] }))
+      .resolves.toEqual({ kind: "LIST", deliveries: [] });
+    await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("status delivery-1"), images: [] }))
+      .resolves.toMatchObject({ kind: "RECOVERY", deliveryId: "delivery-1" });
+    await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("recover delivery-1"), images: [] }))
+      .resolves.toMatchObject({ kind: "RECOVERY", deliveryId: "delivery-1" });
+    await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("abandon delivery-1"), images: [] }))
+      .resolves.toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-1" });
+    expect(resolved).toEqual([]);
+
+    await expect(runtime.invokeForSession({
+      sessionKey: "accepted-session", agent: { id: "accepted-session" }, operation: parseWsrCommand("create fixture@1.0.0\nrequest"),
+      turnText: "/wsr create fixture@1.0.0\nrequest", images: [],
+    })).resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
+    expect(resolved).toEqual(["accepted-session"]);
+    expect(requests).toEqual([expect.objectContaining({ worktree: workspace })]);
+
+    await expect(runtime.invokeForSession({
+      sessionKey: "accepted-session", agent: { id: "different-session" }, operation: parseWsrCommand("create fixture@1.0.0\nrequest"),
+      turnText: "/wsr create fixture@1.0.0\nrequest", images: [],
+    })).resolves.toMatchObject({ kind: "ERROR", code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+    expect(resolved).toEqual(["accepted-session"]);
+
+    await expect(runtime.invokeForSession({
+      sessionKey: "rejected-session", agent: { id: "rejected-session" }, operation: parseWsrCommand("create fixture@1.0.0\nrequest"),
+      turnText: "/wsr create fixture@1.0.0\nrequest", images: [],
+    })).resolves.toMatchObject({ kind: "ERROR", code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+    await runtime.close();
+  });
+
+  it("records an Action reply once before rejecting the DSH-I model step", () => {
+    const appended: unknown[] = [];
+    const message = { source: { kind: "user" }, content: [{ type: "text", text: "ordinary answer" }] };
+    recordConsumedActionReply({ session: { append: (...args: unknown[]) => appended.push(args) } }, message);
+    expect(appended).toEqual([["user/message", message, { surfaceOp: "append" }]]);
+  });
+
+  it("routes an interactive WSR command through a host-owned turn so a blank session becomes a real conversation", async () => {
+    const followedUp: unknown[] = [];
+    let idleWaits = 0;
+    const image = { type: "image", attachment: "attachment-1" };
+    const message = await recordWsrCommandInput(
+      {
+        followup(value: unknown) { followedUp.push(value); },
+        async whenIdle() { idleWaits += 1; },
+      },
+      "create hello-world-workflow@0.1.0\n向我问好、概括本请求；如果存在附件，请确认已经看到它。",
+      [image],
+      () => "message-wsr-1",
+    );
+
+    expect(message).toEqual({
+      id: "message-wsr-1",
+      role: "user",
+      source: { kind: "user", workflowCommand: "wsr" },
+      content: [
+        { type: "text", text: "/wsr create hello-world-workflow@0.1.0\n向我问好、概括本请求；如果存在附件，请确认已经看到它。" },
+        image,
+      ],
+    });
+    expect(followedUp).toEqual([message]);
+    expect(idleWaits).toBe(1);
+  });
+
+  it("explains that create joined an existing current Delivery instead of creating a new one", () => {
+    const presentation = presentationForDshOperation(coreApi, "correlation-1", { operation: "create" }, {
+      kind: "RECOVERY", worktree: "/conversation", deliveryId: "delivery-existing", state: "RESULT_UNRESOLVED",
+    });
+    expect(presentation).toEqual({
+      schemaVersion: "wsr.presentation@1.0.0",
+      correlation: "correlation-1",
+      kind: "delivery-status",
+      data: {
+        worktree: "/conversation", deliveryId: "delivery-existing", state: "RESULT_UNRESOLVED",
+        created: false, reason: "CURRENT_DELIVERY_EXISTS",
+      },
+    });
+  });
+
   it("rejects invalid profile config before binding, bootstrap, or startup activation effects", async () => {
     let factoryCalls = 0;
     const options = {
@@ -82,6 +243,13 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(client).toContain('sidebar.footer.action');
     expect(client).toContain('key: "wsr"');
     expect(client).toContain('data-wsr-presentation');
+    expect(source).toContain("recordInput: true");
+    expect(source).toContain("session?.header?.cwd");
+    expect(source).toContain('"workspaceRegistry"');
+    expect(source).toContain("workspace.sessionIds.some");
+    expect(source).toContain("executeFromConversationWorkspace");
+    expect(source).not.toContain("process.cwd()");
+    expect(source).not.toContain("conversationWorktreeFromAgent");
     expect(source).not.toMatch(/(?:src\/(?:delivery|observation|providers|host|coordinator|invocation)|RunnerFactory|DSH-E|ctx\.sessions)/u);
     expect(JSON.stringify(manifest) + patch + skill + source).not.toContain("implementation-workflow@0.3.0");
     expect(JSON.stringify(manifest) + patch + skill + source).not.toContain("system-design-workflow@0.3.0");

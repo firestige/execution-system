@@ -76,6 +76,50 @@ function statusData(result: Record<string, unknown>): Readonly<Record<string, Fr
   return data;
 }
 
+function visibleActionText(value: FrozenJsonValue): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const completion = visibleCompletionText(item);
+      if (completion !== undefined) return completion;
+    }
+    const parts = value.flatMap((item) => {
+      if (typeof item === "string") return item.length === 0 ? [] : [item];
+      if (item === null || typeof item !== "object" || Array.isArray(item)) return [];
+      const block = item as Readonly<Record<string, FrozenJsonValue>>;
+      return block.type === "text" && typeof block.text === "string" && block.text.length > 0 ? [block.text] : [];
+    });
+    return parts.length === 0 ? undefined : parts.join("\n\n");
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const record = value as Readonly<Record<string, FrozenJsonValue>>;
+  if (typeof record.type === "string") return record.type === "text" && typeof record.text === "string"
+    ? record.text
+    : visibleCompletionText(record);
+  for (const key of ["text", "message", "greeting", "summary", "result"] as const) {
+    const nested = record[key];
+    if (nested === undefined) continue;
+    const text = visibleActionText(nested);
+    if (text !== undefined) return text;
+  }
+  return undefined;
+}
+
+function visibleCompletionText(value: FrozenJsonValue): string | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const block = value as Readonly<Record<string, FrozenJsonValue>>;
+  if (block.type !== "tool-call" || block.name !== "workflow_complete" || typeof block.arguments !== "string") return undefined;
+  let args: FrozenJsonValue;
+  try {
+    const parsed = JSON.parse(block.arguments) as unknown;
+    if (!validJson(parsed)) return undefined;
+    args = parsed;
+  } catch { return undefined; }
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const result = (args as Readonly<Record<string, FrozenJsonValue>>).result;
+  return result === undefined ? undefined : visibleActionText(result);
+}
+
 export function presentationForIntakeResult(
   correlation: string,
   result: WorkflowIntakeResult,
@@ -96,7 +140,9 @@ export function presentationForIntakeResult(
 }
 
 export function actionOutputPresentation(correlation: string, content: FrozenJsonValue): IntakePresentation {
-  return createIntakePresentation(correlation, "action-output", { content });
+  return createIntakePresentation(correlation, "action-output", {
+    content: { text: visibleActionText(content) ?? "WSR content unavailable" },
+  });
 }
 
 export function actionInputRequestPresentation(correlation: string, prompt: FrozenJsonValue): IntakePresentation {

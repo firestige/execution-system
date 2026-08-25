@@ -9,17 +9,25 @@ const clientPath = path.resolve(import.meta.dirname, "../../packages/dsh-intake/
 async function loadClient(sessionSnapshot?: unknown) {
   const source = await readFile(clientPath, "utf8");
   let definition: any;
+  const copied: string[] = [];
   runInNewContext(source, {
     window: { __ModuleLoader__: { load(value: unknown) { definition = value; } } },
+    navigator: { clipboard: { async writeText(value: string) { copied.push(value); } } },
   });
   const React = Object.freeze({
     createElement(type: unknown, props: unknown, ...children: unknown[]) { return { type, props, children }; },
     useSyncExternalStore(_subscribe: unknown, getSnapshot: () => unknown) { return getSnapshot(); },
     useState(value: unknown) { return [value, () => undefined]; },
   });
+  const primitives = Object.freeze({
+    Tooltip: "Tooltip",
+    IconCopyOutline16: "IconCopyOutline16",
+    async writeClipboard(value: string) { copied.push(value); return true; },
+  });
   const client = definition.factory((name: string) => {
-    if (name !== "react") throw new TypeError(`UNEXPECTED_CLIENT_IMPORT:${name}`);
-    return React;
+    if (name === "react") return React;
+    if (name === "@deepseek-ai/dsh-client-ui-primitives") return primitives;
+    throw new TypeError(`UNEXPECTED_CLIENT_IMPORT:${name}`);
   });
   const components = new Map<string, (props: unknown) => any>();
   const definitions: any[] = [];
@@ -42,7 +50,7 @@ async function loadClient(sessionSnapshot?: unknown) {
       };
     },
   }, conversationEvents: { register(value: unknown) { definitions.push(value); return () => undefined; } } });
-  return { components, definitions, commands };
+  return { components, definitions, commands, copied };
 }
 
 async function loadViews(sessionSnapshot?: unknown): Promise<ReadonlyMap<string, (props: unknown) => any>> {
@@ -62,21 +70,33 @@ function textOf(element: any): string {
         : textOf(element.children);
 }
 
+function elementsOf(element: any): any[] {
+  if (element === null || element === undefined || typeof element === "string") return [];
+  if (Array.isArray(element)) return element.flatMap(elementsOf);
+  return [element, ...elementsOf(element.children)];
+}
+
 describe("DSH official WSR command view", () => {
-  it("hides generic WSR command rows so list/status stay out of chat", async () => {
+  it("hides every internal WSR command lifecycle because native user/output nodes own the chat timeline", async () => {
     const view = await loadCommandView();
-    expect(view({ node: { commandId: "command-1", outcome: null } })).toBeNull();
-    expect(view({ node: { outcome: { text: JSON.stringify({
-      schemaVersion: "wsr.presentation@1.0.0", correlation: "presentation-1", kind: "delivery-list", data: { items: [] },
-    }) } } })).toBeNull();
+    expect(view({ node: {
+      commandId: "command-create", name: "wsr",
+      args: " create hello-world-workflow@0.1.0\n向我问好，并提及本 conversation 描述的任务。",
+      outcome: { kind: "error", text: "SOURCE_FAILED" },
+    } })).toBeNull();
+
+    for (const args of [null, " recover delivery-1", " abandon delivery-1", " action finish\nfinal answer", " list", " status"]) {
+      expect(view({ node: { commandId: `command-${String(args)}`, name: "wsr", args, outcome: null } })).toBeNull();
+    }
   });
 
   it.each([
     ["delivery-running", { deliveryId: "delivery-1" }, "Workflow delivery running · delivery-1"],
     ["delivery-status", { state: "RUNNING_CORRELATED" }, "Workflow delivery status · RUNNING_CORRELATED"],
+    ["delivery-status", { state: "RESULT_UNRESOLVED", created: false, reason: "CURRENT_DELIVERY_EXISTS" }, "No new Workflow Delivery created · CURRENT_DELIVERY_EXISTS · RESULT_UNRESOLVED"],
     ["action-output", { content: { text: "hello" } }, "Action output"],
     ["action-input-request", { prompt: { question: "Continue?" } }, "Action input requested"],
-    ["terminal-result", { outcome: "SUCCEEDED" }, "Workflow finished · SUCCEEDED"],
+    ["terminal-result", { outcome: "FAILED" }, "Workflow finished · FAILED"],
   ])("renders the %s presentation", async (kind, data, expected) => {
     const { components, definitions } = await loadClient();
     const definition = definitions.find((candidate) => candidate.kind === "wsr-interaction");
@@ -101,8 +121,71 @@ describe("DSH official WSR command view", () => {
     expect(view, "WSR chat node renderer").toBeTypeOf("function");
     const rendered = view!({ node });
     expect(rendered.props["data-wsr-surface"]).toBe("chat");
+    expect(rendered.props["data-wsr-chat-role"]).toBe("assistant");
     expect(rendered.props["data-wsr-kind"]).toBe(kind);
+    expect(rendered.type).toBe("article");
+    expect(rendered.children[0].type).toBe("div");
+    expect(rendered.children[0].props.style.fontFamily).toBe("inherit");
     expect(textOf(rendered)).toContain(expected);
+  });
+
+  it("keeps a successful Workflow terminal marker out of chat so the answer actions remain last", async () => {
+    const { definitions } = await loadClient();
+    const definition = definitions.find((candidate) => candidate.kind === "wsr-interaction");
+    const run = { type: "command/run", seq: 10, time: 20, data: {
+      commandId: "presentation-command-1", name: "wsr", source: { kind: "plugin", plugin: "workflow-execution" },
+    } };
+    const done = { type: "command/done", seq: 11, time: 21, data: { commandId: "presentation-command-1", kind: "success", text: JSON.stringify({
+      schemaVersion: "wsr.presentation@1.0.0", correlation: "presentation-1", kind: "terminal-result", data: { outcome: "SUCCEEDED" },
+    }) } };
+    const startMatch = { event: run, location: { kind: "session" }, role: "start" };
+    const initial = definition.start({ key: "wsr-interaction:presentation-command-1" }, startMatch);
+    const state = definition.update({ state: initial }, { event: done, location: { kind: "session" }, role: "update" });
+
+    expect(definition.buildViewNode({
+      key: "wsr-interaction:presentation-command-1", id: "presentation-command-1", state,
+      start: startMatch, matches: [], current: new Map(),
+    })).toBeNull();
+  });
+
+  it("defensively renders only visible text from a native Action block array", async () => {
+    const { components, definitions, copied } = await loadClient();
+    const definition = definitions.find((candidate) => candidate.kind === "wsr-interaction");
+    const run = { type: "command/run", seq: 10, time: 20, data: {
+      commandId: "presentation-command-1", name: "wsr", source: { kind: "plugin", plugin: "workflow-execution" },
+    } };
+    const done = { type: "command/done", seq: 11, time: 21, data: { commandId: "presentation-command-1", kind: "success", text: JSON.stringify({
+      schemaVersion: "wsr.presentation@1.0.0", correlation: "presentation-1", kind: "action-output", data: { content: [
+        { type: "text", text: "你好！我先概括您的请求，然后为您完成这个操作。" },
+        { type: "tool-call", id: "call-secret", name: "workflow_complete", arguments: "{\"result\":{\"success\":true,\"greeting\":\"您好！我已收到并概括您的请求。\"}}" },
+      ] },
+    }) } };
+    const startMatch = { event: run, location: { kind: "session" }, role: "start" };
+    const initial = definition.start({ key: "wsr-interaction:presentation-command-1" }, startMatch);
+    const state = definition.update({ state: initial }, { event: done, location: { kind: "session" }, role: "update" });
+    const node = definition.buildViewNode({
+      key: "wsr-interaction:presentation-command-1", id: "presentation-command-1", state,
+      start: startMatch, matches: [], current: new Map(),
+    });
+    const rendered = components.get("conversation.chat.node")!({ node });
+    const text = textOf(rendered);
+
+    expect(text).toContain("您好！我已收到并概括您的请求。");
+    expect(text).not.toContain("为您完成这个操作");
+    expect(text).not.toContain("tool-call");
+    expect(text).not.toContain("workflow_complete");
+    expect(text).not.toContain("call-secret");
+    expect(text).not.toContain("arguments");
+    const actions = elementsOf(rendered).find((child: any) => child?.props?.["data-wsr-answer-actions"] === "true");
+    expect(actions, "DSH-shaped answer actions row").toBeDefined();
+    const copy = elementsOf(actions).find((child: any) => child?.type === "button");
+    expect(copy, "Action output copy button").toBeDefined();
+    expect(copy.props["aria-label"]).toBe("复制");
+    expect(copy.props.className).toBe("wsr-answer-action");
+    expect(elementsOf(copy).some((child: any) => child?.type === "IconCopyOutline16")).toBe(true);
+    expect(textOf(copy)).not.toContain("⧉");
+    await copy.props.onClick();
+    expect(copied).toEqual(["您好！我已收到并概括您的请求。"]);
   });
 });
 

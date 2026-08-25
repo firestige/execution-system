@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   WSR_PRESENTATION_VERSION,
+  actionOutputPresentation,
   createIntakePresentation,
   presentationForIntakeResult,
   serializeIntakePresentation,
@@ -45,6 +46,39 @@ describe("WSR host-neutral presentation contract", () => {
       presentationForIntakeResult("correlation-1", { kind: "ERROR", code: "DELIVERY_UNKNOWN", message: "DELIVERY_UNKNOWN", nativePayload: "secret" } as never, 4096),
       4096,
     )).not.toContain("nativePayload");
+  });
+
+  it("projects native assistant blocks to visible text without publishing completion tool protocol", () => {
+    const event = actionOutputPresentation("correlation-1", [
+      { type: "text", text: "你好！我先概括您的请求，然后为您完成这个操作。" },
+      {
+        type: "tool-call",
+        id: "call-secret",
+        name: "workflow_complete",
+        arguments: JSON.stringify({ result: { success: true, greeting: "您好！我已收到并概括您的请求。" } }),
+      },
+    ]);
+
+    expect(event).toMatchObject({
+      kind: "action-output",
+      data: { content: { text: "您好！我已收到并概括您的请求。" } },
+    });
+    const serialized = serializeIntakePresentation(event, 4096);
+    expect(serialized).not.toContain("tool-call");
+    expect(serialized).not.toContain("workflow_complete");
+    expect(serialized).not.toContain("call-secret");
+    expect(serialized).not.toContain("为您完成这个操作");
+  });
+
+  it.each([
+    ["plain assistant text", "plain assistant text"],
+    [{ type: "text", text: "single text block" }, "single text block"],
+    [{ result: { greeting: "nested visible result" } }, "nested visible result"],
+    [["first", { type: "text", text: "second" }, null], "first\n\nsecond"],
+    [{ type: "tool-call", name: "workflow_complete", arguments: "secret" }, "WSR content unavailable"],
+  ])("normalizes Action output %j to public text", (content, expected) => {
+    expect(actionOutputPresentation("correlation-1", content as never).data)
+      .toEqual({ content: { text: expected } });
   });
 
   it("fails closed to a bounded error when public presentation content exceeds its bound", () => {
