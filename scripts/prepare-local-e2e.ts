@@ -161,7 +161,21 @@ export type LocalE2EDshProfileInput = Readonly<{
   pluginArchive: string;
   configFile: string;
   bindingFile: string;
+  reinstallProfile?: boolean;
 }>;
+
+export function resolveLocalE2EProfileReinstall(args: readonly string[]): boolean {
+  return args.includes("--reinstall-dsh-profile");
+}
+
+function resolveDshProfileModulesDirectory(dshHome: string, profile: string): string {
+  const profilesDirectory = path.resolve(dshHome, "profiles");
+  const profileDirectory = path.resolve(profilesDirectory, profile);
+  if (profileDirectory === profilesDirectory || !profileDirectory.startsWith(`${profilesDirectory}${path.sep}`)) {
+    throw new Error("DSH_PROFILE_PATH_INVALID");
+  }
+  return path.join(profileDirectory, "node_modules");
+}
 
 function ownedWorkflowExecutionRow(configFile: string, bindingFile: string): string {
   return [
@@ -216,6 +230,9 @@ export async function reconcileLocalE2EDshProfile(
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
   }
+  if (input.reinstallProfile === true) {
+    await rm(resolveDshProfileModulesDirectory(dshHome, profile), { recursive: true, force: true });
+  }
   const corePackage = "@workflow-self-recursive/execution-system";
   const pluginPackage = "@workflow-self-recursive/dsh-intake";
   const removePrefix = ["plugin", "--profile", profile, "remove", "--workspace-root"] as const;
@@ -245,6 +262,7 @@ export async function reconcileLocalE2EDshProfile(
 
 async function main(): Promise<void> {
   const executionRoot = path.resolve(import.meta.dirname, "..");
+  const reinstallProfile = resolveLocalE2EProfileReinstall(process.argv.slice(2));
   const result = await prepareLocalE2E(await resolveLocalE2EPreparationInput(executionRoot));
   await loadExecutionInstallationConfig(result.configFile);
   const dsh = await reconcileLocalE2EDshProfile({
@@ -255,6 +273,7 @@ async function main(): Promise<void> {
     pluginArchive: result.pluginArchive,
     configFile: result.configFile,
     bindingFile: path.join(path.dirname(result.configFile), "dsh-intake-bindings.json"),
+    reinstallProfile,
   });
   process.stdout.write([
     "Local E2E files are ready.",
@@ -262,6 +281,7 @@ async function main(): Promise<void> {
     `Configuration: ${result.configFile}`,
     `Credentials: ${result.credentialFile}`,
     `DSH profile: ${dsh.profile}`,
+    `DSH profile dependencies: ${reinstallProfile ? "reinstalled" : "reconciled"}`,
     `DSH override: ${dsh.patchFile}`,
     "Replace the credential placeholder before validation or Workflow execution.",
     "",
