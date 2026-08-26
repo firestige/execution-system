@@ -145,6 +145,31 @@ export function presentToDshSession(agent, presentation, createId = () => `cmd-w
   agent.session.append("command/done", { commandId, kind: presentation?.kind === "error" ? "error" : "success", text });
 }
 
+export function createSessionPresentationRouter(agents) {
+  if (agents === null || typeof agents !== "object" || typeof agents.get !== "function") {
+    throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
+  }
+  const retained = new Map();
+  return Object.freeze({
+    retain(sessionKey, agent) {
+      if (typeof sessionKey !== "string" || sessionKey.length === 0 || agent === null || typeof agent !== "object"
+        || String(agent.id) !== sessionKey || typeof agent.session?.append !== "function") {
+        throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
+      }
+      retained.set(sessionKey, agent);
+    },
+    release(sessionKey) { retained.delete(sessionKey); },
+    present({ sessionKey, presentation }) {
+      const agent = agents.get(sessionKey) ?? retained.get(sessionKey);
+      if (agent === undefined) throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
+      try { presentToDshSession(agent, presentation); }
+      finally {
+        if (["terminal-result", "error"].includes(presentation?.kind)) retained.delete(sessionKey);
+      }
+    },
+  });
+}
+
 export function presentationForDshOperation(api, correlation, operation, result, maxBytes = 4096) {
   if (operation?.operation === "create" && result?.kind === "RECOVERY") {
     return api.createIntakePresentation(correlation, "delivery-status", {
@@ -397,11 +422,9 @@ export function mapIntakeToolOperation(args) {
 }
 
 export async function apply(ctx, config) {
-  const runtime = await createPluginRuntime(config, { present: async ({ sessionKey, presentation }) => {
-    const agent = ctx.agents.get(sessionKey);
-    if (agent === undefined) throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
-    presentToDshSession(agent, presentation);
-  }, sessionAvailable: (sessionKey) => ctx.agents.get(sessionKey) !== undefined,
+  const presentationRouter = createSessionPresentationRouter(ctx.agents);
+  const runtime = await createPluginRuntime(config, { present: (value) => presentationRouter.present(value),
+  sessionAvailable: (sessionKey) => ctx.agents.get(sessionKey) !== undefined,
   resolveConversationWorkspace: async (agent) => resolveConversationWorkspace(ctx, agent) });
   const active = new Set();
   const attachmentStore = ctx.attachments;
@@ -416,6 +439,9 @@ export async function apply(ctx, config) {
         let query = false;
         try {
           const operation = parseWsrCommand(invocation.rawInput);
+          if (["create", "recover"].includes(operation.operation)) {
+            presentationRouter.retain(String(invocation.agent.id), invocation.agent);
+          }
           query = operation.operation === "list" || operation.operation === "status";
           const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("wsr-execution");
           if (!query) {
@@ -432,6 +458,9 @@ export async function apply(ctx, config) {
             return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
           }
           const result = await runtime.invokeForSession({ sessionKey: String(invocation.agent.id), agent: invocation.agent, operation, turnText: commandTurn(invocation.rawInput), images: invocation.attachments, attachmentStore, signal: invocation.signal });
+          if (["create", "recover"].includes(operation.operation) && !["START_UNCERTAIN", "RECOVERY"].includes(result.kind)) {
+            presentationRouter.release(String(invocation.agent.id));
+          }
           const presentation = presentationForDshOperation({ createIntakePresentation, presentationForIntakeResult }, `presentation-${randomUUID()}`, operation, result, 4096);
           if (!query) presentToDshSession(invocation.agent, presentation);
           return { kind: result.kind === "ERROR" ? "error" : "success", text: serializeIntakePresentation(presentation, 4096) };
@@ -456,7 +485,11 @@ export async function apply(ctx, config) {
         if (agent === undefined) throw new TypeError("DSH_INTAKE_SESSION_UNAVAILABLE");
         const turn = turnFromAgent(agent);
         const operation = mapIntakeToolOperation(args);
+        if (["create", "recover"].includes(operation.operation)) presentationRouter.retain(String(agent.id), agent);
         const result = await runtime.invokeForSession({ sessionKey: String(agent.id), agent, operation, turnText: turn.text, images: turn.images, attachmentStore, signal: execution.signal });
+        if (["create", "recover"].includes(operation.operation) && !["START_UNCERTAIN", "RECOVERY"].includes(result.kind)) {
+          presentationRouter.release(String(agent.id));
+        }
         const { createIntakePresentation, presentationForIntakeResult, serializeIntakePresentation } = await import("wsr-execution");
         return { result: serializeIntakePresentation(presentationForDshOperation(
           { createIntakePresentation, presentationForIntakeResult }, `presentation-${randomUUID()}`, operation, result, 4096,
@@ -473,6 +506,7 @@ export async function apply(ctx, config) {
     if (await runtime.bindings.bySession(String(payload.agent.id)) === undefined) return next();
     if (messages.length !== 1) return next();
     try {
+      presentationRouter.retain(String(payload.agent.id), payload.agent);
       const result = await runtime.answerForSession({ sessionKey: String(payload.agent.id), text: textOf(messages[0].content), images: messages[0].content.filter((block) => block.type === "image"), attachmentStore, signal: payload.signal });
       if (result.kind === "ERROR" && result.code === "ACTION_NOT_AWAITING_INPUT") return next();
       recordConsumedActionReply(payload.agent, messages[0]);

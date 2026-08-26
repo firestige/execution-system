@@ -49,6 +49,11 @@ export function presentToDshSession(agent: unknown, presentation: Readonly<{
   kind: "command-accepted" | "delivery-running" | "delivery-list" | "delivery-status" | "action-output" | "action-input-request" | "terminal-result" | "error";
   data: Readonly<Record<string, unknown>>;
 }>, createId?: () => string): void;
+export function createSessionPresentationRouter(agents: Readonly<{ get(sessionKey: string): unknown }>): Readonly<{
+  retain(sessionKey: string, agent: unknown): void;
+  release(sessionKey: string): void;
+  present(input: Readonly<{ sessionKey: string; presentation: unknown }>): void;
+}>;
 export function createPluginRuntime(config: unknown, options?: unknown): Promise<unknown>;
 export function apply(ctx: unknown, config: unknown): Promise<void>;
 

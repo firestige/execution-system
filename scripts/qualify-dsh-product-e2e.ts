@@ -387,8 +387,13 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
     if (!empty.text.includes("No Workflow Deliveries")) throw new Error(`PRODUCT_EMPTY_RESULT_INVALID:${empty.text}`);
 
     await attach(cdp, attachmentFile);
+    const helloBefore = (await events(cdp)).filter((event) => event.surface === "chat");
     await submitBrowserCommand(cdp, "/wsr create hello-world-workflow@0.1.0\nGreet the Wave 6 reviewer and acknowledge the attachment.");
-    const helloTerminal = await waitForKind(cdp, "terminal-result", 0, 300_000, "chat");
+    const helloTerminal = await waitForEitherKind(cdp, ["terminal-result", "error"], {
+      "terminal-result": helloBefore.filter((event) => event.kind === "terminal-result").length,
+      error: helloBefore.filter((event) => event.kind === "error").length,
+    }, 300_000);
+    if (helloTerminal.kind === "error") throw new Error(`PRODUCT_HELLO_FAILED:${helloTerminal.text}`);
     const helloEvents = (await events(cdp)).filter((event) => event.surface === "chat");
     for (const kind of ["command-accepted", "action-output", "terminal-result"]) {
       if (!helloEvents.some((event) => event.kind === kind)) throw new Error(`PRODUCT_HELLO_LIFECYCLE_MISSING:${kind}`);

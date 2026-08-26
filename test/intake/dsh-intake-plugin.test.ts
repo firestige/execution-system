@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   IntakeSessionBindingRepository,
+  createSessionPresentationRouter,
   createPluginRuntime,
   mapIntakeToolOperation,
   parseWsrCommand,
@@ -516,6 +517,35 @@ describe("Wave 6 DSH Intake plugin", () => {
         schemaVersion: "wsr.presentation@1.0.0", correlation: "intake-1", kind: "action-output", data: { content: { text: "Question from DSH-E" } },
       }) }],
     ]);
+  });
+
+  it("retains the invocation Agent only for asynchronous presentation after the live registry goes idle", () => {
+    const appended: unknown[] = [];
+    const agent = Object.freeze({
+      id: "session-presentation",
+      session: Object.freeze({ append: (...args: unknown[]) => appended.push(args) }),
+    });
+    const live = new Map<string, typeof agent>([[agent.id, agent]]);
+    const router = createSessionPresentationRouter(Object.freeze({ get: (sessionKey: string) => live.get(sessionKey) }));
+    router.retain(agent.id, agent);
+    live.delete(agent.id);
+
+    router.present(Object.freeze({
+      sessionKey: agent.id,
+      presentation: createIntakePresentation("correlation-output", "action-output", { content: { text: "done" } }),
+    }));
+    router.present(Object.freeze({
+      sessionKey: agent.id,
+      presentation: createIntakePresentation("correlation-terminal", "terminal-result", {
+        worktree: "/worktree", deliveryId: "delivery-1", outcome: "SUCCEEDED",
+      }),
+    }));
+
+    expect(appended).toHaveLength(4);
+    expect(() => router.present(Object.freeze({
+      sessionKey: agent.id,
+      presentation: createIntakePresentation("correlation-late", "action-output", { content: { text: "late" } }),
+    }))).toThrow("DSH_INTAKE_SESSION_UNAVAILABLE");
   });
 
   it("maps a native session and attachment into one private binding and host-neutral multi-turn control", async () => {
