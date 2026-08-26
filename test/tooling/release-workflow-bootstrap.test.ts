@@ -24,7 +24,7 @@ describe("release workflow bootstrap", () => {
     const candidate = await readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8");
 
     expect(candidate).toContain("repository: firestige/workflow-self-recursive");
-    expect(candidate).toContain("ref: ${{ inputs.authority_ref }}");
+    expect(candidate).toContain("ref: ${{ steps.request.outputs.authority_ref }}");
     expect(candidate).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(candidate).toContain("submodules: recursive");
     expect(candidate).toContain('test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"');
