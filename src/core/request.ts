@@ -1,3 +1,5 @@
+import { isAbsolute } from "node:path";
+
 import type { TaskPrompt, TaskPromptAttachment } from "../application/execution-application.js";
 import { createDeliveryConfigProjection, deepFreeze, type DeliveryConfigProjection, type ExecutionInstallationConfig } from "../configuration/index.js";
 
@@ -19,6 +21,13 @@ export interface ExecutionPrebindingCommand {
   readonly intakeCorrelation?: string;
   readonly deliveryConfigProjection: DeliveryConfigProjection["value"];
   readonly deliveryConfigProjectionIdentity: string;
+}
+
+export interface ConversationWorkspaceAuthorization {
+  readonly schemaVersion: "execution.conversation-workspace-authorization@1.0.0";
+  readonly sessionKey: string;
+  readonly workspaceId: string;
+  readonly path: string;
 }
 
 export class CoreRequestError extends Error {
@@ -48,6 +57,20 @@ function exactObject(value: unknown, required: readonly string[], allowed: reado
 function boundedString(value: unknown, minimum: number, maximum: number): string {
   if (typeof value !== "string" || value.length < minimum || value.length > maximum) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
   return value;
+}
+
+export function admitConversationWorkspaceAuthorization(candidate: unknown): ConversationWorkspaceAuthorization {
+  if (!Object.isFrozen(candidate)) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+  const keys = ["schemaVersion", "sessionKey", "workspaceId", "path"];
+  const data = exactObject(candidate, keys, keys);
+  if (data.schemaVersion !== "execution.conversation-workspace-authorization@1.0.0"
+    || typeof data.path !== "string" || !isAbsolute(data.path)) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+  return Object.freeze({
+    schemaVersion: data.schemaVersion,
+    sessionKey: boundedString(data.sessionKey, 1, 512),
+    workspaceId: boundedString(data.workspaceId, 1, 512),
+    path: data.path,
+  });
 }
 
 function attachment(value: unknown): TaskPromptAttachment {

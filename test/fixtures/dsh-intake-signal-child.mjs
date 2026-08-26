@@ -1,13 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { createPluginRuntime, parseWsrCommand } from "../../packages/dsh-intake/src/index.js";
 
 const root = path.resolve(process.argv[2]);
-const worktree = path.join(root, "worktree");
+const worktreeSpelling = path.join(root, "worktree");
 const bindingFile = path.join(root, "bindings.json");
 const closeFile = path.join(root, "close.json");
-await mkdir(worktree, { recursive: true });
+const deliveryBindingIdentity = `sha256:${"a".repeat(64)}`;
+await mkdir(worktreeSpelling, { recursive: true });
+const worktree = await realpath(worktreeSpelling);
 
 class WorkflowIntakeService {
   constructor({ application }) { this.application = application; }
@@ -24,7 +26,7 @@ const application = Object.freeze({
 });
 const control = Object.freeze({
   async list() { return []; }, attach() {},
-  async waitForDelivery() { return { deliveryId: "delivery-signal", worktree }; },
+  async waitForDelivery() { return { deliveryId: "delivery-signal", worktree, deliveryBindingIdentity }; },
   async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); },
   async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
 });
@@ -33,9 +35,10 @@ const runtime = await createPluginRuntime({ configFile: path.join(root, "executi
   factory: Object.freeze({ async create() { return application; } }),
   control,
   quiesceTimeoutMs: 5,
+  resolveConversationWorkspace: async (agent) => Object.freeze({ sessionKey: agent.id, workspaceId: "workspace-signal", path: worktree }),
 });
 await runtime.invokeForSession({
-  sessionKey: "session-signal", worktree,
+  sessionKey: "session-signal", agent: { id: "session-signal" },
   operation: parseWsrCommand("create fixture@1.0.0\nwait"),
   turnText: "/wsr create fixture@1.0.0\nwait", images: [],
 });

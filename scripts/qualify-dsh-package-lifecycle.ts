@@ -6,12 +6,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
+import { bindLocalPackageCandidate, ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
 
 const require = createRequire(import.meta.url);
 const PACKAGE_NAME = "wsr-dsh-intake";
+const repository = path.resolve(import.meta.dirname, "..");
+const coreVersion = (require(path.join(repository, "package.json")) as { readonly version: string }).version;
 
 export interface DshPackageLifecycleQualificationOptions {
+  readonly coreArchive: string;
   readonly oldArchive: string;
   readonly newArchive: string;
   readonly profile?: string;
@@ -97,6 +100,7 @@ export async function qualifyDshPackageLifecycle(
 ): Promise<DshPackageLifecycleQualificationResult> {
   const oldArchive = path.resolve(options.oldArchive);
   const newArchive = path.resolve(options.newArchive);
+  const coreArchive = path.resolve(options.coreArchive);
   const profile = options.profile ?? "web";
   const root = await mkdtemp(path.join(tmpdir(), "execution-dsh-lifecycle-"));
   const dshHome = path.join(root, "dsh-home");
@@ -147,6 +151,7 @@ export async function qualifyDshPackageLifecycle(
     // better-sqlite3 native build must be approved in the profile before any
     // install (mirrors the documented `dsh plugin config set allowBuilds` step).
     await ensureDshProfileInstallationPolicy(profile, (args) => invokeDsh(executable, dshHome, profile, args.slice(3)));
+    await bindLocalPackageCandidate(profileDirectory, "wsr-execution", coreVersion, coreArchive);
 
     invokeDsh(executable, dshHome, profile, ["add", "--workspace-root", oldArchive]);
     const installedVersions = [await installedVersion(profileDirectory)];
@@ -198,10 +203,11 @@ export async function qualifyDshPackageLifecycle(
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const oldArchive = process.argv[2];
   const newArchive = process.argv[3];
-  if (oldArchive === undefined || newArchive === undefined) {
-    process.stderr.write("usage: qualify-dsh-package-lifecycle <old-plugin.tgz> <new-plugin.tgz>\n");
+  const coreArchive = process.argv[4];
+  if (oldArchive === undefined || newArchive === undefined || coreArchive === undefined) {
+    process.stderr.write("usage: qualify-dsh-package-lifecycle <old-plugin.tgz> <new-plugin.tgz> <core.tgz>\n");
     process.exitCode = 2;
   } else {
-    process.stdout.write(`${JSON.stringify(await qualifyDshPackageLifecycle({ oldArchive, newArchive }), null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(await qualifyDshPackageLifecycle({ oldArchive, newArchive, coreArchive }), null, 2)}\n`);
   }
 }

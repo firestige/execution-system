@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -34,6 +35,7 @@ const coreApi = Object.freeze({
 });
 
 const roots: string[] = [];
+const bindingIdentity = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -98,7 +100,9 @@ describe("Wave 6 DSH Intake plugin", () => {
       async close() {},
     });
     const control = Object.freeze({
-      async list() { return []; }, attach() {}, async waitForDelivery() { return undefined; },
+      async list() { return []; },
+      async bindingInventory() { return [{ deliveryId: "delivery-1", worktree: workspace, deliveryBindingIdentity: bindingIdentity("delivery-1"), package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "DETACHED", action: "UNKNOWN" }]; },
+      attach() {}, async waitForDelivery() { return undefined; },
       async recover(request: any) { return { kind: "RECOVERY", worktree: workspace, deliveryId: request.deliveryId, state: "RUNNING_CORRELATED" }; },
       async status(request: any) { return { kind: "RECOVERY", worktree: workspace, deliveryId: request.deliveryId, state: "RUNNING_CORRELATED" }; },
       async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
@@ -122,24 +126,24 @@ describe("Wave 6 DSH Intake plugin", () => {
       .resolves.toEqual({ kind: "LIST", deliveries: [] });
     await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("status delivery-1"), images: [] }))
       .resolves.toMatchObject({ kind: "RECOVERY", deliveryId: "delivery-1" });
-    await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("recover delivery-1"), images: [] }))
-      .resolves.toMatchObject({ kind: "RECOVERY", deliveryId: "delivery-1" });
+    await expect(runtime.invokeForSession({ sessionKey: "rejected-session", agent: { id: "rejected-session" }, operation: parseWsrCommand("recover delivery-1"), images: [] }))
+      .resolves.toMatchObject({ kind: "ERROR", code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
     await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("abandon delivery-1"), images: [] }))
       .resolves.toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-1" });
-    expect(resolved).toEqual([]);
+    expect(resolved).toEqual(["rejected-session"]);
 
     await expect(runtime.invokeForSession({
       sessionKey: "accepted-session", agent: { id: "accepted-session" }, operation: parseWsrCommand("create fixture@1.0.0\nrequest"),
       turnText: "/wsr create fixture@1.0.0\nrequest", images: [],
     })).resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
-    expect(resolved).toEqual(["accepted-session"]);
+    expect(resolved).toEqual(["rejected-session", "accepted-session"]);
     expect(requests).toEqual([expect.objectContaining({ worktree: workspace })]);
 
     await expect(runtime.invokeForSession({
       sessionKey: "accepted-session", agent: { id: "different-session" }, operation: parseWsrCommand("create fixture@1.0.0\nrequest"),
       turnText: "/wsr create fixture@1.0.0\nrequest", images: [],
     })).resolves.toMatchObject({ kind: "ERROR", code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
-    expect(resolved).toEqual(["accepted-session"]);
+    expect(resolved).toEqual(["rejected-session", "accepted-session"]);
 
     await expect(runtime.invokeForSession({
       sessionKey: "rejected-session", agent: { id: "rejected-session" }, operation: parseWsrCommand("create fixture@1.0.0\nrequest"),
@@ -264,13 +268,20 @@ describe("Wave 6 DSH Intake plugin", () => {
     roots.push(root);
     const repository = new IntakeSessionBindingRepository(path.join(root, "bindings.json"));
     await repository.start();
-    const first = await repository.claim(Object.freeze({ sessionKey: "native-session-a", correlation: "intake-1", deliveryId: "delivery-a", worktree: "/worktree/a" }));
-    const second = await repository.claim(Object.freeze({ sessionKey: "native-session-b", correlation: "intake-2", deliveryId: "delivery-b", worktree: "/worktree/b" }));
+    const identityA = `sha256:${"a".repeat(64)}`;
+    const identityB = `sha256:${"b".repeat(64)}`;
+    const first = await repository.claim(Object.freeze({ sessionKey: "native-session-a", correlation: "intake-1", deliveryId: "delivery-a", worktree: "/worktree/a", deliveryBindingIdentity: identityA }));
+    const second = await repository.claim(Object.freeze({ sessionKey: "native-session-b", correlation: "intake-2", deliveryId: "delivery-b", worktree: "/worktree/b", deliveryBindingIdentity: identityB }));
     expect(await repository.list()).toEqual([first, second]);
-    await expect(repository.claim(Object.freeze({ sessionKey: "native-session-c", correlation: "intake-3", deliveryId: "delivery-a", worktree: "/worktree/a" })))
+    await expect(repository.claim(Object.freeze({ sessionKey: "native-session-c", correlation: "intake-3", deliveryId: "delivery-a", worktree: "/worktree/a", deliveryBindingIdentity: identityA })))
       .rejects.toMatchObject({ code: "DELIVERY_INTAKE_BOUND" });
-    await expect(repository.claim(Object.freeze({ sessionKey: "native-session-a", correlation: "intake-1", deliveryId: "delivery-c", worktree: "/worktree/c" })))
-      .rejects.toMatchObject({ code: "INTAKE_BINDING_INVARIANT_VIOLATION" });
+    await expect(repository.claim(Object.freeze({ sessionKey: "native-session-a", correlation: "intake-1", deliveryId: "delivery-c", worktree: "/worktree/c", deliveryBindingIdentity: `sha256:${"c".repeat(64)}` })))
+      .rejects.toMatchObject({ code: "SESSION_INTAKE_BOUND" });
+
+    expect(JSON.parse(await readFile(path.join(root, "bindings.json"), "utf8"))).toMatchObject({
+      schemaVersion: "execution.intake-bindings@2.0.0",
+      bindings: [{ deliveryBindingIdentity: identityA }, { deliveryBindingIdentity: identityB }],
+    });
 
     const restarted = new IntakeSessionBindingRepository(path.join(root, "bindings.json"));
     await restarted.start();
@@ -278,24 +289,93 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(await restarted.byDelivery("delivery-b")).toEqual(second);
     await restarted.markDetached("delivery-a");
     expect(await restarted.byDelivery("delivery-a")).toMatchObject({ state: "DETACHED" });
-    const reclaimed = await restarted.claim(Object.freeze({ sessionKey: "native-session-c", correlation: "intake-3", deliveryId: "delivery-a", worktree: "/worktree/a" }));
+    const reclaimed = await restarted.claim(Object.freeze({ sessionKey: "native-session-c", correlation: "intake-3", deliveryId: "delivery-a", worktree: "/worktree/a", deliveryBindingIdentity: identityA }));
     expect(reclaimed).toMatchObject({ sessionKey: "native-session-c", correlation: "intake-3", state: "BOUND" });
     expect(await restarted.bySession("native-session-a")).toBeUndefined();
+    await restarted.markDetached("delivery-b");
+    const resumed = await restarted.claim(Object.freeze({
+      sessionKey: "native-session-b", correlation: "intake-2-resumed", deliveryId: "delivery-b",
+      worktree: "/worktree/b", deliveryBindingIdentity: identityB,
+    }));
+    expect(resumed).toMatchObject({ sessionKey: "native-session-b", correlation: "intake-2-resumed", state: "BOUND" });
     expect(JSON.stringify(await restarted.list())).not.toContain("credential");
+  });
+
+  it("migrates every v1 binding by an exact recovered Delivery identity or fails closed", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-binding-migration-"));
+    roots.push(root);
+    const file = path.join(root, "bindings.json");
+    const legacy = { sessionKey: "session-a", correlation: "intake-a", deliveryId: "delivery-a", worktree: "/worktree/a", state: "BOUND" };
+    await writeFile(file, `${JSON.stringify({ schemaVersion: "execution.intake-bindings@1.0.0", bindings: [legacy] })}\n`, "utf8");
+    const identity = `sha256:${"d".repeat(64)}`;
+    const inventory = [{ ...legacy, deliveryBindingIdentity: identity }];
+
+    const migrated = new IntakeSessionBindingRepository(file);
+    await migrated.start(inventory);
+    await expect(migrated.byDelivery("delivery-a")).resolves.toMatchObject({ deliveryBindingIdentity: identity });
+    expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({
+      schemaVersion: "execution.intake-bindings@2.0.0",
+      bindings: [{ ...legacy, deliveryBindingIdentity: identity }],
+    });
+
+    await writeFile(file, `${JSON.stringify({ schemaVersion: "execution.intake-bindings@1.0.0", bindings: [legacy] })}\n`, "utf8");
+    await expect(new IntakeSessionBindingRepository(file).start([]))
+      .rejects.toMatchObject({ code: "INTAKE_BINDING_INVARIANT_VIOLATION" });
+  });
+
+  it("removes only conclusively stale bindings and fails startup on recovered identity drift", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-binding-reconcile-"));
+    roots.push(root);
+    const worktreeSpelling = path.join(root, "worktree");
+    await mkdir(worktreeSpelling);
+    const worktree = await realpath(worktreeSpelling);
+    const application = Object.freeze({
+      async start() {}, async execute() { throw new Error("not used"); }, async inspect() { throw new Error("not used"); },
+      async cancel() { throw new Error("not used"); }, status() { return { state: "READY" }; }, async close() {},
+    });
+    const baseControl = {
+      async list() { return []; }, attach() {}, async waitForDelivery() { return undefined; },
+      async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); },
+      async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
+    };
+
+    const stale = new IntakeSessionBindingRepository(path.join(root, "stale.json"));
+    await stale.start();
+    await stale.claim({ sessionKey: "stale-session", correlation: "stale-correlation", deliveryId: "stale-delivery", worktree, deliveryBindingIdentity: bindingIdentity("stale-delivery") });
+    const runtime: any = await createPluginRuntime({ configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "stale.json") }, {
+      bindings: stale, moduleLoader: async () => coreApi, factory: Object.freeze({ async create() { return application; } }),
+      control: Object.freeze({ ...baseControl, async bindingInventory() { return []; } }),
+    } as any);
+    await expect(runtime.bindings.byDelivery("stale-delivery")).resolves.toBeUndefined();
+    await runtime.close();
+
+    const drifted = new IntakeSessionBindingRepository(path.join(root, "drifted.json"));
+    await drifted.start();
+    await drifted.claim({ sessionKey: "session-a", correlation: "correlation-a", deliveryId: "delivery-a", worktree, deliveryBindingIdentity: bindingIdentity("old") });
+    await expect(createPluginRuntime({ configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "drifted.json") }, {
+      bindings: drifted, moduleLoader: async () => coreApi, factory: Object.freeze({ async create() { return application; } }),
+      control: Object.freeze({ ...baseControl, async bindingInventory() {
+        return [{ deliveryId: "delivery-a", worktree, deliveryBindingIdentity: bindingIdentity("new"), package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "DETACHED", action: "UNKNOWN" }];
+      } }),
+    } as any)).rejects.toMatchObject({ code: "INTAKE_BINDING_INVARIANT_VIOLATION" });
   });
 
   it("detaches an unavailable restored host session and refuses a live Delivery second claim before Core", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-recovery-"));
     roots.push(root);
-    const worktree = path.join(root, "worktree");
-    await (await import("node:fs/promises")).mkdir(worktree);
+    const worktreeSpelling = path.join(root, "worktree");
+    await (await import("node:fs/promises")).mkdir(worktreeSpelling);
+    const worktree = await realpath(worktreeSpelling);
+    const otherWorkspaceSpelling = path.join(root, "other-workspace");
+    await mkdir(otherWorkspaceSpelling);
+    const otherWorkspace = await realpath(otherWorkspaceSpelling);
     const file = path.join(root, "bindings.json");
     const repository = new IntakeSessionBindingRepository(file);
     await repository.start();
-    await repository.claim(Object.freeze({ sessionKey: "stale-session", correlation: "stale-correlation", deliveryId: "delivery-1", worktree }));
+    await repository.claim(Object.freeze({ sessionKey: "stale-session", correlation: "stale-correlation", deliveryId: "delivery-1", worktree, deliveryBindingIdentity: bindingIdentity("delivery-1") }));
     let recoverCalls = 0;
     const control = Object.freeze({
-      async list() { return [{ deliveryId: "delivery-1", worktree, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "DETACHED", action: "UNKNOWN" }]; },
+      async list() { return [{ deliveryId: "delivery-1", worktree, deliveryBindingIdentity: bindingIdentity("delivery-1"), package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "DETACHED", action: "UNKNOWN" }]; },
       attach() {},
       async waitForDelivery() { return new Promise(() => undefined); },
       async recover(request: any) { recoverCalls += 1; return { kind: "RECOVERY", worktree, deliveryId: "delivery-1", state: "RUNNING_CORRELATED", request }; },
@@ -313,16 +393,22 @@ describe("Wave 6 DSH Intake plugin", () => {
       control,
       moduleLoader: async () => coreApi,
       sessionAvailable: () => false,
+      resolveConversationWorkspace: async (agent: { id: string }) => Object.freeze({
+        sessionKey: agent.id, workspaceId: agent.id === "foreign-session" ? "workspace-2" : "workspace-1",
+        path: agent.id === "foreign-session" ? otherWorkspace : worktree,
+      }),
     } as any);
     expect(await runtime.bindings.byDelivery("delivery-1")).toMatchObject({ state: "DETACHED" });
-    const first = await runtime.invokeForSession({ sessionKey: "new-session", worktree, operation: parseWsrCommand("recover"), images: [] });
+    const first = await runtime.invokeForSession({ sessionKey: "new-session", agent: { id: "new-session" }, operation: parseWsrCommand("recover"), images: [] });
     expect(first).toMatchObject({ kind: "RECOVERY", deliveryId: "delivery-1" });
     expect(await runtime.bindings.byDelivery("delivery-1")).toMatchObject({ sessionKey: "new-session", state: "BOUND" });
-    const second = await runtime.invokeForSession({ sessionKey: "second-session", worktree, operation: parseWsrCommand("recover delivery-1"), images: [] });
+    await expect(runtime.invokeForSession({ sessionKey: "foreign-session", agent: { id: "foreign-session" }, operation: parseWsrCommand("recover delivery-1"), images: [] }))
+      .resolves.toMatchObject({ kind: "ERROR", code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
+    const second = await runtime.invokeForSession({ sessionKey: "second-session", agent: { id: "second-session" }, operation: parseWsrCommand("recover delivery-1"), images: [] });
     expect(second).toMatchObject({ kind: "ERROR", code: "DELIVERY_INTAKE_BOUND" });
     expect(recoverCalls).toBe(1);
     const occupiedCreate = await Promise.race([
-      runtime.invokeForSession({ sessionKey: "third-session", worktree, operation: parseWsrCommand("create fixture@1.0.0\nnew request"), turnText: "/wsr create fixture@1.0.0\nnew request", images: [] }),
+      runtime.invokeForSession({ sessionKey: "third-session", agent: { id: "third-session" }, operation: parseWsrCommand("create fixture@1.0.0\nnew request"), turnText: "/wsr create fixture@1.0.0\nnew request", images: [] }),
       new Promise((resolve) => setTimeout(() => resolve({ kind: "TIMEOUT" }), 50)),
     ]);
     expect(occupiedCreate).toMatchObject({ kind: "RECOVERY", deliveryId: "delivery-1" });
@@ -338,10 +424,10 @@ describe("Wave 6 DSH Intake plugin", () => {
       return directory;
     }));
     const inventory = [
-      { deliveryId: "delivery-running", worktree: worktrees[0]!, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "RUNNING" },
-      { deliveryId: "delivery-input", worktree: worktrees[1]!, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "AWAITING_INPUT" },
-      { deliveryId: "delivery-wait", worktree: worktrees[2]!, package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "WORKFLOW_WAIT" },
-      { deliveryId: "delivery-uncertain", worktree: worktrees[3]!, package: "fixture@1.0.0", lifecycle: "START_UNCERTAIN", intakeBinding: "BOUND", action: "UNKNOWN" },
+      { deliveryId: "delivery-running", worktree: worktrees[0]!, deliveryBindingIdentity: bindingIdentity("delivery-running"), package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "RUNNING" },
+      { deliveryId: "delivery-input", worktree: worktrees[1]!, deliveryBindingIdentity: bindingIdentity("delivery-input"), package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "AWAITING_INPUT" },
+      { deliveryId: "delivery-wait", worktree: worktrees[2]!, deliveryBindingIdentity: bindingIdentity("delivery-wait"), package: "fixture@1.0.0", lifecycle: "RUNNING_CORRELATED", intakeBinding: "BOUND", action: "WORKFLOW_WAIT" },
+      { deliveryId: "delivery-uncertain", worktree: worktrees[3]!, deliveryBindingIdentity: bindingIdentity("delivery-uncertain"), package: "fixture@1.0.0", lifecycle: "START_UNCERTAIN", intakeBinding: "BOUND", action: "UNKNOWN" },
     ];
     const bindings = new IntakeSessionBindingRepository(path.join(root, "bindings.json"));
     await bindings.start();
@@ -350,6 +436,7 @@ describe("Wave 6 DSH Intake plugin", () => {
         sessionKey: `session-${index}`,
         correlation: `correlation-${index}`,
         deliveryId: item.deliveryId,
+        deliveryBindingIdentity: item.deliveryBindingIdentity,
         worktree: item.worktree,
       }));
     }
@@ -380,7 +467,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     } as any);
 
     expect(attached).toEqual(inventory.map((item, index) => ({ deliveryId: item.deliveryId, correlation: `correlation-${index}` })));
-    expect(startObservedAttachments).toBe(4);
+    expect(startObservedAttachments).toBe(0);
     expect(executeCalls).toBe(0);
     await runtime.close();
   });
@@ -459,7 +546,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     const control = Object.freeze({
       async list() { return []; },
       attach() {},
-      async waitForDelivery() { return { deliveryId: "delivery-1", worktree }; },
+      async waitForDelivery() { return { deliveryId: "delivery-1", worktree, deliveryBindingIdentity: bindingIdentity("delivery-1") }; },
       async recover() { return { kind: "ERROR", code: "DELIVERY_UNKNOWN", message: "DELIVERY_UNKNOWN" }; },
       async status() { return { kind: "ERROR", code: "DELIVERY_UNKNOWN", message: "DELIVERY_UNKNOWN" }; },
       async finishAction(request: any) { finishes.push(request); return { kind: "RECOVERY", worktree, deliveryId: "delivery-1", state: "RUNNING_CORRELATED" }; },
@@ -469,10 +556,11 @@ describe("Wave 6 DSH Intake plugin", () => {
     const runtime: any = await createPluginRuntime({ configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json") }, {
       moduleLoader: async () => coreApi, factory, control,
       present: async (presentation: any) => { presentations.push(presentation); },
+      resolveConversationWorkspace: async (agent: { id: string }) => Object.freeze({ sessionKey: agent.id, workspaceId: "workspace-1", path: worktree }),
     } as any);
     const attachmentStore = Object.freeze({ async readImage() { return { ref: { name: "proof.png", mediaType: "image/png" }, data: Uint8Array.from([1, 2, 3]) }; } });
     const result = await runtime.invokeForSession({
-      sessionKey: "native-session-private", worktree,
+      sessionKey: "native-session-private", agent: { id: "native-session-private" },
       operation: parseWsrCommand("create implementation-workflow@0.3.0\nuse attached evidence"),
       turnText: "/wsr create implementation-workflow@0.3.0\nuse attached evidence",
       images: [{ type: "image", attachment: { attachmentId: "native-ref" } }], attachmentStore,
@@ -491,6 +579,14 @@ describe("Wave 6 DSH Intake plugin", () => {
     } }]);
     expect(await capturedDependencies.attachments.read(requests[0].prompt.attachments[0].contentRef)).toEqual(Uint8Array.from([1, 2, 3]));
     expect(await runtime.bindings.bySession("native-session-private")).toMatchObject({ deliveryId: "delivery-1", worktree });
+
+    await expect(runtime.invokeForSession({
+      sessionKey: "native-session-private", agent: { id: "native-session-private" },
+      operation: parseWsrCommand("create implementation-workflow@0.3.0\nsecond Delivery"),
+      turnText: "/wsr create implementation-workflow@0.3.0\nsecond Delivery", images: [], attachmentStore,
+      signal: new AbortController().signal,
+    })).resolves.toMatchObject({ kind: "ERROR", code: "SESSION_INTAKE_BOUND" });
+    expect(requests).toHaveLength(1);
 
     await runtime.answerForSession({ sessionKey: "native-session-private", text: "ordinary answer", images: [], attachmentStore, signal: new AbortController().signal });
     expect(answers).toEqual([{ correlation: requests[0].intakeCorrelation, prompt: { text: "ordinary answer", attachments: [] } }]);
@@ -511,8 +607,9 @@ describe("Wave 6 DSH Intake plugin", () => {
   it("closes the Intake gate, reaches a quiescent boundary, then disposes Execution", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-close-order-"));
     roots.push(root);
-    const worktree = path.join(root, "worktree");
-    await (await import("node:fs/promises")).mkdir(worktree);
+    const worktreeSpelling = path.join(root, "worktree");
+    await (await import("node:fs/promises")).mkdir(worktreeSpelling);
+    const worktree = await realpath(worktreeSpelling);
     let resolveExecution!: (value: any) => void;
     const execution = new Promise<any>((resolve) => { resolveExecution = resolve; });
     let applicationClosed = false;
@@ -521,14 +618,15 @@ describe("Wave 6 DSH Intake plugin", () => {
       status() { return { state: "READY" }; }, async close() { applicationClosed = true; },
     });
     const control = Object.freeze({
-      async list() { return []; }, attach() {}, async waitForDelivery() { return { deliveryId: "delivery-close", worktree }; },
+      async list() { return []; }, attach() {}, async waitForDelivery() { return { deliveryId: "delivery-close", worktree, deliveryBindingIdentity: bindingIdentity("delivery-close") }; },
       async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); }, async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
     });
     const runtime: any = await createPluginRuntime({ configFile: path.join(root, "execution.json"), bindingFile: path.join(root, "bindings.json") }, {
       moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }), control, quiesceTimeoutMs: 1_000,
+      resolveConversationWorkspace: async (agent: { id: string }) => Object.freeze({ sessionKey: agent.id, workspaceId: "workspace-1", path: worktree }),
     } as any);
-    await runtime.invokeForSession({ sessionKey: "session-close", worktree, operation: parseWsrCommand("create fixture@1.0.0\nwait"), turnText: "/wsr create fixture@1.0.0\nwait", images: [] });
+    await runtime.invokeForSession({ sessionKey: "session-close", agent: { id: "session-close" }, operation: parseWsrCommand("create fixture@1.0.0\nwait"), turnText: "/wsr create fixture@1.0.0\nwait", images: [] });
     const closing = runtime.close();
     await Promise.resolve();
     expect(applicationClosed).toBe(false);
@@ -542,8 +640,9 @@ describe("Wave 6 DSH Intake plugin", () => {
   it("bounds quiescence without fabricating terminal truth or clearing the durable binding", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "dsh-intake-close-timeout-"));
     roots.push(root);
-    const worktree = path.join(root, "worktree");
-    await (await import("node:fs/promises")).mkdir(worktree);
+    const worktreeSpelling = path.join(root, "worktree");
+    await (await import("node:fs/promises")).mkdir(worktreeSpelling);
+    const worktree = await realpath(worktreeSpelling);
     const execution = new Promise<never>(() => undefined);
     let closeCalls = 0;
     let cancelCalls = 0;
@@ -553,7 +652,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       status() { return { state: "READY" }; }, async close() { closeCalls += 1; },
     });
     const control = Object.freeze({
-      async list() { return []; }, attach() {}, async waitForDelivery() { return { deliveryId: "delivery-timeout", worktree }; },
+      async list() { return []; }, attach() {}, async waitForDelivery() { return { deliveryId: "delivery-timeout", worktree, deliveryBindingIdentity: bindingIdentity("delivery-timeout") }; },
       async recover() { throw new Error("not used"); }, async status() { throw new Error("not used"); },
       async finishAction() { throw new Error("not used"); }, async answerAction() { throw new Error("not used"); },
     });
@@ -562,9 +661,10 @@ describe("Wave 6 DSH Intake plugin", () => {
     }, {
       moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }), control, quiesceTimeoutMs: 5,
+      resolveConversationWorkspace: async (agent: { id: string }) => Object.freeze({ sessionKey: agent.id, workspaceId: "workspace-1", path: worktree }),
     } as any);
     await runtime.invokeForSession({
-      sessionKey: "session-timeout", worktree,
+      sessionKey: "session-timeout", agent: { id: "session-timeout" },
       operation: parseWsrCommand("create fixture@1.0.0\nwait"),
       turnText: "/wsr create fixture@1.0.0\nwait", images: [],
     });

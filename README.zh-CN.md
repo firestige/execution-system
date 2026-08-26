@@ -56,7 +56,7 @@ dsh plugin --profile web config set --location=project --json allowBuilds '{"bet
 dsh plugin --profile web add wsr-dsh-intake
 ```
 
-要求 Node `>=24.12 <25` 与 DSH `0.1.1-rc.2`。Core 与 Intake 版本联动（`wsr-dsh-intake@0.1.2` 依赖 `wsr-execution@0.1.2`），一次 `add` 装齐、一次 `update` 同升。
+要求 Node `>=24.12 <25` 与 DSH `0.1.1-rc.2`。Core 与 Intake 版本联动（`wsr-dsh-intake@0.1.3` 依赖 `wsr-execution@0.1.3`），一次 `add` 装齐、一次 `update` 同升。
 
 ## 快速开始
 
@@ -107,7 +107,7 @@ dsh plugin --profile web add wsr-dsh-intake
 ## 已知限制与待办
 
 - **开发者预览** —— `0.1.x` 是面向个人与小团队可信本地使用的 MVP candidate；可能存在破坏兼容性的变更。
-- **会话工作区作为临时 worktree** —— 在 [#94](https://github.com/firestige/workflow-self-recursive/issues/94) 之前，需要选择 worktree 的操作使用调用会话的已注册工作区；权威是调用级且精确的。
+- **Session/Delivery 排他绑定** —— DSH Intake 只传递 private、typed、invocation-only 的精确注册会话工作区证明；Execution 推导并持久化 canonical Git worktree，Manifest/current-slot 继续作为 Delivery/worktree 的持久权威。Session、Delivery 与被占用 worktree 均不得隐式切换、共享、抢占或超时释放。
 - **观测默认关闭** —— 将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
 - **仅 DSH 交互面** —— 发行版以自带 `web` profile 为交互组装；自定义 profile 只含 `dsh-base`，不是交互式 Intake 面。
 

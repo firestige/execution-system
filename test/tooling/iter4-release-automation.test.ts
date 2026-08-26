@@ -55,42 +55,42 @@ describe("Iteration 4 release automation", () => {
   });
 
   it("checks every lockstep coordinate and rejects a dependency or workflow filename drift", async () => {
-    await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.1.2");
+    await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.1.3");
 
-    const core = { name: "wsr-execution", version: "0.1.2" };
+    const core = { name: "wsr-execution", version: "0.1.3" };
     const intake = {
       name: "wsr-dsh-intake",
-      version: "0.1.2",
+      version: "0.1.3",
       dependencies: { "wsr-execution": "0.1.1" },
-      dsh: { compatibility: { executionSystem: "0.1.2" } },
+      dsh: { compatibility: { executionSystem: "0.1.3" } },
     };
     expect(() => assertExecutionReleaseCoordinates({ core, intake, workflow: "VERSION=dynamic" }))
       .toThrowError("RELEASE_PACKAGE_VERSION_MISMATCH");
     expect(() => assertExecutionReleaseCoordinates({
       core,
-      intake: { ...intake, dependencies: { "wsr-execution": "0.1.2" } },
-      workflow: "wsr-execution-0.1.2.tgz",
+      intake: { ...intake, dependencies: { "wsr-execution": "0.1.3" } },
+      workflow: "wsr-execution-0.1.3.tgz",
     })).toThrowError("RELEASE_WORKFLOW_VERSION_HARDCODED");
   });
 
   it("publishes core before intake and resumes only an exact already-published coordinate", async () => {
     const artifacts = [
-      { package: "wsr-execution", version: "0.1.2", file: "wsr-execution-0.1.2.tgz", sha256: "sha256:" + "a".repeat(64) },
-      { package: "wsr-dsh-intake", version: "0.1.2", file: "wsr-dsh-intake-0.1.2.tgz", sha256: "sha256:" + "b".repeat(64) },
+      { package: "wsr-execution", version: "0.1.3", file: "wsr-execution-0.1.3.tgz", sha256: "sha256:" + "a".repeat(64) },
+      { package: "wsr-dsh-intake", version: "0.1.3", file: "wsr-dsh-intake-0.1.3.tgz", sha256: "sha256:" + "b".repeat(64) },
     ] as const;
     const absent = async (): Promise<RegistryVersion | null> => null;
 
     await expect(planNpmPairPublication(artifacts, absent)).resolves.toEqual([
-      { action: "publish", package: "wsr-execution", file: "wsr-execution-0.1.2.tgz" },
-      { action: "publish", package: "wsr-dsh-intake", file: "wsr-dsh-intake-0.1.2.tgz" },
+      { action: "publish", package: "wsr-execution", file: "wsr-execution-0.1.3.tgz" },
+      { action: "publish", package: "wsr-dsh-intake", file: "wsr-dsh-intake-0.1.3.tgz" },
     ]);
 
     const coreAlreadyPublished = async (name: string): Promise<RegistryVersion | null> => (
       name === "wsr-execution" ? { sha256: artifacts[0].sha256, description: "core" } : null
     );
     await expect(planNpmPairPublication(artifacts, coreAlreadyPublished)).resolves.toEqual([
-      { action: "skip-exact", package: "wsr-execution", file: "wsr-execution-0.1.2.tgz" },
-      { action: "publish", package: "wsr-dsh-intake", file: "wsr-dsh-intake-0.1.2.tgz" },
+      { action: "skip-exact", package: "wsr-execution", file: "wsr-execution-0.1.3.tgz" },
+      { action: "publish", package: "wsr-dsh-intake", file: "wsr-dsh-intake-0.1.3.tgz" },
     ]);
 
     const collision = async (): Promise<RegistryVersion> => ({
@@ -102,17 +102,17 @@ describe("Iteration 4 release automation", () => {
     const exact = async (name: string): Promise<RegistryVersion> => ({
       sha256: artifacts.find((item) => item.package === name)!.sha256,
       description: `${name} description`,
-      latest: "0.1.2",
-      versions: ["0.1.1", "0.1.2"],
+      latest: "0.1.3",
+      versions: ["0.1.1", "0.1.2", "0.1.3"],
     });
     await expect(verifyPublishedNpmPair(artifacts, exact)).resolves.toEqual({
-      version: "0.1.2", packages: ["wsr-execution", "wsr-dsh-intake"],
+      version: "0.1.3", packages: ["wsr-execution", "wsr-dsh-intake"],
     });
     let attempts = 0;
     await expect(waitForPublishedNpmPair(artifacts, async (name) => {
       attempts += 1;
       return attempts === 1 ? null : exact(name);
-    }, async () => undefined, 2)).resolves.toMatchObject({ version: "0.1.2" });
+    }, async () => undefined, 2)).resolves.toMatchObject({ version: "0.1.3" });
   });
 
   it("models recovery without allowing failed candidates to become stable", () => {
@@ -174,7 +174,7 @@ describe("Iteration 4 release automation", () => {
     const workspace = await readFile(path.join(repository, "pnpm-workspace.yaml"), "utf8");
     expect(workspace).toContain('"better-sqlite3": true');
     expect(workspace).toContain("minimumReleaseAgeExclude:");
-    expect(workspace).toContain("wsr-execution@0.1.2");
+    expect(workspace).toContain("wsr-execution@0.1.3");
 
     const cleanEnvironment = { ...process.env };
     delete cleanEnvironment.WSR_RELEASE_PACK_MODE;

@@ -26,6 +26,10 @@ export interface IntakeDeliveryInventoryItem {
   readonly action: "IDLE" | "AWAITING_INPUT" | "UNKNOWN";
 }
 
+export interface IntakeDeliveryBindingInventoryItem extends IntakeDeliveryInventoryItem {
+  readonly deliveryBindingIdentity: string;
+}
+
 export interface WorkflowIntakeControlPort {
   list(): Promise<readonly IntakeDeliveryInventoryItem[]>;
   recover(request: Readonly<{ worktree?: string; deliveryId?: string; correlation: string }>): Promise<ExecutionResult>;
@@ -70,19 +74,19 @@ export class WorkflowIntakeService {
   static readonly operations = Object.freeze(["list", "create", "recover", "status", "action-finish", "abandon"] as const);
   readonly #application: ExecutionApplication;
   readonly #control?: WorkflowIntakeControlPort;
-  readonly #execute: (request: ExecutionRequest) => Promise<ExecutionResult>;
+  readonly #execute: (request: ExecutionRequest, invocation?: unknown) => Promise<ExecutionResult>;
 
   constructor(options: Readonly<{
     application: ExecutionApplication;
     control?: WorkflowIntakeControlPort;
-    execute?: (request: ExecutionRequest) => Promise<ExecutionResult>;
+    execute?: (request: ExecutionRequest, invocation?: unknown) => Promise<ExecutionResult>;
   }>) {
     this.#application = options.application;
     this.#control = options.control;
     this.#execute = options.execute ?? options.application.execute.bind(options.application);
   }
 
-  async invoke(candidate: WorkflowIntakeOperation): Promise<WorkflowIntakeResult> {
+  async invoke(candidate: WorkflowIntakeOperation, invocation?: unknown): Promise<WorkflowIntakeResult> {
     const base = record(candidate, ["operation"], ["operation", "selector", "worktree", "directive", "turn", "correlation", "deliveryId"]);
     if (base === undefined || typeof base.operation !== "string" || !WorkflowIntakeService.operations.includes(base.operation as WorkflowIntakeOperationName)) return error("INTAKE_OPERATION_INVALID");
     if (typeof base.correlation !== "string" || base.correlation.length === 0) return error("INTAKE_OPERATION_INVALID");
@@ -97,7 +101,7 @@ export class WorkflowIntakeService {
         prompt,
         intakeCorrelation: base.correlation,
       });
-      return this.#execute(request);
+      return this.#execute(request, invocation);
     }
     if (base.operation === "list") {
       if (record(candidate, ["operation", "correlation"]) === undefined) return error("INTAKE_OPERATION_INVALID");

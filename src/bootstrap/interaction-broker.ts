@@ -7,6 +7,7 @@ export interface BrokerDelivery {
   readonly deliveryId: string;
   readonly worktree: string;
   readonly package: string;
+  readonly deliveryBindingIdentity: string;
   correlation?: string;
 }
 
@@ -37,10 +38,10 @@ export class ProductionInteractionBroker {
     const delivery = this.#deliveries.get(deliveryId);
     if (delivery !== undefined) delivery.correlation = correlation;
   }
-  register(deliveryId: string, worktree: string, packageCoordinate: string): void {
+  register(deliveryId: string, worktree: string, packageCoordinate: string, deliveryBindingIdentity: string): void {
     const correlation = this.#correlationByDelivery.get(deliveryId) ?? this.#correlationByWorktree.get(worktree);
     this.#correlationByWorktree.delete(worktree);
-    const delivery: BrokerDelivery = { deliveryId, worktree, package: packageCoordinate, ...(correlation === undefined ? {} : { correlation }) };
+    const delivery: BrokerDelivery = { deliveryId, worktree, package: packageCoordinate, deliveryBindingIdentity, ...(correlation === undefined ? {} : { correlation }) };
     this.#deliveries.set(deliveryId, delivery);
     if (correlation !== undefined) for (const resolve of this.#waiters.get(correlation) ?? []) resolve(delivery);
     if (correlation !== undefined) this.#waiters.delete(correlation);

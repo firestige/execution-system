@@ -4,7 +4,7 @@ import path from "node:path";
 import type { ExecutionApplication, ExecutionFailure, ExecutionRequest, ExecutionResult, TaskPrompt } from "../application/execution-application.js";
 import { RunnerFactory, type RunnerFactoryConfig } from "../composition/runner-factory.js";
 import { canonicalDigest, type FrozenJsonValue, type RunnerActivationContext } from "../contracts/index.js";
-import { createExecutionEnvironment } from "../core/request.js";
+import { createExecutionEnvironment, type ConversationWorkspaceAuthorization } from "../core/request.js";
 import { ExecutionCoreAdmission } from "../core/execution-core.js";
 import {
   CurrentSlotRepository,
@@ -28,7 +28,7 @@ import { loadExecutionInstallationConfig } from "../configuration/index.js";
 import { createDeliveryObservationEmitter, createObservationOwnerFact, createRunnerOwnerFactPort, type DeliveryObservationEmitter, type ObservationFamilySchema, type RunnerSettlementOwnerFact } from "../observation/index.js";
 import type { HostOperationHandler } from "../host/workflow-host-adapter-factory.js";
 import type { ExecutionRuntimeAdapter } from "../execution/runtime-adapter.js";
-import type { IntakeDeliveryInventoryItem, WorkflowIntakeControlPort } from "../intake/index.js";
+import type { IntakeDeliveryBindingInventoryItem, IntakeDeliveryInventoryItem, WorkflowIntakeControlPort } from "../intake/index.js";
 import { BootstrapLifecycle, ImmediateConcurrencyController, admitExecutionBootstrapDependencies } from "./runtime-contracts.js";
 import type { ExecutionApplicationFactory, ExecutionBootstrapDependencies, OwnerFact, OwnerFactIngress } from "./contracts.js";
 import { ProductionInteractionBroker } from "./interaction-broker.js";
@@ -227,7 +227,7 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
       host: Object.freeze({ engine: "langgraph", checkpointDirectory: path.join(runnerRoot, "checkpoints") }),
       implementationIdentity: manifest.deliveryConfigProjection.value.runner.implementationKey,
     });
-    this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`);
+    this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`, manifest.deliveryBindingIdentity);
     const interaction = this.interactions.bridge(manifest.deliveryId);
     const workflow = this.interactions.workflowBridge(manifest.deliveryId);
     const observation = createRunnerOwnerFactPort(Object.freeze({ emit: (fact: RunnerSettlementOwnerFact) => this.observation.emit(fact) }));
@@ -266,9 +266,10 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
 }
 
 export interface ExecutionApplicationControl extends WorkflowIntakeControlPort {
-  executeFromConversationWorkspace(request: ExecutionRequest, exactWorkspace: string): Promise<ExecutionResult>;
+  executeFromConversationWorkspace(request: ExecutionRequest, authorization: ConversationWorkspaceAuthorization): Promise<ExecutionResult>;
+  bindingInventory(): Promise<readonly IntakeDeliveryBindingInventoryItem[]>;
   attach(deliveryId: string, correlation: string): void;
-  waitForDelivery(correlation: string, timeoutMs: number): Promise<Readonly<{ deliveryId: string; worktree: string }> | undefined>;
+  waitForDelivery(correlation: string, timeoutMs: number): Promise<Readonly<{ deliveryId: string; worktree: string; deliveryBindingIdentity: string }> | undefined>;
   answerAction(request: Readonly<{ correlation: string; prompt: TaskPrompt }>): Promise<ExecutionResult>;
 }
 
@@ -324,7 +325,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     );
     const observation = createDeliveryObservationEmitter({
       config: config.observation,
-      serviceVersion: "0.1.1",
+      serviceVersion: "0.1.3",
       diagnostic() {},
     });
     const ownerFacts: OwnerFactIngress = Object.freeze({
@@ -350,10 +351,10 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     let closePromise: Promise<void> | undefined;
     let diagnostic: Readonly<{ code: string; phase: "RECOVERING"; installationIdentity: string }> | undefined;
 
-    async function executeRequest(request: ExecutionRequest, exactWorktreeRoot?: string): Promise<ExecutionResult> {
+    async function executeRequest(request: ExecutionRequest, authorization?: ConversationWorkspaceAuthorization): Promise<ExecutionResult> {
       const state = lifecycle.status().state;
       if (state !== "READY") return failure(state === "CLOSING" || state === "CLOSED" ? "APPLICATION_CLOSING" : "APPLICATION_NOT_READY");
-      const admitted = await core.begin(request, exactWorktreeRoot === undefined ? undefined : { exactWorktreeRoot });
+      const admitted = await core.begin(request, authorization);
       if (admitted.kind === "NEW") interactions.expect(admitted.command.canonicalWorktree, admitted.command.intakeCorrelation);
       return admitted.kind === "NEW" ? delivery.activate(admitted) : admitted;
     }
@@ -434,22 +435,28 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
         return closePromise;
       },
     });
+    async function readBindingInventory(): Promise<readonly IntakeDeliveryBindingInventoryItem[]> {
+      const items: IntakeDeliveryBindingInventoryItem[] = [];
+      for (const slot of await slots.enumerate()) {
+        const manifest = await manifests.load(slot.manifestPath);
+        items.push(Object.freeze({
+          deliveryId: slot.deliveryId,
+          worktree: slot.worktree,
+          deliveryBindingIdentity: slot.deliveryBindingIdentity,
+          package: `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`,
+          lifecycle: slot.state,
+          intakeBinding: interactions.isBound(slot.deliveryId) ? "BOUND" : "DETACHED",
+          action: interactions.pending(slot.deliveryId) ? "AWAITING_INPUT" : "UNKNOWN",
+        }));
+      }
+      return Object.freeze(items);
+    }
+
     const control: ExecutionApplicationControl = Object.freeze({
-      executeFromConversationWorkspace: (request: ExecutionRequest, exactWorkspace: string) => executeRequest(request, exactWorkspace),
+      executeFromConversationWorkspace: (request: ExecutionRequest, authorization: ConversationWorkspaceAuthorization) => executeRequest(request, authorization),
+      bindingInventory: readBindingInventory,
       async list() {
-        const items: IntakeDeliveryInventoryItem[] = [];
-        for (const slot of await slots.enumerate()) {
-          const manifest = await manifests.load(slot.manifestPath);
-          items.push(Object.freeze({
-            deliveryId: slot.deliveryId,
-            worktree: slot.worktree,
-            package: `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`,
-            lifecycle: slot.state,
-            intakeBinding: interactions.isBound(slot.deliveryId) ? "BOUND" : "DETACHED",
-            action: interactions.pending(slot.deliveryId) ? "AWAITING_INPUT" : "UNKNOWN",
-          }));
-        }
-        return Object.freeze(items);
+        return Object.freeze((await readBindingInventory()).map(({ deliveryBindingIdentity: _identity, ...item }) => Object.freeze(item))) as readonly IntakeDeliveryInventoryItem[];
       },
       async recover(request: Readonly<{ worktree?: string; deliveryId?: string; correlation: string }>) {
         const slotsNow = await slots.enumerate();

@@ -150,12 +150,16 @@ describe("Execution Core admission", () => {
     await mkdir(join(outside, ".git"), { recursive: true });
     const canonicalOutside = await realpath(outside);
     const core = new ExecutionCoreAdmission(f.environment, f.admission);
+    const authorize = (workspace: string) => Object.freeze({
+      schemaVersion: "execution.conversation-workspace-authorization@1.0.0" as const,
+      sessionKey: "session-a", workspaceId: "workspace-a", path: workspace,
+    });
 
     expect(await core.begin(request(canonicalOutside))).toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
-    expect(await core.begin(request(canonicalOutside), { exactWorktreeRoot: f.root }))
+    expect(await core.begin(request(canonicalOutside), authorize(f.root)))
       .toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
 
-    const result = await core.begin(request(canonicalOutside), { exactWorktreeRoot: canonicalOutside });
+    const result = await core.begin(request(canonicalOutside), authorize(canonicalOutside));
     expect(result.kind).toBe("NEW");
     if (result.kind === "NEW") {
       expect(result.command.canonicalWorktree).toBe(canonicalOutside);

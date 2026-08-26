@@ -56,7 +56,7 @@ dsh plugin --profile web config set --location=project --json allowBuilds '{"bet
 dsh plugin --profile web add wsr-dsh-intake
 ```
 
-Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. Core and Intake versions are locked together (`wsr-dsh-intake@0.1.2` depends on `wsr-execution@0.1.2`), so a single `add` installs both and a single `update` moves both.
+Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. Core and Intake versions are locked together (`wsr-dsh-intake@0.1.3` depends on `wsr-execution@0.1.3`), so a single `add` installs both and a single `update` moves both.
 
 ## Quick start
 
@@ -107,7 +107,7 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 ## Known Limitations and Deferred Work
 
 - **Developer preview** — version `0.1.x` is an MVP candidate for trusted local use by individuals and small teams; compatibility-breaking changes are possible.
-- **Conversation workspace as provisional worktree** — until [#94](https://github.com/firestige/workflow-self-recursive/issues/94), an operation that must select a worktree uses the invoking conversation's registered workspace; authority is invocation-scoped and exact.
+- **Exclusive Session/Delivery binding** — the DSH Intake passes a private, typed, invocation-only proof of the exact registered conversation workspace; Execution derives and persists the canonical Git worktree, while Manifest/current-slot remain the durable Delivery/worktree authority. One Session, Delivery, and occupied worktree cannot be implicitly switched, shared, stolen, or released by timeout.
 - **Observation disabled by default** — set `observation.enabled: true` with a loopback OTLP base `endpoint` to enable the non-controlling exporter.
 - **DSH-only interactive surface** — the shipped `web` profile is the reference assembly; a custom profile contains only `dsh-base` and is not an interactive Intake surface.
 

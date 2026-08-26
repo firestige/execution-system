@@ -163,7 +163,6 @@ export async function createPluginRuntime(config, options = {}) {
   const api = await (options.moduleLoader?.() ?? import("wsr-execution"));
   const attachmentBytes = new Map();
   const bindings = options.bindings ?? new IntakeSessionBindingRepository(admitted.bindingFile);
-  await bindings.start();
   const sessionByCorrelation = new Map();
   const present = async (presentation) => {
     const sessionKey = sessionByCorrelation.get(presentation.correlation);
@@ -173,19 +172,29 @@ export async function createPluginRuntime(config, options = {}) {
   const factory = options.factory ?? new api.DefaultExecutionApplicationFactory();
   const application = await factory.create(admitted.configFile, dependencies);
   const control = options.control ?? api.getExecutionApplicationControl(application);
-  const inventory = await control.list();
-  for (const binding of await bindings.list()) {
-    const matches = inventory.filter((item) => item.deliveryId === binding.deliveryId && item.worktree === binding.worktree);
-    if (matches.length !== 1) throw Object.assign(new Error("INTAKE_BINDING_INVARIANT_VIOLATION"), { code: "INTAKE_BINDING_INVARIANT_VIOLATION" });
-    if (options.sessionAvailable !== undefined && !await options.sessionAvailable(binding.sessionKey)) {
-      await bindings.markDetached(binding.deliveryId);
-      continue;
-    }
-    control.attach(binding.deliveryId, binding.correlation);
-    sessionByCorrelation.set(binding.correlation, binding.sessionKey);
-  }
+  const bindingInventory = () => typeof control.bindingInventory === "function" ? control.bindingInventory() : control.list();
   try {
     await application.start();
+    const inventory = await bindingInventory();
+    await bindings.start(inventory);
+    for (const binding of await bindings.list()) {
+      const sameDelivery = inventory.filter((item) => item.deliveryId === binding.deliveryId || item.worktree === binding.worktree);
+      const matches = sameDelivery.filter((item) => item.deliveryId === binding.deliveryId && item.worktree === binding.worktree
+        && item.deliveryBindingIdentity === binding.deliveryBindingIdentity);
+      if (matches.length === 0 && sameDelivery.length === 0) {
+        await bindings.detach(binding.deliveryId);
+        continue;
+      }
+      if (matches.length !== 1 || sameDelivery.length !== 1) {
+        throw Object.assign(new Error("INTAKE_BINDING_INVARIANT_VIOLATION"), { code: "INTAKE_BINDING_INVARIANT_VIOLATION" });
+      }
+      if (options.sessionAvailable !== undefined && !await options.sessionAvailable(binding.sessionKey)) {
+        await bindings.markDetached(binding.deliveryId);
+        continue;
+      }
+      control.attach(binding.deliveryId, binding.correlation);
+      sessionByCorrelation.set(binding.correlation, binding.sessionKey);
+    }
   } catch (cause) {
     try { await application.close(); } catch { /* preserve the first startup failure */ }
     throw cause;
@@ -194,7 +203,7 @@ export async function createPluginRuntime(config, options = {}) {
     application,
     control,
     ...(typeof control.executeFromConversationWorkspace !== "function" ? {} : {
-      execute: (request) => control.executeFromConversationWorkspace(request, request.worktree),
+      execute: (request, authorization) => control.executeFromConversationWorkspace(request, authorization),
     }),
   }));
   const active = new Set();
@@ -228,29 +237,30 @@ export async function createPluginRuntime(config, options = {}) {
     const attachments = await captureImages(input.images ?? [], input.attachmentStore, input.signal);
     const turn = Object.freeze({ text: input.turnText ?? "", attachments });
     const operation = input.operation;
-    async function conversationWorktree() {
+    async function conversationAuthorization() {
       try {
-        if (options.resolveConversationWorkspace !== undefined) {
-          if (input.agent === null || typeof input.agent !== "object" || String(input.agent.id) !== input.sessionKey) {
-            return undefined;
-          }
-          const authority = await options.resolveConversationWorkspace(input.agent);
-          if (authority === null || typeof authority !== "object" || authority.sessionKey !== input.sessionKey
-            || typeof authority.workspaceId !== "string" || typeof authority.path !== "string" || !path.isAbsolute(authority.path)) {
-            return undefined;
-          }
-          const canonical = await realpath(authority.path);
-          return canonical === authority.path ? canonical : undefined;
-        }
-        return typeof input.worktree === "string" ? await realpath(input.worktree) : undefined;
+        if (options.resolveConversationWorkspace === undefined || input.agent === null || typeof input.agent !== "object"
+          || String(input.agent.id) !== input.sessionKey) return undefined;
+        const authority = await options.resolveConversationWorkspace(input.agent);
+        if (authority === null || typeof authority !== "object" || authority.sessionKey !== input.sessionKey
+          || typeof authority.workspaceId !== "string" || authority.workspaceId.length === 0
+          || typeof authority.path !== "string" || !path.isAbsolute(authority.path)) return undefined;
+        const canonical = await realpath(authority.path);
+        if (canonical !== authority.path) return undefined;
+        return Object.freeze({
+          schemaVersion: "execution.conversation-workspace-authorization@1.0.0",
+          sessionKey: input.sessionKey,
+          workspaceId: authority.workspaceId,
+          path: canonical,
+        });
       } catch { return undefined; }
     }
     if (operation.operation === "create") {
-      if (candidateBinding !== undefined) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
-      const worktree = await conversationWorktree();
-      if (worktree === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
+      if (candidateBinding !== undefined) return error("SESSION_INTAKE_BOUND");
+      const authorization = await conversationAuthorization();
+      if (authorization === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
       sessionByCorrelation.set(correlation, input.sessionKey);
-      const execution = track(service.invoke(Object.freeze({ operation: "create", selector: operation.selector, worktree, directive: operation.directive, turn, correlation })));
+      const execution = track(service.invoke(Object.freeze({ operation: "create", selector: operation.selector, worktree: authorization.path, directive: operation.directive, turn, correlation }), authorization));
       const first = await Promise.race([
         execution.then((result) => Object.freeze({ kind: "result", result })),
         control.waitForDelivery(correlation, options.deliveryRegistrationTimeoutMs ?? 10_000)
@@ -266,7 +276,7 @@ export async function createPluginRuntime(config, options = {}) {
         if (result.kind === "ERROR" || result.kind === "TERMINAL") sessionByCorrelation.delete(correlation);
         return result;
       }
-      await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: delivery.deliveryId, worktree: delivery.worktree }));
+      await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: delivery.deliveryId, worktree: delivery.worktree, deliveryBindingIdentity: delivery.deliveryBindingIdentity }));
       void track(execution.then(async (result) => {
         try { await options.present?.(Object.freeze({
           sessionKey: input.sessionKey,
@@ -282,26 +292,32 @@ export async function createPluginRuntime(config, options = {}) {
     }
     if (operation.operation === "list") return service.invoke(Object.freeze({ operation: "list", correlation }));
     if (operation.operation === "recover") {
-      if (existing !== undefined) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
-      const worktree = operation.deliveryId === undefined ? await conversationWorktree() : undefined;
-      if (operation.deliveryId === undefined && worktree === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
-      const recoverable = (await control.list()).filter((item) => operation.deliveryId === undefined
-        ? item.worktree === worktree
+      if (existing !== undefined) return error("SESSION_INTAKE_BOUND");
+      const authorization = await conversationAuthorization();
+      if (authorization === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
+      const recoverable = (await bindingInventory()).filter((item) => operation.deliveryId === undefined
+        ? item.worktree === authorization.path
         : item.deliveryId === operation.deliveryId);
+      if (operation.deliveryId !== undefined && recoverable.length === 1 && recoverable[0].worktree !== authorization.path) {
+        return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
+      }
       if (recoverable.length === 1) {
         const claimed = await bindings.byDelivery(recoverable[0].deliveryId);
         if (claimed?.state === "BOUND") return error("DELIVERY_INTAKE_BOUND");
       }
-      const result = await service.invoke(Object.freeze({ operation: "recover", ...(worktree === undefined ? {} : { worktree }), ...(operation.deliveryId === undefined ? {} : { deliveryId: operation.deliveryId }), correlation }));
+      const result = await service.invoke(Object.freeze({ operation: "recover", worktree: authorization.path, ...(operation.deliveryId === undefined ? {} : { deliveryId: operation.deliveryId }), correlation }));
       if (result.kind === "RECOVERY") {
-        await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: result.deliveryId, worktree: result.worktree }));
+        const recovered = (await bindingInventory()).filter((item) => item.deliveryId === result.deliveryId && item.worktree === result.worktree);
+        if (recovered.length !== 1) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
+        await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: result.deliveryId, worktree: result.worktree, deliveryBindingIdentity: recovered[0].deliveryBindingIdentity }));
         sessionByCorrelation.set(correlation, input.sessionKey);
       }
       return result;
     }
     if (operation.operation === "status") {
       const deliveryId = operation.deliveryId ?? existing?.deliveryId;
-      const worktree = deliveryId === undefined ? await conversationWorktree() : undefined;
+      const authorization = deliveryId === undefined ? await conversationAuthorization() : undefined;
+      const worktree = authorization?.path;
       if (deliveryId === undefined && worktree === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
       return service.invoke(Object.freeze({ operation: "status", ...(worktree === undefined ? {} : { worktree }), ...(deliveryId === undefined ? {} : { deliveryId }), correlation }));
     }

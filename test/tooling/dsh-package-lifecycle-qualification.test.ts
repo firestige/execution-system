@@ -10,6 +10,15 @@ import { qualifyDshPackageLifecycle } from "../../scripts/qualify-dsh-package-li
 const repository = path.resolve(import.meta.dirname, "../..");
 const pluginSource = path.join(repository, "packages/dsh-intake");
 
+function packCore(destination: string): string {
+  const output = execFileSync("npm", ["pack", "--silent", "--pack-destination", destination], {
+    cwd: repository,
+    encoding: "utf8",
+    env: { ...process.env, WSR_RELEASE_PACK_MODE: "verified-builder" },
+  }).trim();
+  return path.join(destination, output.split("\n").at(-1)!);
+}
+
 async function packPlugin(root: string, version: string): Promise<string> {
   const source = path.join(root, `plugin-${version}`);
   const destination = path.join(root, `release-${version}`);
@@ -30,10 +39,12 @@ describe("DSH package lifecycle qualification", () => {
   it("keeps external Delivery truth across compatible update, removal, and reinstall", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "execution-dsh-package-lifecycle-"));
     try {
+      execFileSync("pnpm", ["build"], { cwd: repository, stdio: "pipe" });
+      const coreArchive = packCore(root);
       const oldArchive = await packPlugin(root, "0.1.0");
       const newArchive = await packPlugin(root, "0.1.1");
 
-      const result = await qualifyDshPackageLifecycle({ oldArchive, newArchive });
+      const result = await qualifyDshPackageLifecycle({ coreArchive, oldArchive, newArchive });
 
       expect(result).toMatchObject({
         profile: "web",

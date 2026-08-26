@@ -1,6 +1,8 @@
 packages:
   - "packages/*"
 
+linkWorkspacePackages: true
+
 allowBuilds:
   "@deepseek-ai/dsh-subprocess-local": true
   "@google/genai": true
@@ -11,4 +13,4 @@ allowBuilds:
   "protobufjs": true
 
 minimumReleaseAgeExclude:
-  - wsr-execution@0.1.2
+  - wsr-execution@0.1.3
