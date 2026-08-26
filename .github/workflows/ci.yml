@@ -22,6 +22,11 @@ on:
         required: false
         default: release/next
         type: string
+      authority_manifest:
+        description: Superproject-relative immutable unified candidate manifest
+        required: false
+        default: release/candidates/iter4-wave11.json
+        type: string
 
 concurrency:
   group: execution-system-${{ github.workflow }}-${{ github.ref }}
@@ -97,3 +102,4 @@ jobs:
       candidate_tag: ${{ inputs.candidate_tag }}
       local_manual_e2e_evidence: ${{ inputs.local_manual_e2e_evidence }}
       authority_ref: ${{ inputs.authority_ref }}
+      authority_manifest: ${{ inputs.authority_manifest }}

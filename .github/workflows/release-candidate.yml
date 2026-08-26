@@ -93,7 +93,14 @@ jobs:
           submodules: recursive
 
       - name: Verify exact Execution candidate pin
-        run: test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"
+        id: authority
+        env:
+          AUTHORITY_MANIFEST: ${{ steps.request.outputs.authority_manifest }}
+        run: |
+          case "$AUTHORITY_MANIFEST" in release/candidates/*.json) ;; *) exit 1 ;; esac
+          ARCHIVE_COMMIT="$(jq -er .execution.candidate_archive_commit "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")"
+          test "$(git -C execution-system rev-parse HEAD)" = "$ARCHIVE_COMMIT"
+          echo "archive_commit=$ARCHIVE_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -121,6 +128,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
           LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
+          RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
         run: |
           PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
           pnpm release:policy candidate "$CANDIDATE_TAG" "$PACKAGE_VERSION"
@@ -128,13 +136,13 @@ jobs:
             https://github.com/firestige/*/issues/*) ;;
             *) echo "local_manual_e2e_evidence must be a firestige GitHub issue/comment URL" >&2; exit 1 ;;
           esac
-          if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
-            test "$(gh release view "$CANDIDATE_TAG" --json isPrerelease --jq .isPrerelease)" = true
-            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$GITHUB_SHA"
+          if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            test "$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = true
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$RELEASE_TARGET"
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" >/dev/null 2>&1; then
-              test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$GITHUB_SHA"
+              test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$RELEASE_TARGET"
             fi
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -155,12 +163,12 @@ jobs:
         working-directory: execution-system
         env:
           AUTHORITY_MANIFEST: ${{ steps.request.outputs.authority_manifest }}
+          RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
         run: |
           case "$AUTHORITY_MANIFEST" in release/candidates/*.json) ;; *) exit 1 ;; esac
-          ARCHIVE_COMMIT="$(jq -r .execution.candidate_archive_commit "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")"
           CANDIDATE_DIR="$(dirname "$(jq -r .execution.metadata.path "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")")"
-          git merge-base --is-ancestor "$ARCHIVE_COMMIT" "$GITHUB_SHA"
-          git diff --quiet "$ARCHIVE_COMMIT" -- "${CANDIDATE_DIR#execution-system/}"
+          test "$(git rev-parse HEAD)" = "$RELEASE_TARGET"
+          git diff --quiet "$RELEASE_TARGET" -- "${CANDIDATE_DIR#execution-system/}"
           node --import tsx scripts/materialize-unified-release-candidate.ts \
             "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST" "$RUNNER_TEMP/local-release"
           pnpm release:verify "$RUNNER_TEMP/local-release"
@@ -180,20 +188,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
           RC_EXISTS: ${{ steps.candidate.outputs.exists }}
+          RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
         run: |
           if test "$RC_EXISTS" != true; then
-            gh release create "$CANDIDATE_TAG" --prerelease --target "$GITHUB_SHA" \
+            gh release create "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --prerelease --target "$RELEASE_TARGET" \
               --title "Execution System $CANDIDATE_TAG" \
               --notes-file "$RUNNER_TEMP/local-release/release-notes.md"
           fi
           mkdir "$RUNNER_TEMP/existing-assets"
           for FILE in "$RUNNER_TEMP/local-release/"*; do
             NAME="$(basename "$FILE")"
-            if gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name' | grep -Fxq "$NAME"; then
-              gh release download "$CANDIDATE_TAG" --pattern "$NAME" --dir "$RUNNER_TEMP/existing-assets"
+            if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq "$NAME"; then
+              gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$NAME" --dir "$RUNNER_TEMP/existing-assets"
               cmp "$FILE" "$RUNNER_TEMP/existing-assets/$NAME"
             else
-              gh release upload "$CANDIDATE_TAG" "$FILE"
+              gh release upload "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" "$FILE"
             fi
           done
 
@@ -204,7 +213,7 @@ jobs:
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
         run: |
           mkdir "$RUNNER_TEMP/remote-release"
-          gh release download "$CANDIDATE_TAG" --dir "$RUNNER_TEMP/remote-release"
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/remote-release"
           pnpm release:verify "$RUNNER_TEMP/remote-release"
           cmp "$RUNNER_TEMP/local-release/release-metadata.json" "$RUNNER_TEMP/remote-release/release-metadata.json"
 
@@ -223,16 +232,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
           LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
+          RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           METADATA_SHA="sha256:$(sha256sum "$RUNNER_TEMP/remote-release/release-metadata.json" | cut -d' ' -f1)"
           export VERSION METADATA_SHA
-          node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({schemaVersion:"execution.release-qualification@1.0.0",packageVersion:process.env.VERSION,candidateTag:process.env.CANDIDATE_TAG,commit:process.env.GITHUB_SHA,artifactMetadataSha256:process.env.METADATA_SHA,localE2E:{status:"PASS",manualEvidence:process.env.LOCAL_E2E},remotePrereleaseE2E:{status:"PASS"}},null,2)+"\n")' \
+          node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({schemaVersion:"execution.release-qualification@1.0.0",packageVersion:process.env.VERSION,candidateTag:process.env.CANDIDATE_TAG,commit:process.env.RELEASE_TARGET,publisherRevision:process.env.GITHUB_SHA,artifactMetadataSha256:process.env.METADATA_SHA,localE2E:{status:"PASS",manualEvidence:process.env.LOCAL_E2E},remotePrereleaseE2E:{status:"PASS"}},null,2)+"\n")' \
             "$RUNNER_TEMP/release-qualification.json"
-          if gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name' | grep -Fxq release-qualification.json; then
+          if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq release-qualification.json; then
             mkdir "$RUNNER_TEMP/existing-qualification"
-            gh release download "$CANDIDATE_TAG" --pattern release-qualification.json --dir "$RUNNER_TEMP/existing-qualification"
+            gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --pattern release-qualification.json --dir "$RUNNER_TEMP/existing-qualification"
             cmp "$RUNNER_TEMP/release-qualification.json" "$RUNNER_TEMP/existing-qualification/release-qualification.json"
           else
-            gh release upload "$CANDIDATE_TAG" "$RUNNER_TEMP/release-qualification.json"
+            gh release upload "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/release-qualification.json"
           fi

@@ -20,17 +20,36 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain("local_manual_e2e_evidence:");
   });
 
-  it("qualifies the RC from a selected super-project authority ref at the exact Execution pin", async () => {
+  it("qualifies and tags the RC at the immutable Wave11 product pin, not the publisher revision", async () => {
     const candidate = await readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8");
 
     expect(candidate).toContain("repository: firestige/workflow-self-recursive");
     expect(candidate).toContain("ref: ${{ steps.request.outputs.authority_ref }}");
     expect(candidate).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(candidate).toContain("submodules: recursive");
-    expect(candidate).toContain('test "$(git -C execution-system rev-parse HEAD)" = "$GITHUB_SHA"');
+    expect(candidate).toContain('ARCHIVE_COMMIT="$(jq -er .execution.candidate_archive_commit');
+    expect(candidate).toContain('test "$(git -C execution-system rev-parse HEAD)" = "$ARCHIVE_COMMIT"');
+    expect(candidate).toContain('RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}');
+    expect(candidate).toContain('--target "$RELEASE_TARGET"');
+    expect(candidate).not.toContain('--target "$GITHUB_SHA"');
     expect(candidate).toContain("Install frozen contract checker dependencies");
     expect(candidate).toContain("working-directory: execution-system");
     expect(candidate).toContain('"$GITHUB_WORKSPACE/execution-system"');
+  });
+
+  it("passes the unified authority manifest through the registered CI bootstrap", async () => {
+    const ci = await readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8");
+
+    expect(ci).toContain("authority_manifest:");
+    expect(ci).toContain("authority_manifest: ${{ inputs.authority_manifest }}");
+  });
+
+  it("scopes every GitHub Release operation to the component repository", async () => {
+    const candidate = await readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8");
+    const releaseCommands = candidate.split("\n").filter((line) => /gh release (?:view|create|download|upload)/u.test(line));
+
+    expect(releaseCommands.length).toBeGreaterThan(0);
+    expect(releaseCommands.every((line) => line.includes('--repo "$GITHUB_REPOSITORY"'))).toBe(true);
   });
 
   it("keeps ordinary component PR qualification on the stable super-project authority", async () => {
