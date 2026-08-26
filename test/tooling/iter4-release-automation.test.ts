@@ -18,10 +18,24 @@ import {
 import { assertReleaseNotes, renderReleaseNotes } from "../../release/cli/verify-release-notes.js";
 import { simulateReleaseLifecycle } from "../../release/cli/simulate-release-lifecycle.js";
 import { assertCapabilityMatrix } from "../../release/cli/verify-release-matrix.js";
+import { isChangelogMetaCommit } from "../../release/cli/changelog-policy.js";
 
 const repository = path.resolve(import.meta.dirname, "../..");
 
 describe("Iteration 4 release automation", () => {
+  it("excludes changelog regeneration and immutable candidate archival commits", () => {
+    expect(isChangelogMetaCommit(["CHANGELOG.md"])).toBe(true);
+    expect(isChangelogMetaCommit([
+      "release/candidates/iter4-wave11/release-metadata.json",
+      "release/candidates/iter4-wave11/wsr-execution-0.1.3.tgz",
+    ])).toBe(true);
+    expect(isChangelogMetaCommit([
+      "release/candidates/iter4-wave11/release-metadata.json",
+      "src/index.ts",
+    ])).toBe(false);
+    expect(isChangelogMetaCommit([])).toBe(false);
+  });
+
   it("validates the language-neutral lifecycle configuration and Execution capabilities", async () => {
     const config = JSON.parse(
       await readFile(path.join(repository, "release/config/component.json"), "utf8"),
