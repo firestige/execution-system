@@ -83,6 +83,16 @@ describe("Iteration 4 release automation", () => {
       ?.split("- name:", 1)[0];
     expect(lifecycleStep).toContain("wsr-dsh-intake-$VERSION.tgz");
     expect(lifecycleStep).toContain("wsr-execution-$VERSION.tgz");
+    expect(authorityWorkflow).not.toContain('git -C system-contracts rev-parse HEAD)" = 9e6ba782');
+    for (const protectedContract of [
+      "delivery-admission",
+      "evaluation",
+      "observation",
+      "workflow-dsl",
+    ]) {
+      expect(authorityWorkflow).toContain(`HEAD^{tree}:${protectedContract}`);
+      expect(authorityWorkflow).toContain(`9e6ba782b742f49f3d2392c9af37ebd4ff328bc8^{tree}:${protectedContract}`);
+    }
 
     const core = { name: "wsr-execution", version: "0.1.3" };
     const intake = {
