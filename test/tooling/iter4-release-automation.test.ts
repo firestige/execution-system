@@ -74,6 +74,16 @@ describe("Iteration 4 release automation", () => {
   it("checks every lockstep coordinate and rejects a dependency or workflow filename drift", async () => {
     await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.1.3");
 
+    const authorityWorkflow = await readFile(
+      path.join(repository, "../.github/workflows/iter3-execution-ci.yml"),
+      "utf8",
+    );
+    const lifecycleStep = authorityWorkflow
+      .split("- name: Qualify DSH package lifecycle without install hooks", 2)[1]
+      ?.split("- name:", 1)[0];
+    expect(lifecycleStep).toContain("wsr-dsh-intake-$VERSION.tgz");
+    expect(lifecycleStep).toContain("wsr-execution-$VERSION.tgz");
+
     const core = { name: "wsr-execution", version: "0.1.3" };
     const intake = {
       name: "wsr-dsh-intake",
