@@ -155,6 +155,7 @@ describe("Iteration 4 release automation", () => {
     expect(candidate).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
     expect(candidate).toContain("repositories: execution-system");
     expect(candidate).toContain("permission-contents: write");
+    expect(candidate).toContain("permission-workflows: write");
     expect(candidate.indexOf("actions/create-github-app-token@"))
       .toBeGreaterThan(candidate.indexOf("Run local artifact-install DSH Web E2E"));
     expect(candidate.indexOf("actions/create-github-app-token@"))
