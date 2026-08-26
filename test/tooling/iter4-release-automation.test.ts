@@ -143,7 +143,7 @@ describe("Iteration 4 release automation", () => {
     }
   });
 
-  it("mints the GitHub App token only for final publish and never hardcodes a qualification branch", async () => {
+  it("mints a repository-scoped GitHub App token only after candidate qualification or before final publish", async () => {
     const [candidate, promote] = await Promise.all([
       readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8"),
       readFile(path.join(repository, ".github/workflows/release-promote.yml"), "utf8"),
@@ -151,7 +151,15 @@ describe("Iteration 4 release automation", () => {
 
     expect(candidate).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(candidate).toContain('test "$GITHUB_REF_NAME" = "release/next"');
-    expect(candidate).not.toContain("WSR_RELEASE_APP_PRIVATE_KEY");
+    expect(candidate).toContain("WSR_RELEASE_APP_ID");
+    expect(candidate).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
+    expect(candidate).toContain("repositories: execution-system");
+    expect(candidate).toContain("permission-contents: write");
+    expect(candidate.indexOf("actions/create-github-app-token@"))
+      .toBeGreaterThan(candidate.indexOf("Run local artifact-install DSH Web E2E"));
+    expect(candidate.indexOf("actions/create-github-app-token@"))
+      .toBeLessThan(candidate.indexOf("Create or resume RC with exact local assets"));
+    expect(candidate).toContain("GH_TOKEN: ${{ steps.release-app-token.outputs.token }}");
     expect(candidate).toContain("push:");
     expect(candidate).toContain("release/request.json");
     expect(candidate).toContain("steps.request.outputs.candidate_tag");

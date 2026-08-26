@@ -42,7 +42,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: execution-release-candidate
@@ -189,13 +189,23 @@ jobs:
           VERSION="$(node -p 'require("./package.json").version')"
           pnpm qualify:dsh-interactive \
             "$RUNNER_TEMP/local-release/wsr-execution-$VERSION.tgz" \
-            "$RUNNER_TEMP/local-release/wsr-dsh-intake-$VERSION.tgz" \
-            "$GITHUB_WORKSPACE/execution-system"
+             "$RUNNER_TEMP/local-release/wsr-dsh-intake-$VERSION.tgz" \
+             "$GITHUB_WORKSPACE/execution-system"
+
+      - name: Mint short-lived release App token after candidate qualification
+        id: release-app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.WSR_RELEASE_APP_ID }}
+          private-key: ${{ secrets.WSR_RELEASE_APP_PRIVATE_KEY }}
+          owner: firestige
+          repositories: execution-system
+          permission-contents: write
 
       - name: Create or resume RC with exact local assets
         working-directory: execution-system
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
           RC_EXISTS: ${{ steps.candidate.outputs.exists }}
           RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
@@ -219,7 +229,7 @@ jobs:
       - name: Redownload exact prerelease assets
         working-directory: execution-system
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
         run: |
           mkdir "$RUNNER_TEMP/remote-release"
@@ -239,7 +249,7 @@ jobs:
       - name: Publish immutable qualification evidence to the prerelease
         working-directory: execution-system
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
           LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
           RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}

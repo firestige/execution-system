@@ -96,8 +96,9 @@ jobs:
   release-candidate:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate == true }}
     permissions:
-      contents: write
+      contents: read
     uses: ./.github/workflows/release-candidate.yml
+    secrets: inherit
     with:
       candidate_tag: ${{ inputs.candidate_tag }}
       local_manual_e2e_evidence: ${{ inputs.local_manual_e2e_evidence }}

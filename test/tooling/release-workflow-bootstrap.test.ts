@@ -14,7 +14,9 @@ describe("release workflow bootstrap", () => {
 
     expect(ci).toContain("release_candidate:");
     expect(ci).toContain("uses: ./.github/workflows/release-candidate.yml");
-    expect(ci).toContain("permissions:\n      contents: write");
+    expect(ci).toContain("secrets: inherit");
+    expect(ci).toContain("permissions:\n      contents: read");
+    expect(ci).not.toContain("permissions:\n      contents: write");
     expect(candidate).toContain("workflow_call:");
     expect(candidate).toContain("candidate_tag:");
     expect(candidate).toContain("local_manual_e2e_evidence:");
