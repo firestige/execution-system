@@ -102,6 +102,16 @@ jobs:
           test "$(git -C execution-system rev-parse HEAD)" = "$ARCHIVE_COMMIT"
           echo "archive_commit=$ARCHIVE_COMMIT" >> "$GITHUB_OUTPUT"
 
+      - name: Checkout exact publisher tooling revision
+        uses: actions/checkout@v6
+        with:
+          repository: firestige/execution-system
+          ref: ${{ github.sha }}
+          path: release-publisher
+
+      - name: Verify exact publisher tooling checkout
+        run: test "$(git -C release-publisher rev-parse HEAD)" = "$GITHUB_SHA"
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -169,7 +179,7 @@ jobs:
           CANDIDATE_DIR="$(dirname "$(jq -r .execution.metadata.path "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")")"
           test "$(git rev-parse HEAD)" = "$RELEASE_TARGET"
           git diff --quiet "$RELEASE_TARGET" -- "${CANDIDATE_DIR#execution-system/}"
-          node --import tsx scripts/materialize-unified-release-candidate.ts \
+          node --import tsx "$GITHUB_WORKSPACE/release-publisher/scripts/materialize-unified-release-candidate.ts" \
             "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST" "$RUNNER_TEMP/local-release"
           pnpm release:verify "$RUNNER_TEMP/local-release"
 

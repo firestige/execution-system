@@ -29,6 +29,9 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain("submodules: recursive");
     expect(candidate).toContain('ARCHIVE_COMMIT="$(jq -er .execution.candidate_archive_commit');
     expect(candidate).toContain('test "$(git -C execution-system rev-parse HEAD)" = "$ARCHIVE_COMMIT"');
+    expect(candidate).toContain("path: release-publisher");
+    expect(candidate).toContain('test "$(git -C release-publisher rev-parse HEAD)" = "$GITHUB_SHA"');
+    expect(candidate).toContain('"$GITHUB_WORKSPACE/release-publisher/scripts/materialize-unified-release-candidate.ts"');
     expect(candidate).toContain('RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}');
     expect(candidate).toContain('--target "$RELEASE_TARGET"');
     expect(candidate).not.toContain('--target "$GITHUB_SHA"');
