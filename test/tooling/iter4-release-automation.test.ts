@@ -206,6 +206,35 @@ describe("Iteration 4 release automation", () => {
     await writeFile(path.join(candidate, "wsr-execution-0.1.3.tgz"), "tampered");
     await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "tampered-output")))
       .rejects.toThrowError("UNIFIED_CANDIDATE_DIGEST_MISMATCH");
+
+    await writeFile(path.join(candidate, "wsr-execution-0.1.3.tgz"), "core");
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, execution: { ...manifest.execution, metadata: null } }));
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "invalid-output")))
+      .rejects.toThrowError("UNIFIED_CANDIDATE_INVALID");
+
+    const invalidDigest = structuredClone(manifest);
+    invalidDigest.execution.metadata.sha256 = "sha256:not-a-digest";
+    await writeFile(manifestPath, JSON.stringify(invalidDigest));
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "invalid-digest-output")))
+      .rejects.toThrowError("UNIFIED_CANDIDATE_INVALID");
+
+    const invalidPackage = structuredClone(manifest);
+    invalidPackage.execution.artifacts[0]!.package = "unexpected-package";
+    await writeFile(manifestPath, JSON.stringify(invalidPackage));
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "coordinate-output")))
+      .rejects.toThrowError("UNIFIED_CANDIDATE_COORDINATE_MISMATCH");
+
+    const escapedPath = structuredClone(manifest);
+    escapedPath.execution.metadata.path = "../release-metadata.json";
+    await writeFile(manifestPath, JSON.stringify(escapedPath));
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "escaped-output")))
+      .rejects.toThrowError("UNIFIED_CANDIDATE_PATH_INVALID");
+
+    const splitDirectory = structuredClone(manifest);
+    splitDirectory.execution.release_notes.path = "execution-system/release/candidates/release-notes.md";
+    await writeFile(manifestPath, JSON.stringify(splitDirectory));
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "split-output")))
+      .rejects.toThrowError("UNIFIED_CANDIDATE_PATH_INVALID");
   });
 
   it("fails closed on direct source publication and fixes the release-note shape", async () => {
