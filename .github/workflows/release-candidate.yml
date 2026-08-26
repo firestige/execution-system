@@ -1,6 +1,9 @@
 name: Release candidate
 
 on:
+  push:
+    branches:
+      - release/next
   workflow_dispatch:
     inputs:
       candidate_tag:
@@ -53,11 +56,39 @@ jobs:
       - name: Verify release trigger branch
         run: test "$GITHUB_REF_NAME" = "release/next"
 
+      - name: Resolve immutable release request
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          DISPATCH_LOCAL_E2E: ${{ inputs.local_manual_e2e_evidence }}
+          DISPATCH_AUTHORITY_REF: ${{ inputs.authority_ref }}
+          DISPATCH_AUTHORITY_MANIFEST: ${{ inputs.authority_manifest }}
+        run: |
+          if test "$GITHUB_EVENT_NAME" = "push"; then
+            gh api "repos/$GITHUB_REPOSITORY/contents/release/request.json?ref=$GITHUB_SHA" \
+              --jq .content | base64 --decode > "$RUNNER_TEMP/release-request.json"
+            CANDIDATE_TAG="$(jq -er .candidate_tag "$RUNNER_TEMP/release-request.json")"
+            LOCAL_E2E="$(jq -er .local_manual_e2e_evidence "$RUNNER_TEMP/release-request.json")"
+            AUTHORITY_REF="$(jq -er .authority_ref "$RUNNER_TEMP/release-request.json")"
+            AUTHORITY_MANIFEST="$(jq -er .authority_manifest "$RUNNER_TEMP/release-request.json")"
+          else
+            CANDIDATE_TAG="$DISPATCH_CANDIDATE_TAG"
+            LOCAL_E2E="$DISPATCH_LOCAL_E2E"
+            AUTHORITY_REF="$DISPATCH_AUTHORITY_REF"
+            AUTHORITY_MANIFEST="$DISPATCH_AUTHORITY_MANIFEST"
+          fi
+          test -n "$CANDIDATE_TAG" && test -n "$LOCAL_E2E" && test -n "$AUTHORITY_REF" && test -n "$AUTHORITY_MANIFEST"
+          echo "candidate_tag=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "local_e2e=$LOCAL_E2E" >> "$GITHUB_OUTPUT"
+          echo "authority_ref=$AUTHORITY_REF" >> "$GITHUB_OUTPUT"
+          echo "authority_manifest=$AUTHORITY_MANIFEST" >> "$GITHUB_OUTPUT"
+
       - name: Checkout super-project qualification authority workspace
         uses: actions/checkout@v6
         with:
           repository: firestige/workflow-self-recursive
-          ref: ${{ inputs.authority_ref }}
+          ref: ${{ steps.request.outputs.authority_ref }}
           fetch-depth: 0
           submodules: recursive
 
@@ -87,8 +118,8 @@ jobs:
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
-          LOCAL_E2E: ${{ inputs.local_manual_e2e_evidence }}
+          CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
+          LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
         run: |
           PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
           pnpm release:policy candidate "$CANDIDATE_TAG" "$PACKAGE_VERSION"
@@ -120,7 +151,7 @@ jobs:
       - name: Materialize and verify exact unified-candidate artifacts
         working-directory: execution-system
         env:
-          AUTHORITY_MANIFEST: ${{ inputs.authority_manifest }}
+          AUTHORITY_MANIFEST: ${{ steps.request.outputs.authority_manifest }}
         run: |
           case "$AUTHORITY_MANIFEST" in release/candidates/*.json) ;; *) exit 1 ;; esac
           ARCHIVE_COMMIT="$(jq -r .execution.candidate_archive_commit "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")"
@@ -144,7 +175,7 @@ jobs:
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
         run: |
           gh release create "$CANDIDATE_TAG" "$RUNNER_TEMP/local-release/"* \
             --prerelease --target "$GITHUB_SHA" \
@@ -155,7 +186,7 @@ jobs:
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+          CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
         run: |
           mkdir "$RUNNER_TEMP/remote-release"
           gh release download "$CANDIDATE_TAG" --dir "$RUNNER_TEMP/remote-release"
@@ -175,8 +206,8 @@ jobs:
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
-          LOCAL_E2E: ${{ inputs.local_manual_e2e_evidence }}
+          CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
+          LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           METADATA_SHA="sha256:$(sha256sum "$RUNNER_TEMP/remote-release/release-metadata.json" | cut -d' ' -f1)"
