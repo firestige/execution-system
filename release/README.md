@@ -17,4 +17,4 @@ pnpm release:publish-npm <directory>
 
 The last command defaults to a dry plan. `--execute` is reserved for the trusted-publishing promotion workflow. It verifies the immutable manifest, publishes core then intake, resumes only when existing registry bytes have the same digest, and asserts digest/description/versions/`latest` afterward.
 
-Candidate dispatch is accepted only from `release/next`. Stable promotion uses npm OIDC for the exact qualified tgz pair, then mints a repository- and permission-scoped GitHub App token for the final GitHub Release operation.
+Candidate dispatch is accepted only from `release/next`. After qualification, candidate publication mints a short-lived App token scoped to `execution-system` with Contents and Workflows write so a workflow-bearing archived target can be tagged. Stable promotion uses npm OIDC for the exact qualified tgz pair, then mints a fresh repository- and permission-scoped GitHub App token for the final GitHub Release operation.
