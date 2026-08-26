@@ -15,6 +15,10 @@ on:
         description: Superproject release/next ref pinned to this exact component candidate
         required: true
         type: string
+      authority_manifest:
+        description: Superproject-relative immutable unified candidate manifest
+        required: true
+        type: string
   workflow_call:
     inputs:
       candidate_tag:
@@ -27,6 +31,10 @@ on:
         type: string
       authority_ref:
         description: Superproject release/next ref pinned to this exact component candidate
+        required: true
+        type: string
+      authority_manifest:
+        description: Superproject-relative immutable unified candidate manifest
         required: true
         type: string
 
@@ -109,10 +117,18 @@ jobs:
           pnpm harness feasibility
           pnpm verify:dsh-intake
 
-      - name: Build and verify current-checkout artifacts
+      - name: Materialize and verify exact unified-candidate artifacts
         working-directory: execution-system
+        env:
+          AUTHORITY_MANIFEST: ${{ inputs.authority_manifest }}
         run: |
-          pnpm release:artifacts "$RUNNER_TEMP/local-release"
+          case "$AUTHORITY_MANIFEST" in release/candidates/*.json) ;; *) exit 1 ;; esac
+          ARCHIVE_COMMIT="$(jq -r .execution.candidate_archive_commit "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")"
+          CANDIDATE_DIR="$(dirname "$(jq -r .execution.metadata.path "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST")")"
+          git merge-base --is-ancestor "$ARCHIVE_COMMIT" "$GITHUB_SHA"
+          git diff --quiet "$ARCHIVE_COMMIT" -- "${CANDIDATE_DIR#execution-system/}"
+          node --import tsx scripts/materialize-unified-release-candidate.ts \
+            "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST" "$RUNNER_TEMP/local-release"
           pnpm release:verify "$RUNNER_TEMP/local-release"
 
       - name: Run local artifact-install DSH Web E2E

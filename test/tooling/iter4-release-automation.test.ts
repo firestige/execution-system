@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -19,6 +21,7 @@ import { assertReleaseNotes, renderReleaseNotes } from "../../release/cli/verify
 import { simulateReleaseLifecycle } from "../../release/cli/simulate-release-lifecycle.js";
 import { assertCapabilityMatrix } from "../../release/cli/verify-release-matrix.js";
 import { isChangelogMetaCommit } from "../../release/cli/changelog-policy.js";
+import { materializeUnifiedCandidate } from "../../scripts/materialize-unified-release-candidate.js";
 
 const repository = path.resolve(import.meta.dirname, "../..");
 
@@ -149,6 +152,9 @@ describe("Iteration 4 release automation", () => {
     expect(candidate).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(candidate).toContain('test "$GITHUB_REF_NAME" = "release/next"');
     expect(candidate).not.toContain("WSR_RELEASE_APP_PRIVATE_KEY");
+    expect(candidate).toContain("authority_manifest");
+    expect(candidate).toContain("materialize-unified-release-candidate.ts");
+    expect(candidate).not.toContain('pnpm release:artifacts "$RUNNER_TEMP/local-release"');
     expect(promote).toContain("actions/create-github-app-token@");
     expect(promote).toContain("WSR_RELEASE_APP_ID");
     expect(promote).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
@@ -157,6 +163,44 @@ describe("Iteration 4 release automation", () => {
     expect(promote.indexOf("actions/create-github-app-token@"))
       .toBeGreaterThan(promote.indexOf("Re-run remote artifact-install E2E"));
     expect(promote).toContain("GH_TOKEN: ${{ steps.release-app-token.outputs.token }}");
+  });
+
+  it("materializes only exact Execution bytes bound by the unified candidate", async () => {
+    const superproject = await mkdtemp(path.join(tmpdir(), "wsr-unified-candidate-"));
+    const candidate = path.join(superproject, "execution-system/release/candidates/wave11");
+    const destination = path.join(superproject, "output");
+    await mkdir(candidate, { recursive: true });
+    await writeFile(path.join(candidate, "release-metadata.json"), "metadata\n");
+    await writeFile(path.join(candidate, "release-notes.md"), "notes\n");
+    await writeFile(path.join(candidate, "wsr-execution-0.1.3.tgz"), "core");
+    await writeFile(path.join(candidate, "wsr-dsh-intake-0.1.3.tgz"), "intake");
+    await writeFile(path.join(candidate, "publication.json"), "publication\n");
+    const digest = (value: string): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;
+    const manifest = {
+      schema_version: "wsr.iter4-unified-candidate@1.0.0",
+      status: "IMMUTABLE_RELEASE_CANDIDATE",
+      execution: {
+        metadata: { path: "execution-system/release/candidates/wave11/release-metadata.json", sha256: digest("metadata\n") },
+        release_notes: { path: "execution-system/release/candidates/wave11/release-notes.md", sha256: digest("notes\n") },
+        artifacts: [
+          { package: "wsr-execution", version: "0.1.3", path: "execution-system/release/candidates/wave11/wsr-execution-0.1.3.tgz", sha256: digest("core") },
+          { package: "wsr-dsh-intake", version: "0.1.3", path: "execution-system/release/candidates/wave11/wsr-dsh-intake-0.1.3.tgz", sha256: digest("intake") },
+        ],
+      },
+    };
+    const manifestPath = path.join(superproject, "release/candidates/iter4-wave11.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(manifestPath, JSON.stringify(manifest));
+
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, destination)).resolves.toEqual({
+      candidateDirectory: candidate,
+      version: "0.1.3",
+      artifactCount: 2,
+    });
+    await expect(readFile(path.join(destination, "wsr-execution-0.1.3.tgz"), "utf8")).resolves.toBe("core");
+    await writeFile(path.join(candidate, "wsr-execution-0.1.3.tgz"), "tampered");
+    await expect(materializeUnifiedCandidate(superproject, manifestPath, path.join(superproject, "tampered-output")))
+      .rejects.toThrowError("UNIFIED_CANDIDATE_DIGEST_MISMATCH");
   });
 
   it("fails closed on direct source publication and fixes the release-note shape", async () => {
