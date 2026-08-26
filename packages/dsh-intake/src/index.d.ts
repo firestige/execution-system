@@ -1,18 +1,19 @@
 export class IntakeBindingError extends Error {
-  readonly code: "DELIVERY_INTAKE_BOUND" | "INTAKE_BINDING_INVARIANT_VIOLATION";
+  readonly code: "SESSION_INTAKE_BOUND" | "DELIVERY_INTAKE_BOUND" | "INTAKE_BINDING_INVARIANT_VIOLATION";
 }
 
 export interface IntakeSessionBinding {
   readonly sessionKey: string;
   readonly correlation: string;
   readonly deliveryId: string;
+  readonly deliveryBindingIdentity: string;
   readonly worktree: string;
   readonly state: "BOUND" | "DETACHED";
 }
 
 export class IntakeSessionBindingRepository {
   constructor(file: string);
-  start(): Promise<void>;
+  start(inventory?: readonly Readonly<{ deliveryId: string; worktree: string; deliveryBindingIdentity: string }>[]): Promise<void>;
   claim(input: Omit<IntakeSessionBinding, "state">): Promise<IntakeSessionBinding>;
   bySession(sessionKey: string): Promise<IntakeSessionBinding | undefined>;
   byDelivery(deliveryId: string): Promise<IntakeSessionBinding | undefined>;
@@ -48,6 +49,11 @@ export function presentToDshSession(agent: unknown, presentation: Readonly<{
   kind: "command-accepted" | "delivery-running" | "delivery-list" | "delivery-status" | "action-output" | "action-input-request" | "terminal-result" | "error";
   data: Readonly<Record<string, unknown>>;
 }>, createId?: () => string): void;
+export function createSessionPresentationRouter(agents: Readonly<{ get(sessionKey: string): unknown }>): Readonly<{
+  retain(sessionKey: string, agent: unknown): void;
+  release(sessionKey: string): void;
+  present(input: Readonly<{ sessionKey: string; presentation: unknown }>): void;
+}>;
 export function createPluginRuntime(config: unknown, options?: unknown): Promise<unknown>;
 export function apply(ctx: unknown, config: unknown): Promise<void>;
 

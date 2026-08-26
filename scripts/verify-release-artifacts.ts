@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertReleaseNotes } from "../release/cli/verify-release-notes.js";
+
 const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const COMPATIBILITY = Object.freeze({
   node: ">=24.12.0 <25",
@@ -33,7 +35,7 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
   let parsed: unknown;
   try { parsed = JSON.parse(await readFile(path.join(directory, "release-metadata.json"), "utf8")); }
   catch { throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID"); }
-  const metadata = record(parsed, ["schemaVersion", "version", "compatibility", "artifacts"], "RELEASE_METADATA_INVALID");
+  const metadata = record(parsed, ["schemaVersion", "version", "compatibility", "releaseNotes", "artifacts"], "RELEASE_METADATA_INVALID");
   if (metadata.schemaVersion !== "execution.release@1.0.0" || typeof metadata.version !== "string"
     || !STABLE_VERSION.test(metadata.version) || !Array.isArray(metadata.artifacts)) {
     throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID");
@@ -49,6 +51,22 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
   const compatibility = record(metadata.compatibility, Object.keys(COMPATIBILITY), "RELEASE_COMPATIBILITY_MISMATCH");
   if (Object.entries(COMPATIBILITY).some(([key, value]) => compatibility[key] !== value)) {
     throw new ReleaseArtifactVerificationError("RELEASE_COMPATIBILITY_MISMATCH");
+  }
+  const releaseNotes = record(metadata.releaseNotes, ["file", "sha256", "changelogSectionSha256"], "RELEASE_NOTES_MISMATCH");
+  if (releaseNotes.file !== "release-notes.md" || typeof releaseNotes.sha256 !== "string"
+    || typeof releaseNotes.changelogSectionSha256 !== "string"
+    || !/^sha256:[0-9a-f]{64}$/u.test(releaseNotes.changelogSectionSha256)) {
+    throw new ReleaseArtifactVerificationError("RELEASE_NOTES_MISMATCH");
+  }
+  try {
+    const notes = await readFile(path.join(directory, releaseNotes.file), "utf8");
+    if (sha256(new TextEncoder().encode(notes)) !== releaseNotes.sha256) throw new Error();
+    assertReleaseNotes(notes, version);
+    for (const [key, value] of Object.entries(COMPATIBILITY)) {
+      if (!notes.includes(`- \`${key}\`: \`${value}\``)) throw new Error();
+    }
+  } catch {
+    throw new ReleaseArtifactVerificationError("RELEASE_NOTES_MISMATCH");
   }
   const artifacts = metadata.artifacts.map((candidate) => record(candidate, ["name", "bytes", "sha256", "inventory"], "RELEASE_METADATA_INVALID"));
   const names = artifacts.map((artifact) => artifact.name).sort();

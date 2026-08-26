@@ -22,15 +22,18 @@ import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { isChangelogMetaCommit } from "../release/cli/changelog-policy.js";
+
 const repository = path.resolve(import.meta.dirname, "..");
 const checkOnly = process.argv.includes("--check");
 const outputFile = process.argv.slice(2).filter((arg) => arg !== "--check")[0] ?? path.join(repository, "CHANGELOG.md");
 
 function gitLog(range: string): string[] {
   // hash + subject from one call; per-commit files via diff-tree (no
-  // dependency on git log --name-only block formatting). A commit whose only
-  // changed file is CHANGELOG.md is the regen meta-commit and is excluded so
-  // the committed file equals what git history produces.
+  // dependency on git log --name-only block formatting). Commits whose only
+  // changed files are generated release evidence are excluded so the
+  // committed changelog and immutable candidate archives do not recursively
+  // change the release notes they bind.
   const args = ["log", "--no-merges", "--format=%H%x09%s", ...(range === "" ? [] : [range])];
   const lines = execFileSync("git", args, { cwd: repository, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 })
     .trim().split("\n").filter((line) => line.length > 0);
@@ -40,7 +43,7 @@ function gitLog(range: string): string[] {
     const files = execFileSync("git", ["diff-tree", "--no-commit-id", "--name-only", "-r", hash], {
       cwd: repository, encoding: "utf8",
     }).trim().split("\n").filter((file) => file.length > 0);
-    if (files.length === 1 && files[0] === "CHANGELOG.md") continue;
+    if (isChangelogMetaCommit(files)) continue;
     messages.push(subject);
   }
   return messages;

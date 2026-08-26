@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
+import { bindLocalPackageCandidate, ensureDshProfileInstallationPolicy } from "./dsh-profile-installation.js";
 
 const require = createRequire(import.meta.url);
 const repository = path.resolve(import.meta.dirname, "..");
 const defaultWorktree = path.resolve(repository, "..");
+const coreVersion = (require(path.join(repository, "package.json")) as { readonly version: string }).version;
 
 export function dshExecutable(): string {
   const manifestPath = require.resolve("@deepseek-ai/dsh/package.json");
@@ -235,6 +236,12 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
       writeFile(defaults.paths.credentialStorePath, "version: 1\nrefs:\n  QUALIFICATION_KEY: unused-for-list\n", "utf8"),
     ]);
     await ensureDshProfileInstallationPolicy("web", (args) => runDsh(dshHome, worktree, args));
+    await bindLocalPackageCandidate(
+      path.join(dshHome, "profiles/web"),
+      "wsr-execution",
+      coreVersion,
+      coreArchive,
+    );
     runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", coreArchive]);
     runDsh(dshHome, worktree, ["plugin", "--profile", "web", "add", "--workspace-root", pluginArchive]);
     await writeFile(path.join(dshHome, "profiles/web/cordis.patch.yml"), [

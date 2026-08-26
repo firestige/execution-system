@@ -73,7 +73,9 @@ Implement the requested change and preserve existing user edits.
 
 ## 工作区权威
 
-插件从不替换进程 cwd。在 [#93](https://github.com/firestige/workflow-self-recursive/issues/93) 过渡期，需要选择 worktree 的操作使用调用会话的精确注册工作区；仅当调用 Agent 是当前活跃实例、DSH workspace registry 将会话 `cwd` 解析为绝对规范工作区、且该工作区记录会话为成员时才被接受——否则返回 `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`。该权威是调用级且精确的；不接纳公共父路径或兄弟路径。[Issue #94](https://github.com/firestige/workflow-self-recursive/issues/94) 负责后续由 Delivery 选择 worktree 及其独立生命周期。
+插件从不替换进程 cwd，也不把 raw path 当作持久 worktree 权威。选择或恢复 Delivery 的操作必须先证明：调用 Agent 是当前活跃实例、DSH workspace registry 把该 Session 的 `cwd` 解析为唯一的绝对规范工作区、且该工作区包含精确 Session；否则返回 `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`。随后 Intake 只向 private Execution control 传递 frozen、typed、invocation-only authorization；Execution 校验路径精确相等、推导 Git worktree root，并写入 Manifest/current-slot。该 authorization 不持久化，也不接纳父目录或兄弟目录。
+
+Session↔Delivery 与 worktree↔current Delivery 均排他。已绑定 Session 二次 create 返回 `SESSION_INTAKE_BOUND`；第二 Session 不能 claim 已绑定 Delivery（`DELIVERY_INTAKE_BOUND`）。Session 丢失只把展示绑定变为 `DETACHED`，绝不释放 worktree。显式 recover 要求未绑定 Session 对精确持久化 worktree 重新授权。private binding 文件使用 `execution.intake-bindings@2.0.0`，按 Delivery ID、worktree、correlation 与 immutable `deliveryBindingIdentity` 联结；v1 记录只能在 Execution 完整恢复后逐条 exact join 唯一 recovered Delivery 才迁移，否则 startup fail closed。
 
 ## Model Experience
 
@@ -123,7 +125,7 @@ Implement the requested change and preserve existing user edits.
 
 - **社区项目** —— Workflow Self-Recursive 是独立社区项目，与 DeepSeek AI 无隶属关系、未获其背书。
 - **凭据** —— API key 在 `configFile` 引用的外部 DSH credential 文件中 provision；插件将配置原样传给公共 bootstrap，不解析或复制 Provider/credential 设置，`--dump-config` 永不包含 key。
-- **权威** —— 工作区权威是调用级且精确的（#93/#94）；插件不接纳公共父路径或兄弟路径。
+- **权威** —— Session/workspace 权威是调用级且精确的；插件不接纳公共父路径或兄弟路径，Manifest/current-slot 才是持久 worktree 权威。
 - **无 install script、无遥测** —— 包不带安装钩子；Observation 默认关闭，启用时是有界的、尽力而为的 OTLP 导出。
 - **开发者预览** —— `0.1.x` 面向个人与小团队的可信本地使用；可能存在破坏兼容性的变更。安装风险自负。
 
@@ -141,7 +143,7 @@ WSR 不拦截这些包操作。Execution 状态根、Manifest/当前槽位、Run
 ## 已知限制
 
 - **开发者预览** —— `0.1.x` 是 MVP candidate；可能存在破坏兼容性的变更。
-- **临时 worktree** —— 在 #94 之前会话工作区作为临时 worktree；权威是调用级且精确的。
+- **可信本地 Session 权威** —— host Session/workspace registry 是调用权威；不可用、歧义或不匹配一律 fail closed。
 - **仅 DSH 交互面** —— 发行版以自带 `web` profile 为交互组装；自定义 profile 不是交互式 Intake 面。
 
 ## 相关

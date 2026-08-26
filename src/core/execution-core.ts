@@ -7,7 +7,7 @@ import type {
   ExecutionRecovery,
 } from "../application/execution-application.js";
 import type { DeliveryAdmissionHolder, DeliveryAdmissionService } from "../delivery/index.js";
-import { CoreRequestError, captureRequestWorktree, createPrebindingCommand, type ExecutionEnvironment, type ExecutionPrebindingCommand } from "./request.js";
+import { CoreRequestError, admitConversationWorkspaceAuthorization, captureRequestWorktree, createPrebindingCommand, type ConversationWorkspaceAuthorization, type ExecutionEnvironment, type ExecutionPrebindingCommand } from "./request.js";
 import { WorktreeAdmissionError, canonicalizeWorktree } from "./worktree.js";
 
 export interface ExecutionPrebindingReady {
@@ -25,7 +25,7 @@ function failure(code: ExecutionFailure["code"]): ExecutionFailure {
 export class ExecutionCoreAdmission {
   constructor(readonly environment: ExecutionEnvironment, readonly admission: DeliveryAdmissionService) {}
 
-  async begin(candidate: unknown, authority?: Readonly<{ exactWorktreeRoot: string }>): Promise<CoreAdmissionResult> {
+  async begin(candidate: unknown, authority?: ConversationWorkspaceAuthorization): Promise<CoreAdmissionResult> {
     let requestedWorktree: string;
     try { requestedWorktree = captureRequestWorktree(candidate); }
     catch { return failure("INVALID_EXECUTION_REQUEST"); }
@@ -33,11 +33,10 @@ export class ExecutionCoreAdmission {
     try {
       let allowedRoots = this.environment.allowedWorktreeRoots;
       if (authority !== undefined) {
-        if (authority === null || typeof authority !== "object" || Array.isArray(authority)
-          || Reflect.ownKeys(authority).length !== 1 || typeof authority.exactWorktreeRoot !== "string") {
-          throw new WorktreeAdmissionError("WORKTREE_OUT_OF_SCOPE");
-        }
-        const [requested, exactRoot] = await Promise.all([realpath(requestedWorktree), realpath(authority.exactWorktreeRoot)]);
+        let admitted: ConversationWorkspaceAuthorization;
+        try { admitted = admitConversationWorkspaceAuthorization(authority); }
+        catch { throw new WorktreeAdmissionError("WORKTREE_OUT_OF_SCOPE"); }
+        const [requested, exactRoot] = await Promise.all([realpath(requestedWorktree), realpath(admitted.path)]);
         if (requested !== exactRoot) throw new WorktreeAdmissionError("WORKTREE_OUT_OF_SCOPE");
         allowedRoots = [exactRoot];
       }

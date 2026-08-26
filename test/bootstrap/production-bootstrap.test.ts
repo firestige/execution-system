@@ -133,13 +133,13 @@ describe("Wave 6 production bootstrap", () => {
     const second = broker.waitForDelivery("correlation-waiters", 100);
     await expect(first).resolves.toBeUndefined();
     broker.expect("/waiter-worktree", "correlation-waiters");
-    broker.register("delivery-waiter", "/waiter-worktree", "fixture@1.0.0");
+    broker.register("delivery-waiter", "/waiter-worktree", "fixture@1.0.0", `sha256:${"a".repeat(64)}`);
     await expect(second).resolves.toMatchObject({ deliveryId: "delivery-waiter" });
   });
 
   it("projects an ordinary attachment-free chat answer into a string Action response schema", async () => {
     const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }));
-    broker.register("delivery-string-input", "/worktree", "fixture@1.0.0");
+    broker.register("delivery-string-input", "/worktree", "fixture@1.0.0", `sha256:${"b".repeat(64)}`);
     const episode = {
       thread: { delivery: { deliveryIdentity: "delivery-string-input", deliveryGeneration: 1 }, threadIdentity: "thread-1" },
       action: "action-1", invocationIdentity: "invocation-1", attempt: 1,
@@ -162,7 +162,7 @@ describe("Wave 6 production bootstrap", () => {
     const presentations: any[] = [];
     const broker = new ProductionInteractionBroker(Object.freeze({ async publish(message: any) { presentations.push(message); } }));
     broker.expect("/worktree", "intake-correlation");
-    broker.register("delivery-wait", "/worktree", "fixture@1.0.0");
+    broker.register("delivery-wait", "/worktree", "fixture@1.0.0", `sha256:${"c".repeat(64)}`);
     const request = Object.freeze({
       controlIdentity: "control-1", correlationIdentity: "correlation-1", kind: "user",
       content: Object.freeze({ question: "Confirm?" }), contentIdentity: "sha256:request",
@@ -271,10 +271,18 @@ describe("Wave 6 production bootstrap", () => {
     await application.start();
 
     await expect(application.execute(request)).resolves.toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
-    await expect(control.executeFromConversationWorkspace(request, path.dirname(canonicalConversation)))
+    await expect(control.executeFromConversationWorkspace(request, Object.freeze({
+      schemaVersion: "execution.conversation-workspace-authorization@1.0.0",
+      sessionKey: "session-a", workspaceId: "workspace-a", path: path.dirname(canonicalConversation),
+    })))
       .resolves.toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
-    await expect(control.executeFromConversationWorkspace(request, canonicalConversation))
+    await expect(control.executeFromConversationWorkspace(request, Object.freeze({
+      schemaVersion: "execution.conversation-workspace-authorization@1.0.0",
+      sessionKey: "session-a", workspaceId: "workspace-a", path: canonicalConversation,
+    })))
       .resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
+    await expect(control.executeFromConversationWorkspace(request, canonicalConversation as never))
+      .resolves.toMatchObject({ kind: "ERROR", code: "WORKTREE_OUT_OF_SCOPE" });
     await application.close();
   });
 

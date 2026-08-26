@@ -1,3 +1,8 @@
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { parse, stringify } from "yaml";
+
 export type DshProfileCommandRunner = (args: readonly string[]) => Promise<string> | string;
 
 function parseAllowBuilds(output: string): Record<string, boolean> {
@@ -30,4 +35,29 @@ export async function ensureDshProfileInstallationPolicy(
     "allowBuilds", JSON.stringify(allowBuilds),
   ]);
   return Object.freeze(allowBuilds);
+}
+
+export async function bindLocalPackageCandidate(
+  profileDirectory: string,
+  packageName: string,
+  version: string,
+  archive: string,
+): Promise<void> {
+  if (!path.isAbsolute(profileDirectory) || !path.isAbsolute(archive)) {
+    throw new TypeError("DSH_LOCAL_CANDIDATE_PATH_NOT_ABSOLUTE");
+  }
+  if (packageName.length === 0 || version.length === 0) {
+    throw new TypeError("DSH_LOCAL_CANDIDATE_COORDINATE_INVALID");
+  }
+  const workspaceFile = path.join(profileDirectory, "pnpm-workspace.yaml");
+  const document = parse(await readFile(workspaceFile, "utf8")) as Record<string, unknown>;
+  const existing = document.overrides;
+  if (existing !== undefined && (existing === null || typeof existing !== "object" || Array.isArray(existing))) {
+    throw new TypeError("DSH_LOCAL_CANDIDATE_OVERRIDES_INVALID");
+  }
+  document.overrides = {
+    ...(existing as Record<string, unknown> | undefined),
+    [`${packageName}@${version}`]: `file:${archive}`,
+  };
+  await writeFile(workspaceFile, stringify(document), "utf8");
 }

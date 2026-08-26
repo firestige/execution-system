@@ -73,7 +73,9 @@ The sidebar tabs display only read-only control-plane results. In the chat timel
 
 ## Worktree authority
 
-The plugin never substitutes the process cwd. For the [#93](https://github.com/firestige/workflow-self-recursive/issues/93) transition, an operation that must select a worktree uses the invoking conversation's exact registered workspace; it is accepted only when the invoking Agent is the current live instance, the DSH workspace registry resolves the session `cwd` to an absolute canonical workspace, and that workspace records the session as a member — otherwise `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`. This authority is invocation-scoped and exact; it admits neither a common parent nor a sibling path. [Issue #94](https://github.com/firestige/workflow-self-recursive/issues/94) owns the later Delivery-selected worktree and its independent lifecycle.
+The plugin never substitutes the process cwd or passes a raw path as durable worktree authority. An operation that selects or recovers a Delivery first proves that the invoking Agent is the current live instance, the DSH workspace registry resolves its session `cwd` to one absolute canonical workspace, and that workspace records the exact Session as a member — otherwise `DSH_INTAKE_WORKSPACE_UNAUTHORIZED`. Intake then passes a frozen, typed, invocation-only authorization to private Execution control; Execution verifies exact path equality, derives the Git worktree root, and persists it in Manifest/current-slot. The authorization is never stored and admits neither a parent nor a sibling.
+
+Session↔Delivery and worktree↔current Delivery are exclusive. A second create from a bound Session returns `SESSION_INTAKE_BOUND`; a second Session cannot claim a bound Delivery (`DELIVERY_INTAKE_BOUND`). Session loss makes presentation `DETACHED` but never releases the worktree. Explicit recover requires an authorized unbound Session on the exact persisted worktree. The private binding file uses `execution.intake-bindings@2.0.0` and joins Delivery ID, worktree, correlation, and immutable `deliveryBindingIdentity`; v1 records migrate only after complete Execution recovery and only when each record exact-joins one recovered Delivery, otherwise startup fails closed.
 
 ## Model Experience
 
@@ -141,7 +143,7 @@ WSR does not intercept those package operations. The Execution state root, Manif
 ## Known Limitations
 
 - **Developer preview** — `0.1.x` is an MVP candidate; compatibility-breaking changes are possible.
-- **Provisional worktree** — conversation workspace stands in until #94; authority is invocation-scoped.
+- **Trusted-local Session authority** — the host Session/workspace registry is the invocation authority; unavailable, ambiguous, or mismatched registry state fails closed.
 - **DSH-only interactive surface** — the shipped `web` profile is the reference; custom profiles are not an interactive Intake surface.
 
 ## Related

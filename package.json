@@ -1,6 +1,6 @@
 {
   "name": "wsr-execution",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": false,
   "type": "module",
   "exports": {
@@ -40,6 +40,14 @@
     "quickstart:prepare": "pnpm install --frozen-lockfile && node --import tsx scripts/prepare-local-e2e.ts",
     "release:artifacts": "node --import tsx scripts/build-release-artifacts.ts",
     "release:verify": "node --import tsx scripts/verify-release-artifacts.ts",
+    "release:config:verify": "node --import tsx release/cli/verify-release-config.ts",
+    "release:matrix:verify": "node --import tsx release/cli/verify-release-matrix.ts",
+    "release:check-coordinates": "node --import tsx release/cli/verify-execution-coordinates.ts",
+    "release:publish-npm": "node --import tsx release/cli/publish-npm-pair.ts",
+    "release:simulate": "node --import tsx release/cli/simulate-release-lifecycle.ts",
+    "release:notes:verify": "node --import tsx release/cli/verify-release-notes.ts",
+    "release:prepack-guard": "node --import tsx release/cli/prepack-guard.ts",
+    "release:prepublish-guard": "node --import tsx release/cli/prepublish-guard.ts",
     "release:policy": "node --import tsx scripts/release-promotion-policy.ts",
     "qualify:dsh-interactive": "node --import tsx scripts/qualify-dsh-interactive-intake.ts",
     "qualify:dsh-product": "node --import tsx scripts/qualify-dsh-product-e2e.ts",
@@ -48,7 +56,9 @@
     "verify:dsh-intake": "node --import tsx scripts/verify-dsh-intake-distribution.ts",
     "qualify:dsh-package-lifecycle": "node --import tsx scripts/qualify-dsh-package-lifecycle.ts",
     "changelog:generate": "node --import tsx scripts/generate-changelog.ts",
-    "changelog:check": "node --import tsx scripts/generate-changelog.ts --check"
+    "changelog:check": "node --import tsx scripts/generate-changelog.ts --check",
+    "prepack": "pnpm release:prepack-guard",
+    "prepublishOnly": "pnpm release:prepublish-guard"
   },
   "dependencies": {
     "@langchain/core": "1.2.9",

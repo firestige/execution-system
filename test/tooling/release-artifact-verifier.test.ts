@@ -20,12 +20,17 @@ async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "execution-release-verifier-"));
   await writeFile(path.join(root, names.core), "core");
   await writeFile(path.join(root, names.plugin), "plugin");
+  const notes = "# WSR Execution 0.1.0\n\n## What's new\n\n- fixture\n\n## Compatibility\n\n- `node`: `>=24.12.0 <25`\n- `dsh`: `0.1.1-rc.2`\n- `workflowContract`: `agentops.workflow-dsl@1.1.0`\n- `observationContract`: `agentops.observation@1.0.0`\n\n## Upgrade guide\n\nInstall both packages at `0.1.0`.\n";
+  await writeFile(path.join(root, "release-notes.md"), notes);
   const metadata = {
     schemaVersion: "execution.release@1.0.0",
     version: "0.1.0",
     compatibility: {
       node: ">=24.12.0 <25", dsh: "0.1.1-rc.2",
       workflowContract: "agentops.workflow-dsl@1.1.0", observationContract: "agentops.observation@1.0.0",
+    },
+    releaseNotes: {
+      file: "release-notes.md", sha256: digest(notes), changelogSectionSha256: digest("fixture changelog"),
     },
     artifacts: [
       { name: names.plugin, bytes: 6, sha256: digest("plugin"), inventory: ["package/package.json", "package/skills/workflow-execution/SKILL.md"] },
@@ -79,6 +84,10 @@ describe("Iteration 3 release artifact verifier", () => {
     embedded.metadata.artifacts[0]!.inventory.push("package/workflow-packages/implementation-workflow/package.yaml");
     await writeFile(path.join(embedded.root, "release-metadata.json"), JSON.stringify(embedded.metadata));
     await expect(verifyExecutionReleaseArtifacts(embedded.root)).rejects.toMatchObject({ code: "RELEASE_ARTIFACT_INVENTORY_INVALID" });
+
+    const notes = await fixture();
+    await writeFile(path.join(notes.root, "release-notes.md"), "changed");
+    await expect(verifyExecutionReleaseArtifacts(notes.root)).rejects.toMatchObject({ code: "RELEASE_NOTES_MISMATCH" });
   });
 
   it("requires one exact publication record for each independently distributed package", async () => {

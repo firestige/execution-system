@@ -174,8 +174,7 @@ window.__ModuleLoader__.load({
         return { ...context.state, presentation: parsePresentation(match.event?.data?.text) };
       },
       buildViewNode(context) {
-        if (context.state?.presentation === undefined
-          || (context.state.presentation.kind === "terminal-result" && context.state.presentation.data.outcome === "SUCCEEDED")) return null;
+        if (context.state?.presentation === undefined) return null;
         return {
           key: context.key,
           kind: "wsr-interaction",

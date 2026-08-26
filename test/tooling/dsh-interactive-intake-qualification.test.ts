@@ -13,6 +13,7 @@ function pack(source: string, destination: string): string {
   const output = execFileSync("npm", ["pack", "--silent", "--pack-destination", destination], {
     cwd: source,
     encoding: "utf8",
+    env: { ...process.env, WSR_RELEASE_PACK_MODE: "verified-builder" },
   }).trim();
   return path.join(destination, output.split("\n").at(-1)!);
 }

@@ -96,7 +96,7 @@ describe("DSH official WSR command view", () => {
     ["delivery-status", { state: "RESULT_UNRESOLVED", created: false, reason: "CURRENT_DELIVERY_EXISTS" }, "No new Workflow Delivery created · CURRENT_DELIVERY_EXISTS · RESULT_UNRESOLVED"],
     ["action-output", { content: { text: "hello" } }, "Action output"],
     ["action-input-request", { prompt: { question: "Continue?" } }, "Action input requested"],
-    ["terminal-result", { outcome: "FAILED" }, "Workflow finished · FAILED"],
+    ["terminal-result", { outcome: "SUCCEEDED" }, "Workflow finished · SUCCEEDED"],
   ])("renders the %s presentation", async (kind, data, expected) => {
     const { components, definitions } = await loadClient();
     const definition = definitions.find((candidate) => candidate.kind === "wsr-interaction");
@@ -127,25 +127,6 @@ describe("DSH official WSR command view", () => {
     expect(rendered.children[0].type).toBe("div");
     expect(rendered.children[0].props.style.fontFamily).toBe("inherit");
     expect(textOf(rendered)).toContain(expected);
-  });
-
-  it("keeps a successful Workflow terminal marker out of chat so the answer actions remain last", async () => {
-    const { definitions } = await loadClient();
-    const definition = definitions.find((candidate) => candidate.kind === "wsr-interaction");
-    const run = { type: "command/run", seq: 10, time: 20, data: {
-      commandId: "presentation-command-1", name: "wsr", source: { kind: "plugin", plugin: "workflow-execution" },
-    } };
-    const done = { type: "command/done", seq: 11, time: 21, data: { commandId: "presentation-command-1", kind: "success", text: JSON.stringify({
-      schemaVersion: "wsr.presentation@1.0.0", correlation: "presentation-1", kind: "terminal-result", data: { outcome: "SUCCEEDED" },
-    }) } };
-    const startMatch = { event: run, location: { kind: "session" }, role: "start" };
-    const initial = definition.start({ key: "wsr-interaction:presentation-command-1" }, startMatch);
-    const state = definition.update({ state: initial }, { event: done, location: { kind: "session" }, role: "update" });
-
-    expect(definition.buildViewNode({
-      key: "wsr-interaction:presentation-command-1", id: "presentation-command-1", state,
-      start: startMatch, matches: [], current: new Map(),
-    })).toBeNull();
   });
 
   it("defensively renders only visible text from a native Action block array", async () => {

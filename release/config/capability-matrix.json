@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "wsr.release-capability-matrix@1.0.0",
+  "components": [
+    {
+      "repository": "firestige/execution-system",
+      "assetMode": "npm-pair",
+      "publisherAdapter": "npm-pair+dsh+github-release",
+      "releaseMode": "active"
+    },
+    {
+      "repository": "firestige/evidence-system",
+      "assetMode": "python-wheel-sdist+oci",
+      "publisherAdapter": "python-github-release+ghcr",
+      "releaseMode": "active"
+    },
+    {
+      "repository": "firestige/system-contracts",
+      "assetMode": "contract-publication-records",
+      "publisherAdapter": "contract-publication+github-release",
+      "releaseMode": "active"
+    },
+    {
+      "repository": "firestige/workflow-package",
+      "assetMode": "workflow-assets",
+      "publisherAdapter": "workflow-assets+github-release",
+      "releaseMode": "active"
+    },
+    {
+      "repository": "firestige/evolution-system",
+      "assetMode": "implementation-language-selected",
+      "publisherAdapter": "implementation-language-selected",
+      "releaseMode": "parameter-only"
+    },
+    {
+      "repository": "firestige/bi",
+      "assetMode": "not-in-iter4",
+      "publisherAdapter": "not-in-iter4",
+      "releaseMode": "excluded"
+    }
+  ]
+}
