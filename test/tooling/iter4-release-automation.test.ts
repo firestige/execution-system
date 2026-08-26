@@ -194,6 +194,7 @@ describe("Iteration 4 release automation", () => {
     expect(promote).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
     expect(promote).toContain("repositories: execution-system");
     expect(promote).toContain("permission-contents: write");
+    expect(promote).toContain("permission-workflows: write");
     expect(promote.indexOf("actions/create-github-app-token@"))
       .toBeGreaterThan(promote.indexOf("Re-run remote artifact-install E2E"));
     expect(promote).toContain("GH_TOKEN: ${{ steps.release-app-token.outputs.token }}");

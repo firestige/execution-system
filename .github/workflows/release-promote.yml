@@ -104,6 +104,7 @@ jobs:
           owner: firestige
           repositories: execution-system
           permission-contents: write
+          permission-workflows: write
 
       - name: Create final tag and Release as the last operation
         env:
