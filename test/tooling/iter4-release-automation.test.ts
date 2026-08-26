@@ -155,6 +155,8 @@ describe("Iteration 4 release automation", () => {
     expect(candidate).toContain("push:");
     expect(candidate).toContain("release/request.json");
     expect(candidate).toContain("steps.request.outputs.candidate_tag");
+    expect(candidate).toContain("steps.candidate.outputs.exists");
+    expect(candidate).toContain('gh release download "$CANDIDATE_TAG" --pattern "$NAME"');
     expect(candidate).toContain("authority_manifest");
     expect(candidate).toContain("materialize-unified-release-candidate.ts");
     expect(candidate).not.toContain('pnpm release:artifacts "$RUNNER_TEMP/local-release"');

@@ -114,7 +114,8 @@ jobs:
           npm --prefix system-contracts/workflow-dsl ci
           npm --prefix system-contracts/observation ci
 
-      - name: Validate candidate coordinates and local evidence reference
+      - name: Validate coordinates and resolve resumable RC state
+        id: candidate
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,12 +129,14 @@ jobs:
             *) echo "local_manual_e2e_evidence must be a firestige GitHub issue/comment URL" >&2; exit 1 ;;
           esac
           if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
-            echo "candidate tag already exists" >&2
-            exit 1
-          fi
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" >/dev/null 2>&1; then
-            echo "candidate git tag already exists" >&2
-            exit 1
+            test "$(gh release view "$CANDIDATE_TAG" --json isPrerelease --jq .isPrerelease)" = true
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$GITHUB_SHA"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" >/dev/null 2>&1; then
+              test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$GITHUB_SHA"
+            fi
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run full component gates
@@ -171,16 +174,28 @@ jobs:
             "$RUNNER_TEMP/local-release/wsr-dsh-intake-$VERSION.tgz" \
             "$GITHUB_WORKSPACE/execution-system"
 
-      - name: Create RC prerelease after local qualification
+      - name: Create or resume RC with exact local assets
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
+          RC_EXISTS: ${{ steps.candidate.outputs.exists }}
         run: |
-          gh release create "$CANDIDATE_TAG" "$RUNNER_TEMP/local-release/"* \
-            --prerelease --target "$GITHUB_SHA" \
-            --title "Execution System $CANDIDATE_TAG" \
-            --notes-file "$RUNNER_TEMP/local-release/release-notes.md"
+          if test "$RC_EXISTS" != true; then
+            gh release create "$CANDIDATE_TAG" --prerelease --target "$GITHUB_SHA" \
+              --title "Execution System $CANDIDATE_TAG" \
+              --notes-file "$RUNNER_TEMP/local-release/release-notes.md"
+          fi
+          mkdir "$RUNNER_TEMP/existing-assets"
+          for FILE in "$RUNNER_TEMP/local-release/"*; do
+            NAME="$(basename "$FILE")"
+            if gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name' | grep -Fxq "$NAME"; then
+              gh release download "$CANDIDATE_TAG" --pattern "$NAME" --dir "$RUNNER_TEMP/existing-assets"
+              cmp "$FILE" "$RUNNER_TEMP/existing-assets/$NAME"
+            else
+              gh release upload "$CANDIDATE_TAG" "$FILE"
+            fi
+          done
 
       - name: Redownload exact prerelease assets
         working-directory: execution-system
@@ -214,4 +229,10 @@ jobs:
           export VERSION METADATA_SHA
           node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({schemaVersion:"execution.release-qualification@1.0.0",packageVersion:process.env.VERSION,candidateTag:process.env.CANDIDATE_TAG,commit:process.env.GITHUB_SHA,artifactMetadataSha256:process.env.METADATA_SHA,localE2E:{status:"PASS",manualEvidence:process.env.LOCAL_E2E},remotePrereleaseE2E:{status:"PASS"}},null,2)+"\n")' \
             "$RUNNER_TEMP/release-qualification.json"
-          gh release upload "$CANDIDATE_TAG" "$RUNNER_TEMP/release-qualification.json"
+          if gh release view "$CANDIDATE_TAG" --json assets --jq '.assets[].name' | grep -Fxq release-qualification.json; then
+            mkdir "$RUNNER_TEMP/existing-qualification"
+            gh release download "$CANDIDATE_TAG" --pattern release-qualification.json --dir "$RUNNER_TEMP/existing-qualification"
+            cmp "$RUNNER_TEMP/release-qualification.json" "$RUNNER_TEMP/existing-qualification/release-qualification.json"
+          else
+            gh release upload "$CANDIDATE_TAG" "$RUNNER_TEMP/release-qualification.json"
+          fi
