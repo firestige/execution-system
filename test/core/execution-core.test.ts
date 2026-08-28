@@ -74,7 +74,7 @@ describe("Execution Core admission", () => {
       canonicalWorktree: f.worktree,
       selector: "implementation@latest",
       prompt: { text: "implement the approved change", attachments: [] },
-      taskSelection: { mode: "NEW_TASK" },
+      taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK" },
       deliveryConfigProjectionIdentity: f.environment.deliveryConfigProjection.identity,
     });
     expect(Object.isFrozen(command)).toBe(true);
@@ -92,7 +92,7 @@ describe("Execution Core admission", () => {
       .begin(request(first.worktree));
     expect(defaultResult).toMatchObject({
       kind: "NEW",
-      command: { taskSelection: { mode: "NEW_TASK" } },
+      command: { taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK" } },
     });
     if (defaultResult.kind === "NEW") await defaultResult.holder.release();
 
@@ -100,11 +100,11 @@ describe("Execution Core admission", () => {
     const namedResult = await new ExecutionCoreAdmission(second.environment, second.admission)
       .begin({
         ...request(second.worktree),
-        taskSelection: { mode: "NEW_TASK", displayName: "Token tuning" },
+        taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK", displayName: "Token tuning" },
       });
     expect(namedResult).toMatchObject({
       kind: "NEW",
-      command: { taskSelection: { mode: "NEW_TASK", displayName: "Token tuning" } },
+      command: { taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK", displayName: "Token tuning" } },
     });
     if (namedResult.kind === "NEW") await namedResult.holder.release();
 
@@ -112,17 +112,19 @@ describe("Execution Core admission", () => {
     const reuseResult = await new ExecutionCoreAdmission(third.environment, third.admission)
       .begin({
         ...request(third.worktree),
-        taskSelection: { mode: "REUSE_TASK", taskId: "task-existing" },
+        taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "REUSE_TASK", taskId: "task-existing" },
       });
     expect(reuseResult).toMatchObject({
       kind: "NEW",
-      command: { taskSelection: { mode: "REUSE_TASK", taskId: "task-existing" } },
+      command: { schemaVersion: "execution.prebinding-command@1.1.0", taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "REUSE_TASK", taskId: "task-existing" } },
     });
     if (reuseResult.kind === "NEW") await reuseResult.holder.release();
   });
 
   it("rejects ambiguous, malformed, or name-only Task reuse choices", async () => {
     for (const taskSelection of [
+      { mode: "NEW_TASK" },
+      { schemaVersion: "execution.task-selection@9.0.0", mode: "NEW_TASK" },
       { mode: "NEW_TASK", taskId: "task-forbidden" },
       { mode: "REUSE_TASK", taskId: "" },
       { mode: "REUSE_TASK", taskId: "task-existing", displayName: "rename" },

@@ -13,8 +13,16 @@ export interface TaskPrompt {
 }
 
 export type TaskSelection =
-  | Readonly<{ readonly mode: "NEW_TASK"; readonly displayName?: string }>
-  | Readonly<{ readonly mode: "REUSE_TASK"; readonly taskId: string }>;
+  | Readonly<{
+    readonly schemaVersion: "execution.task-selection@0.1.0";
+    readonly mode: "NEW_TASK";
+    readonly displayName?: string;
+  }>
+  | Readonly<{
+    readonly schemaVersion: "execution.task-selection@0.1.0";
+    readonly mode: "REUSE_TASK";
+    readonly taskId: string;
+  }>;
 
 /** Host-neutral request accepted by every Execution Intake Adapter. */
 export interface ExecutionRequest {

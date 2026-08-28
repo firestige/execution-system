@@ -106,14 +106,27 @@ function taskPrompt(value: unknown): TaskPrompt {
 }
 
 function taskSelection(value: unknown): TaskSelection {
-  if (value === undefined) return Object.freeze({ mode: "NEW_TASK" });
-  const candidate = exactObject(value, ["mode"], ["mode", "displayName", "taskId"]);
+  if (value === undefined) return Object.freeze({
+    schemaVersion: "execution.task-selection@0.1.0",
+    mode: "NEW_TASK",
+  });
+  const candidate = exactObject(
+    value,
+    ["schemaVersion", "mode"],
+    ["schemaVersion", "mode", "displayName", "taskId"],
+  );
+  if (candidate.schemaVersion !== "execution.task-selection@0.1.0") {
+    throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+  }
   if (candidate.mode === "NEW_TASK") {
     if (candidate.taskId !== undefined) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
-    if (candidate.displayName === undefined) return Object.freeze({ mode: "NEW_TASK" });
+    if (candidate.displayName === undefined) return Object.freeze({
+      schemaVersion: candidate.schemaVersion,
+      mode: "NEW_TASK",
+    });
     const displayName = boundedString(candidate.displayName, 1, 160);
     if (displayName.trim() !== displayName) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
-    return Object.freeze({ mode: "NEW_TASK", displayName });
+    return Object.freeze({ schemaVersion: candidate.schemaVersion, mode: "NEW_TASK", displayName });
   }
   if (candidate.mode === "REUSE_TASK") {
     if (candidate.displayName !== undefined) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
@@ -121,7 +134,7 @@ function taskSelection(value: unknown): TaskSelection {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/u.test(taskId)) {
       throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
     }
-    return Object.freeze({ mode: "REUSE_TASK", taskId });
+    return Object.freeze({ schemaVersion: candidate.schemaVersion, mode: "REUSE_TASK", taskId });
   }
   throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
 }

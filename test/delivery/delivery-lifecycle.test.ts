@@ -116,7 +116,10 @@ async function fixture(runtimeResult: "start-failed" | "unknown" | "invalid" | "
       canonicalWorktree: worktree,
       selector: "implementation@1.1.0",
       prompt: Object.freeze({ text: "implement", attachments: Object.freeze([]) }),
-      taskSelection: Object.freeze({ mode: "NEW_TASK" as const }),
+      taskSelection: Object.freeze({
+        schemaVersion: "execution.task-selection@0.1.0" as const,
+        mode: "NEW_TASK" as const,
+      }),
       refresh: false,
       deliveryConfigProjection: projection().value,
       deliveryConfigProjectionIdentity: projection().identity,
@@ -132,7 +135,11 @@ describe("M01 production Delivery lifecycle", () => {
       ...fresh.ready,
       command: Object.freeze({
         ...fresh.ready.command,
-        taskSelection: Object.freeze({ mode: "NEW_TASK" as const, displayName: "Token tuning" }),
+        taskSelection: Object.freeze({
+          schemaVersion: "execution.task-selection@0.1.0" as const,
+          mode: "NEW_TASK" as const,
+          displayName: "Token tuning",
+        }),
       }),
     }));
     const freshSlot = await fresh.slots.read(fresh.worktree);
@@ -147,7 +154,11 @@ describe("M01 production Delivery lifecycle", () => {
       ...reused.ready,
       command: Object.freeze({
         ...reused.ready.command,
-        taskSelection: Object.freeze({ mode: "REUSE_TASK" as const, taskId: "task-existing" }),
+        taskSelection: Object.freeze({
+          schemaVersion: "execution.task-selection@0.1.0" as const,
+          mode: "REUSE_TASK" as const,
+          taskId: "task-existing",
+        }),
       }),
     }));
     const reusedSlot = await reused.slots.read(reused.worktree);
