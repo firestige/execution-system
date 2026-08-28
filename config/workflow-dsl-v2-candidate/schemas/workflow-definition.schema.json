@@ -598,3 +598,303 @@
         },
         "kind": {
           "const": "action"
+        },
+        "action": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "type": "boolean",
+          "default": false
+        },
+        "routing": {
+          "$ref": "#/$defs/routing"
+        }
+      },
+      "additionalProperties": false
+    },
+    "parallelNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "branches",
+        "maxConcurrency",
+        "join"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "parallel"
+        },
+        "branches": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "action",
+              "required"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "action": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "required": {
+                "const": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "selection": {
+          "type": "object",
+          "required": [
+            "source"
+          ],
+          "properties": {
+            "source": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/sourcePort"
+            }
+          },
+          "additionalProperties": false
+        },
+        "join": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "collect"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "operator",
+                "inputType"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "reducer"
+                },
+                "operator": {
+                  "enum": [
+                    "sum",
+                    "min",
+                    "max",
+                    "all",
+                    "any",
+                    "set-union"
+                  ]
+                },
+                "inputType": {
+                  "enum": [
+                    "safe-integer",
+                    "boolean",
+                    "non-null-json-scalar-array"
+                  ]
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "sum",
+                          "min",
+                          "max"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputType": {
+                        "const": "safe-integer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "all",
+                          "any"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputType": {
+                        "const": "boolean"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "const": "set-union"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputType": {
+                        "const": "non-null-json-scalar-array"
+                      }
+                    }
+                  }
+                }
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "action"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "aggregator"
+                },
+                "action": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "type": "boolean",
+          "default": false
+        },
+        "routing": {
+          "$ref": "#/$defs/routing"
+        }
+      },
+      "additionalProperties": false
+    },
+    "waitNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "wait"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "wait"
+        },
+        "wait": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "waitRenewalNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "wait",
+        "maxRenewals"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "wait-renewal"
+        },
+        "wait": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "maxRenewals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        }
+      },
+      "additionalProperties": false
+    },
+    "recoveryNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "recovery"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "recovery"
+        },
+        "recovery": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "action": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
