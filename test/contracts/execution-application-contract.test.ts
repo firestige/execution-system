@@ -34,11 +34,27 @@ describe("host-neutral Execution application contract", () => {
   });
 
   it("models Task identity choice independently from the TaskPrompt", () => {
-    const createNew: TaskSelection = { mode: "NEW_TASK", displayName: "Token tuning" };
-    const reuse: TaskSelection = { mode: "REUSE_TASK", taskId: "task-existing" };
+    const createNew: TaskSelection = {
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "NEW_TASK",
+      displayName: "Token tuning",
+    };
+    const reuse: TaskSelection = {
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "REUSE_TASK",
+      taskId: "task-existing",
+    };
 
-    expect(createNew).toEqual({ mode: "NEW_TASK", displayName: "Token tuning" });
-    expect(reuse).toEqual({ mode: "REUSE_TASK", taskId: "task-existing" });
+    expect(createNew).toEqual({
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "NEW_TASK",
+      displayName: "Token tuning",
+    });
+    expect(reuse).toEqual({
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "REUSE_TASK",
+      taskId: "task-existing",
+    });
     expectTypeOf<ExecutionRequest["taskSelection"]>().toEqualTypeOf<
       TaskSelection | undefined
     >();
