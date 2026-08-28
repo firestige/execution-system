@@ -151,7 +151,8 @@ function deliveryOwnerFactIngress(
           standard: Object.freeze({}),
         }));
         emitter.emit(createObservationOwnerFact({
-          owner: "M02", phase: "DELIVERY_TERMINAL", correlation: Object.freeze({ deliveryId: manifest.deliveryId }),
+          owner: "M02", phase: "DELIVERY_TERMINAL",
+          correlation: Object.freeze({ deliveryId: manifest.deliveryId, traceId, spanId }),
           identity: summaryIdentity, signal: "event", eventName: "delivery.summary", familySchema: family.schema,
           fields: Object.freeze({
             C08: family.value, C09: summaryIdentity, C10: outcome, C11: "FINAL", C49: family.schema,

@@ -132,6 +132,8 @@ export interface ObservationEventRecord {
   readonly profile_version: "1.0.0" | "2.0.0";
   readonly record_type: "event";
   readonly event_name: ObservationEventName;
+  readonly trace_id?: string;
+  readonly span_id?: string;
   readonly resource: ObservationResource;
   readonly scope: ObservationScope;
   readonly attributes: Readonly<Record<string, ObservationScalar>>;

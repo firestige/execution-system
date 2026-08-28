@@ -43,6 +43,35 @@ function manifestProjection(deliveryId = "delivery-1", taskId = "task-1", manife
 const taskBindingIdentity = (deliveryId: string): string => `task-binding-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 24)}`;
 
 describe("M03 production owner-fact mapper", () => {
+  it("preserves exact Event Trace/Span correlation for the native LogRecord context", () => {
+    const mapped = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
+      .map(createObservationOwnerFact({
+        owner: "M02",
+        phase: "DELIVERY_TERMINAL",
+        correlation: {
+          deliveryId: "delivery-1",
+          traceId: "1".repeat(32),
+          spanId: "2".repeat(16),
+        },
+        identity: "delivery-summary-1",
+        signal: "event",
+        eventName: "delivery.summary",
+        familySchema: "implementation@1",
+        fields: {
+          C08: "implementation",
+          C09: "delivery-summary-1",
+          C10: "COMPLETED",
+          C11: "FINAL",
+          C49: "implementation@1",
+        },
+      }));
+
+    expect(mapped).toMatchObject({
+      ok: true,
+      record: { trace_id: "1".repeat(32), span_id: "2".repeat(16) },
+    });
+  });
+
   it("maps admission-time Task binding with display metadata outside identity", () => {
     const portable = manifestProjection();
     const mapped = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
