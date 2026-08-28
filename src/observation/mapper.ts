@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+
+import { canonicalJsonBytes } from "../configuration/index.js";
 import { canonicalDigest } from "../contracts/index.js";
 import { EVENT_RULES, PROFILE_ENUMS, PROFILE_FIELDS, type ObservationFieldId, type ObservationScalar } from "./profile.js";
 import type { ObservationDiagnostic, ObservationMappableFact, ObservationRecord, ObservationResource, ObservationScope } from "./types.js";
@@ -6,6 +9,8 @@ const DIGEST = /^[a-f0-9]{64}$/u;
 const TRACE_ID = /^[a-f0-9]{32}$/u;
 const SPAN_ID = /^[a-f0-9]{16}$/u;
 const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/u;
+const IDENTITY = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const STANDARD = new Set(["gen_ai.operation.name","gen_ai.agent.id","gen_ai.agent.name","gen_ai.agent.version","gen_ai.provider.name","gen_ai.request.model","gen_ai.response.model","gen_ai.tool.name","gen_ai.tool.type","gen_ai.tool.call.id","gen_ai.usage.input_tokens","gen_ai.usage.output_tokens","error.type"]);
 
 export interface ObservationMapperConfig { readonly serviceName: string; readonly serviceVersion: string }
@@ -19,8 +24,10 @@ function fieldValid(id: ObservationFieldId, value: ObservationScalar): boolean {
   const definition = PROFILE_FIELDS[id];
   if (definition.type === "integer" && (!Number.isInteger(value) || (value as number) < 0)) return false;
   if (definition.type === "number" && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) return false;
-  const stringLimit = id === "C50" ? 512 : id === "C58" ? 160 : 128;
+  const stringLimit = id === "C59" ? 65_536 : id === "C50" ? 512 : id === "C58" ? 160 : 128;
   if (definition.type === "string" && (typeof value !== "string" || value.length === 0 || value.length > stringLimit)) return false;
+  if (id === "C59" && (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 65_536)) return false;
+  if (id === "C60" && (typeof value !== "string" || !DIGEST.test(value))) return false;
   if (id === "C58" && typeof value === "string" && value.trim() !== value) return false;
   if (id === "C02" && (typeof value !== "string" || !TASK_ID.test(value))) return false;
   if (PROFILE_ENUMS[id] !== undefined && !PROFILE_ENUMS[id]!.includes(value)) return false;
@@ -41,6 +48,7 @@ function familyMatches(fact: ObservationMappableFact): boolean {
 
 function eventComplete(fact: Extract<ObservationMappableFact, { signal: "event" }>): boolean {
   const fields = fact.fields;
+  if (fact.eventName === "task.binding" && !manifestProjectionComplete(fields)) return false;
   if (fact.eventName === "review.finding") {
     const fix = fields.C21 !== undefined || fields.C22 !== undefined;
     const recheck = [fields.C23, fields.C24, fields.C25, fields.C26, fields.C27, fields.C35, fields.C38].some((value) => value !== undefined);
@@ -60,6 +68,69 @@ function eventComplete(fact: Extract<ObservationMappableFact, { signal: "event" 
   }
   if (fact.eventName === "implementation.summary" && typeof fields.I06 === "number" && typeof fields.I07 === "number" && fields.I06 > fields.I07) return false;
   return true;
+}
+
+function plain(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+}
+
+function keys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return Object.keys(value).sort().join(",") === [...expected].sort().join(",");
+}
+
+function manifestProjectionComplete(fields: Readonly<Partial<Record<ObservationFieldId, ObservationScalar>>>): boolean {
+  if (typeof fields.C01 !== "string" || typeof fields.C02 !== "string" || typeof fields.C07 !== "string"
+    || typeof fields.C09 !== "string" || typeof fields.C59 !== "string" || typeof fields.C60 !== "string"
+    || createHash("sha256").update(fields.C59, "utf8").digest("hex") !== fields.C60
+    || fields.C09 !== `task-binding-${createHash("sha256").update(fields.C01, "utf8").digest("hex").slice(0, 24)}`) return false;
+  let projection: unknown;
+  try { projection = JSON.parse(fields.C59); } catch { return false; }
+  if (!plain(projection) || Buffer.from(canonicalJsonBytes(projection as never)).toString("utf8") !== fields.C59
+    || !keys(projection, ["schema_version","delivery_id","task_id","manifest_digest","workflow","repository_model_bindings","roles"])
+    || projection.schema_version !== "execution.delivery-manifest-projection@1.0.0"
+    || projection.delivery_id !== fields.C01 || projection.task_id !== fields.C02 || projection.manifest_digest !== fields.C07
+    || !plain(projection.workflow) || !keys(projection.workflow, ["package_name","exact_package_version","package_digest","workflow_id","workflow_version","snapshot_id","snapshot_digest"])
+    || typeof projection.workflow.package_name !== "string" || !/^[a-z][a-z0-9-]*$/u.test(projection.workflow.package_name)
+    || typeof projection.workflow.exact_package_version !== "string" || typeof projection.workflow.workflow_version !== "string"
+    || !/^\d+\.\d+\.\d+$/u.test(projection.workflow.exact_package_version) || !/^\d+\.\d+\.\d+$/u.test(projection.workflow.workflow_version)
+    || typeof projection.workflow.workflow_id !== "string" || !IDENTITY.test(projection.workflow.workflow_id)
+    || typeof projection.workflow.snapshot_id !== "string" || !IDENTITY.test(projection.workflow.snapshot_id)
+    || typeof projection.workflow.package_digest !== "string" || !SHA256.test(projection.workflow.package_digest)
+    || typeof projection.workflow.snapshot_digest !== "string" || !SHA256.test(projection.workflow.snapshot_digest)
+    || !plain(projection.repository_model_bindings) || !Array.isArray(projection.roles) || projection.roles.length > 128) return false;
+  const repository = projection.repository_model_bindings;
+  if (repository.document_state === "ABSENT") {
+    if (!keys(repository, ["document_state","resolved_map_digest"])) return false;
+  } else if (repository.document_state === "PRESENT") {
+    if (!keys(repository, ["document_state","document_digest","resolved_map_digest"])
+      || typeof repository.document_digest !== "string" || !SHA256.test(repository.document_digest)) return false;
+  } else return false;
+  if (typeof repository.resolved_map_digest !== "string" || !SHA256.test(repository.resolved_map_digest)) return false;
+  const resolvedRoles: Record<string, string>[] = [];
+  let prior = "";
+  for (const role of projection.roles) {
+    if (!plain(role) || !keys(role, ["role_id","role_prompt_identity","role_prompt_digest","agent_provider_id","model_provider_id","model_id","resolution_source"])
+      || typeof role.role_id !== "string" || !IDENTITY.test(role.role_id) || role.role_id <= prior
+      || typeof role.role_prompt_identity !== "string" || !IDENTITY.test(role.role_prompt_identity)
+      || typeof role.role_prompt_digest !== "string" || !SHA256.test(role.role_prompt_digest)
+      || typeof role.agent_provider_id !== "string" || !IDENTITY.test(role.agent_provider_id)
+      || typeof role.model_provider_id !== "string" || !IDENTITY.test(role.model_provider_id)
+      || typeof role.model_id !== "string" || !IDENTITY.test(role.model_id)
+      || (role.resolution_source !== "REPOSITORY" && role.resolution_source !== "EXECUTION_DEFAULT")) return false;
+    prior = role.role_id;
+    resolvedRoles.push({
+      roleId: role.role_id,
+      rolePromptIdentity: role.role_prompt_identity,
+      rolePromptDigest: role.role_prompt_digest,
+      agentProviderId: role.agent_provider_id,
+      modelProviderId: role.model_provider_id,
+      modelId: role.model_id,
+      resolutionSource: role.resolution_source,
+    });
+  }
+  const resolvedDigest = `sha256:${createHash("sha256").update(canonicalJsonBytes(resolvedRoles as never)).digest("hex")}`;
+  return resolvedDigest === repository.resolved_map_digest;
 }
 
 function spanComplete(fact: Extract<ObservationMappableFact, { signal: "span" }>): boolean {

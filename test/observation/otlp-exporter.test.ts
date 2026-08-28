@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,6 +12,7 @@ import {
   createObservationOwnerFact,
   type OtlpTransportDiagnostic,
 } from "../../src/observation/index.js";
+import { canonicalJsonBytes } from "../../src/configuration/index.js";
 
 const require = createRequire(import.meta.url);
 const oracle = require("../../../system-contracts/observation/tools/validator.cjs") as {
@@ -49,11 +51,22 @@ function terminalFact(identity: string) {
 }
 
 function taskBindingFact() {
+  const resolvedMapDigest = `sha256:${createHash("sha256").update("[]").digest("hex")}`;
+  const projection = Buffer.from(canonicalJsonBytes({
+    schema_version: "execution.delivery-manifest-projection@1.0.0",
+    delivery_id: "delivery-1",
+    task_id: "task-1",
+    manifest_digest: "a".repeat(64),
+    workflow: { package_name: "system-design", exact_package_version: "2.0.0", package_digest: `sha256:${"b".repeat(64)}`, workflow_id: "workflow.system-design", workflow_version: "2.0.0", snapshot_id: "snapshot.system-design.2", snapshot_digest: `sha256:${"c".repeat(64)}` },
+    repository_model_bindings: { document_state: "ABSENT", resolved_map_digest: resolvedMapDigest },
+    roles: [],
+  } as never)).toString("utf8");
+  const identity = `task-binding-${createHash("sha256").update("delivery-1").digest("hex").slice(0, 24)}`;
   return createObservationOwnerFact({
     owner: "M01",
     phase: "DELIVERY_BOUND",
     correlation: { deliveryId: "delivery-1" },
-    identity: "task-binding-delivery-1",
+    identity,
     signal: "event",
     eventName: "task.binding",
     familySchema: "implementation@1",
@@ -61,7 +74,9 @@ function taskBindingFact() {
       C01: "delivery-1",
       C02: "task-1",
       C07: "a".repeat(64),
-      C09: "task-binding-delivery-1",
+      C09: identity,
+      C59: projection,
+      C60: createHash("sha256").update(projection).digest("hex"),
     },
   });
 }

@@ -87,7 +87,7 @@ export function createTaskBindingObservationFact(
   fact: DeliveryBoundOwnerFact,
 ): ObservationProfileOwnerFact | undefined {
   const family = observationFamily(fact.workflowIdentity);
-  if (family === undefined) return undefined;
+  if (family === undefined || fact.manifestProjection === undefined || fact.manifestProjectionDigest === undefined) return undefined;
   const identity = `task-binding-${segment(fact.deliveryId).slice(0, 24)}`;
   return createObservationOwnerFact({
     owner: "M01",
@@ -103,6 +103,8 @@ export function createTaskBindingObservationFact(
       C07: fact.deliveryBindingIdentity.replace(/^sha256:/u, ""),
       C09: identity,
       ...(fact.taskDisplayName === undefined ? {} : { C58: fact.taskDisplayName }),
+      C59: fact.manifestProjection,
+      C60: fact.manifestProjectionDigest,
     }),
   });
 }
