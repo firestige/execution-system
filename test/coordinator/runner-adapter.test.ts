@@ -290,6 +290,27 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(await synchronous.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: synchronous.value })).toMatchObject({ ok: true, value: { kind: "terminal" } });
   });
 
+  it("keeps the exact canonical result and terminal inspection across downstream dispositions", async () => {
+    const dispositions = [
+      (observe: any) => observe.mockResolvedValueOnce(undefined),
+      (observe: any) => observe.mockRejectedValueOnce(new Error("downstream rejected")),
+      (observe: any) => observe.mockImplementationOnce(() => { throw new Error("downstream threw"); }),
+      (observe: any) => observe.mockImplementationOnce(() => new Promise<undefined>(() => {})),
+    ];
+    const observations: unknown[] = [];
+
+    for (const configure of dispositions) {
+      const candidate = fixture([]);
+      (candidate.host.start as any).mockResolvedValueOnce(ok({ kind: "terminal-proposal", proposal: terminal(candidate.value) }));
+      configure(candidate.observe);
+      const result = await candidate.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: candidate.value });
+      const inspection = await candidate.adapter.inspect(candidate.delivery);
+      observations.push({ result, inspection });
+    }
+
+    expect(observations.slice(1)).toEqual([observations[0], observations[0], observations[0]]);
+  });
+
   it("fails closed on invalid activation and same Delivery identity with changed correlation", async () => {
     const f = fixture([]);
     const invalid = { ...f.value, bindingIdentity: sha("0") } as RunnerActivationContext;
