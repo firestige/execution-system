@@ -4,7 +4,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { ReadableLogRecord } from "@opentelemetry/sdk-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 
-import type { ObservationRecord, ObservationSpanRecord } from "./types.js";
+import type { ObservationEventRecord, ObservationRecord, ObservationSpanRecord } from "./types.js";
 
 function hrTime(unixNano: string): HrTime {
   const value = BigInt(unixNano);
@@ -17,6 +17,11 @@ function spanContext(record: ObservationSpanRecord, spanId = record.span_id): Sp
   return Object.freeze({ traceId: record.trace_id, spanId, traceFlags: record.span_flags });
 }
 
+function eventSpanContext(record: ObservationEventRecord): SpanContext | undefined {
+  if (record.trace_id === undefined || record.span_id === undefined) return undefined;
+  return Object.freeze({ traceId: record.trace_id, spanId: record.span_id, traceFlags: 0 });
+}
+
 function sdkRecords(signal: "traces" | "logs", records: readonly ObservationRecord[]): ReadableSpan[] | ReadableLogRecord[] {
   const first = records[0];
   if (first === undefined) return [];
@@ -26,6 +31,7 @@ function sdkRecords(signal: "traces" | "logs", records: readonly ObservationReco
     if (record.record_type !== "event") throw new TypeError("OBSERVATION_SIGNAL_MISMATCH");
     return Object.freeze({
       hrTime: [0, 0] as HrTime, hrTimeObserved: [0, 0] as HrTime, eventName: record.event_name,
+      spanContext: eventSpanContext(record),
       resource, instrumentationScope: scope, attributes: record.attributes, droppedAttributesCount: 0,
     });
   });

@@ -167,6 +167,13 @@ export class DeliveryObservationMapper {
     const entries = Object.entries(fact.fields) as Array<[ObservationFieldId, ObservationScalar]>;
     if (entries.some(([id, value]) => PROFILE_FIELDS[id] === undefined || !fieldValid(id, value))) return invalid(fact, "OBSERVATION_FIELD_INVALID");
     if (fact.signal === "event") {
+      const hasTrace = fact.correlation.traceId !== undefined;
+      const hasSpan = fact.correlation.spanId !== undefined;
+      if (hasTrace !== hasSpan
+        || (hasTrace && (!TRACE_ID.test(fact.correlation.traceId!)
+          || !SPAN_ID.test(fact.correlation.spanId!)))) {
+        return invalid(fact, "OBSERVATION_FIELD_INVALID");
+      }
       const rule = EVENT_RULES[fact.eventName];
       const ids = new Set(entries.map(([id]) => id));
       if (entries.some(([id]) => !rule.allowed.includes(id))) return invalid(fact, "OBSERVATION_FIELD_PROHIBITED");
@@ -175,7 +182,12 @@ export class DeliveryObservationMapper {
       if (rule.required.some((id) => !ids.has(id)) || fact.fields.C09 !== fact.identity || !familyMatches(fact) || !eventComplete(fact)) return invalid(fact, "OBSERVATION_SHAPE_INCOMPLETE");
       const attributes = Object.freeze(Object.fromEntries(entries.map(([id, value]) => [PROFILE_FIELDS[id].name, value])));
       const taskBinding = fact.eventName === "task.binding";
-      return Object.freeze({ ok: true, record: Object.freeze({ profile_version: taskBinding ? "2.0.0" : "1.0.0", record_type: "event", event_name: fact.eventName, resource: this.#resource, scope: taskBinding ? this.#taskScope : this.#scope, attributes, family_schema: fact.familySchema }) });
+      return Object.freeze({ ok: true, record: Object.freeze({
+        profile_version: taskBinding ? "2.0.0" : "1.0.0", record_type: "event", event_name: fact.eventName,
+        ...(hasTrace ? { trace_id: fact.correlation.traceId!, span_id: fact.correlation.spanId! } : {}),
+        resource: this.#resource, scope: taskBinding ? this.#taskScope : this.#scope,
+        attributes, family_schema: fact.familySchema,
+      }) });
     }
     const standardEntries = Object.entries(fact.standard);
     const operation = fact.standard["gen_ai.operation.name"];
