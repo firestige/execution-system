@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   createDeliveryConfigProjectionV2,
   loadExecutionInstallationConfigV2,
+  validateExecutionInstallationConfigV2,
 } from "../../src/configuration/index.js";
 
 async function deployment() {
@@ -166,5 +167,101 @@ describe("Execution configuration 2.0", () => {
     for (const forbidden of ["defaultModel", "workflowSource", "observation", paths.stateRoot, "credential", "baseUrl"]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+
+  it("preflights an explicit adapter source and enabled loopback Observation endpoint", async () => {
+    const paths = await deployment();
+    const adapterConfigFile = join(paths.root, "workflow-adapter.json");
+    const configFile = join(paths.root, "execution.json");
+    await writeFile(adapterConfigFile, "{}\n");
+    const canonicalAdapterConfigFile = await realpath(adapterConfigFile);
+    await writeFile(configFile, JSON.stringify({
+      ...input(paths),
+      workflowSource: {
+        kind: "adapter",
+        adapterKey: "source.local",
+        adapterConfigFile,
+      },
+      observation: {
+        ...input(paths).observation,
+        enabled: true,
+        endpoint: "http://127.0.0.1:4318/v1/traces/",
+      },
+    }));
+
+    await expect(loadExecutionInstallationConfigV2(configFile, {
+      agentProviderIdentity: "provider.dsh",
+    })).resolves.toMatchObject({
+      config: {
+        workflowSource: {
+          kind: "adapter",
+          adapterKey: "source.local",
+          adapterConfigFile: canonicalAdapterConfigFile,
+        },
+        observation: { enabled: true, endpoint: "http://127.0.0.1:4318/v1/traces" },
+      },
+    });
+  });
+
+  it("fails closed across placeholder, topology, source, endpoint, type, and range violations", async () => {
+    const paths = await deployment();
+    const valid = input(paths);
+    const cases: readonly [unknown, string][] = [
+      [null, "CONFIG_TYPE_INVALID"],
+      [{ ...valid, schemaVersion: "__REQUIRED__:schema" }, "CONFIG_REQUIRED_INPUT_MISSING"],
+      [{ ...valid, schemaVersion: "execution.config@1.0.0" }, "CONFIG_SCHEMA_VERSION_UNSUPPORTED"],
+      [{ ...valid, paths: { ...valid.paths, packageStoreRoot: join(paths.root, "packages") } }, "CONFIG_DERIVED_KEY_FORBIDDEN"],
+      [{ ...valid, paths: { ...valid.paths, allowedWorktreeRoots: [] } }, "CONFIG_PATH_OUT_OF_SCOPE"],
+      [{ ...valid, paths: { ...valid.paths, allowedWorktreeRoots: [paths.worktreeRoot, paths.worktreeRoot] } }, "CONFIG_PATH_OUT_OF_SCOPE"],
+      [{ ...valid, workflowSource: { ...valid.workflowSource, adapterKey: "source.local" } }, "CONFIG_SOURCE_INVALID"],
+      [{ ...valid, workflowSource: { ...valid.workflowSource, repository: "invalid" } }, "CONFIG_SOURCE_INVALID"],
+      [{ ...valid, workflowSource: { ...valid.workflowSource, releasesBaseUrl: "not-a-url" } }, "CONFIG_URL_INVALID"],
+      [{ ...valid, workflowSource: { ...valid.workflowSource, releasesBaseUrl: "https://user@example.test/releases" } }, "CONFIG_URL_INVALID"],
+      [{ ...valid, workflowSource: { kind: "adapter", repository: "owner/repo" } }, "CONFIG_SOURCE_INVALID"],
+      [{ ...valid, workflowSource: { kind: "adapter", adapterKey: "source.local", adapterConfigFile: "relative.json" } }, "CONFIG_SOURCE_INVALID"],
+      [{ ...valid, workflowSource: { kind: "unknown" } }, "CONFIG_SOURCE_INVALID"],
+      [{ ...valid, observation: { ...valid.observation, enabled: true } }, "CONFIG_OBSERVATION_INVALID"],
+      [{ ...valid, observation: { ...valid.observation, enabled: true, endpoint: "https://example.test/v1/traces" } }, "CONFIG_OBSERVATION_ENDPOINT_INVALID"],
+      [{ ...valid, controls: { ...valid.controls, allowExplicitRefresh: "false" } }, "CONFIG_TYPE_INVALID"],
+      [{ ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, maxParallelToolCalls: 0 } } }, "CONFIG_RANGE_INVALID"],
+    ];
+
+    for (const [candidate, code] of cases) {
+      expect(() => validateExecutionInstallationConfigV2(candidate, {
+        agentProviderIdentity: "provider.dsh",
+      })).toThrow(expect.objectContaining({ code }));
+    }
+
+    await expect(loadExecutionInstallationConfigV2("relative.json", {
+      agentProviderIdentity: "provider.dsh",
+    })).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
+    await expect(loadExecutionInstallationConfigV2(join(paths.root, "missing.json"), {
+      agentProviderIdentity: "provider.dsh",
+    })).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
+
+    const unresolvedPathConfig = join(paths.root, "unresolved-path.json");
+    await writeFile(unresolvedPathConfig, JSON.stringify({
+      ...valid,
+      paths: {
+        ...valid.paths,
+        allowedWorktreeRoots: [join(paths.workspaceRoot, "missing-worktree")],
+      },
+    }));
+    await expect(loadExecutionInstallationConfigV2(unresolvedPathConfig, {
+      agentProviderIdentity: "provider.dsh",
+    })).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
+
+    const outsideWorktree = join(paths.root, "outside-worktree");
+    const linkedWorktree = join(paths.workspaceRoot, "linked-worktree");
+    await mkdir(outsideWorktree);
+    await symlink(outsideWorktree, linkedWorktree, "dir");
+    const escapedPathConfig = join(paths.root, "escaped-path.json");
+    await writeFile(escapedPathConfig, JSON.stringify({
+      ...valid,
+      paths: { ...valid.paths, allowedWorktreeRoots: [linkedWorktree] },
+    }));
+    await expect(loadExecutionInstallationConfigV2(escapedPathConfig, {
+      agentProviderIdentity: "provider.dsh",
+    })).rejects.toMatchObject({ code: "CONFIG_PATH_OUT_OF_SCOPE" });
   });
 });
