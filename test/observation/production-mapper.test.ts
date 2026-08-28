@@ -8,10 +8,75 @@ import {
   OBSERVATION_PROFILE_SOURCE_MATRIX,
   createObservationOwnerFact,
 } from "../../src/observation/index.js";
+import { createTaskBindingObservationFact } from "../../src/bootstrap/index.js";
+import type { DeliveryBoundOwnerFact } from "../../src/bootstrap/index.js";
 
 const contractRoot = path.resolve("../system-contracts/observation");
 
 describe("M03 production owner-fact mapper", () => {
+  it("maps admission-time Task binding with display metadata outside identity", () => {
+    const mapped = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
+      .map(createObservationOwnerFact({
+        owner: "M01",
+        phase: "DELIVERY_BOUND",
+        correlation: { deliveryId: "delivery-1" },
+        identity: "task-binding-delivery-1",
+        signal: "event",
+        eventName: "task.binding",
+        familySchema: "implementation@1",
+        fields: {
+          C01: "delivery-1",
+          C02: "task-1",
+          C07: "a".repeat(64),
+          C09: "task-binding-delivery-1",
+          C58: "Token tuning",
+        },
+      }));
+
+    expect(mapped).toMatchObject({
+      ok: true,
+      record: {
+        profile_version: "2.0.0",
+        scope: { version: "2.0.0" },
+        event_name: "task.binding",
+        attributes: {
+          "agentops.delivery.id": "delivery-1",
+          "agentops.task.id": "task-1",
+          "agentops.task.display_name": "Token tuning",
+        },
+      },
+    });
+  });
+
+  it("creates one stable Task binding owner fact from the persisted Manifest", () => {
+    const fact: DeliveryBoundOwnerFact = {
+      owner: "M01",
+      name: "delivery-bound",
+      occurredAt: 10,
+      deliveryId: "delivery-1",
+      taskId: "task-1",
+      taskDisplayName: "Token tuning",
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+      workflowIdentity: "implementation-workflow@0.3.0",
+    };
+
+    const first = createTaskBindingObservationFact(fact);
+    const replay = createTaskBindingObservationFact(fact);
+
+    expect(first).toEqual(replay);
+    expect(first).toMatchObject({
+      owner: "M01",
+      phase: "DELIVERY_BOUND",
+      eventName: "task.binding",
+      fields: {
+        C01: "delivery-1",
+        C02: "task-1",
+        C07: "a".repeat(64),
+        C58: "Token tuning",
+      },
+    });
+  });
+
   it("accepts the canonical bounded OTel service strings without inventing a stricter identifier grammar", () => {
     expect(() => new DeliveryObservationMapper({ serviceName: "execution service", serviceVersion: "0.1.0+preview" })).not.toThrow();
   });

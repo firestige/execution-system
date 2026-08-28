@@ -38,22 +38,25 @@ const rows = [
   ["S01", "agentops.fresh_reader.result", "string"], ["S02", "agentops.fresh_reader.finding.count", "integer"],
   ["S03", "agentops.verification.id", "string"], ["S04", "agentops.verification.result", "string"],
   ["S05", "agentops.verification.check.passed", "integer"], ["S06", "agentops.verification.check.failed", "integer"],
+  ["C58", "agentops.task.display_name", "string"],
 ] as const;
 
 export type ObservationFieldId = typeof rows[number][0];
 export type ObservationEventName = typeof EVENT_NAMES[number];
 export type ObservationFamilySchema = "implementation@1" | "system-design@1";
 
-export const EVENT_NAMES = Object.freeze([
+const PUBLISHED_EVENT_NAMES = Object.freeze([
   "delivery.summary", "review.finding", "review.summary", "test.summary", "implementation.summary",
   "system_design.summary", "role.lineage", "intervention", "usage", "sampling.decision",
 ] as const);
+
+export const EVENT_NAMES = Object.freeze([...PUBLISHED_EVENT_NAMES, "task.binding"] as const);
 
 const allFields = Object.freeze(Object.fromEntries(rows.map(([id, name, type]) => [id, Object.freeze({ name, type })]))) as Readonly<Record<ObservationFieldId, Readonly<{ name: string; type: "string" | "integer" | "number" }>>>;
 
 type ScalarSource = "M01" | "M02" | "DSH" | "M03" | "FACT_OWNER";
 function scalarSource(id: ObservationFieldId): ScalarSource {
-  if (["C01","C02","C05","C07"].includes(id)) return "M01";
+  if (["C01","C02","C05","C07","C58"].includes(id)) return "M01";
   if (["C06","C10","C42","C43","C44","C45","C46","C55","C57"].includes(id)) return "M02";
   if (["C47","C48"].includes(id)) return "M03";
   if (["C09","C11"].includes(id)) return "FACT_OWNER";
@@ -66,17 +69,18 @@ function sourceRows(selected: readonly typeof rows[number][]) {
 
 export const OBSERVATION_PROFILE_SOURCE_MATRIX = Object.freeze({
   profileVersion: "1.0.0",
-  eventNames: EVENT_NAMES,
+  eventNames: PUBLISHED_EVENT_NAMES,
   fields: Object.freeze({
     common: sourceRows(rows.slice(0, 57)),
     implementation: sourceRows(rows.slice(57, 67)),
-    systemDesign: sourceRows(rows.slice(67)),
+    systemDesign: sourceRows(rows.slice(67, 73)),
   }),
 });
 
 export const PROFILE_FIELDS = allFields;
 
 export const EVENT_RULES: Readonly<Record<ObservationEventName, Readonly<{ allowed: readonly ObservationFieldId[]; required: readonly ObservationFieldId[] }>>> = Object.freeze({
+  "task.binding": { allowed: ["C01","C02","C07","C09","C58"], required: ["C01","C02","C07","C09"] },
   "delivery.summary": { allowed: ["C08","C09","C10","C11","C30","C49","C55","C56"], required: ["C08","C09","C10","C11","C49"] },
   "review.finding": { allowed: ["C08","C09","C12","C13","C14","C15","C18","C19","C20","C21","C22","C23","C24","C25","C26","C27","C28","C29","C33","C34","C35","C36","C37","C38","C49","C50","C51","C52","C53","C54"], required: ["C08","C09","C12","C13","C14","C15","C18","C19","C20","C28","C29","C33","C34","C36","C37","C49","C50","C51","C52","C53"] },
   "review.summary": { allowed: ["C08","C09","C11","C12","C13","C14","C16","C17","C23","C24","C25","C26","C27","C28","C29","C33","C34","C35","C36","C37","C38","C49","S01","S02"], required: ["C08","C09","C11","C12","C13","C14","C28","C29","C33","C34","C36","C37","C49"] },

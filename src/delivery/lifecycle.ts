@@ -207,6 +207,18 @@ export class DeliveryLifecycleService {
         updatedAt: this.#options.clock.now(),
       });
       await ready.holder.release();
+      safeEmit(this.#ownerFacts, {
+        owner: "M01",
+        name: "delivery-bound",
+        occurredAt: this.#options.clock.now(),
+        deliveryId: manifest.deliveryId,
+        taskId: manifest.taskId,
+        ...(manifest.taskDisplayName === undefined
+          ? {}
+          : { taskDisplayName: manifest.taskDisplayName }),
+        deliveryBindingIdentity: manifest.deliveryBindingIdentity,
+        workflowIdentity: manifest.resolvedPackage.workflowId,
+      });
     } catch {
       if (persisted !== undefined) await this.#options.manifests.discard(persisted.path).catch(() => undefined);
       await ready.holder.release().catch(() => undefined);
@@ -224,6 +236,18 @@ export class DeliveryLifecycleService {
     } catch {
       return failure("DELIVERY_BINDING_FAILED");
     }
+    safeEmit(this.#ownerFacts, {
+      owner: "M01",
+      name: "delivery-bound",
+      occurredAt: this.#options.clock.now(),
+      deliveryId: manifest.deliveryId,
+      taskId: manifest.taskId,
+      ...(manifest.taskDisplayName === undefined
+        ? {}
+        : { taskDisplayName: manifest.taskDisplayName }),
+      deliveryBindingIdentity: manifest.deliveryBindingIdentity,
+      workflowIdentity: manifest.resolvedPackage.workflowId,
+    });
     if (slot.state === "START_FAILED") {
       await this.#options.slots.transition(slot.worktree, "M01_START_FAILURE_HANDLED", this.#options.clock.now());
       return failure("RUNNER_START_FAILED");

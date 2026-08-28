@@ -100,13 +100,13 @@ export class OtlpObservationExporter {
     const groups = new Map<string, ObservationRecord[]>();
     for (const record of records) {
       const signal = record.record_type === "span" ? "traces" : "logs";
-      const key = `${signal}:${record.family_schema}`;
+      const key = `${signal}:${record.profile_version}:${record.family_schema}`;
       const group = groups.get(key) ?? [];
       group.push(record);
       groups.set(key, group);
     }
     for (const [key, group] of groups) {
-      const [signal, familySchema] = key.split(":") as ["traces" | "logs", string];
+      const [signal, _profileVersion, familySchema] = key.split(":") as ["traces" | "logs", string, string];
       let batch: ObservationRecord[] = [];
       for (const record of group) {
         const candidate = [...batch, record];

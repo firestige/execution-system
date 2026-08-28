@@ -18,7 +18,9 @@ function fieldValid(id: ObservationFieldId, value: ObservationScalar): boolean {
   const definition = PROFILE_FIELDS[id];
   if (definition.type === "integer" && (!Number.isInteger(value) || (value as number) < 0)) return false;
   if (definition.type === "number" && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) return false;
-  if (definition.type === "string" && (typeof value !== "string" || value.length === 0 || value.length > (id === "C50" ? 512 : 128))) return false;
+  const stringLimit = id === "C50" ? 512 : id === "C58" ? 160 : 128;
+  if (definition.type === "string" && (typeof value !== "string" || value.length === 0 || value.length > stringLimit)) return false;
+  if (id === "C58" && typeof value === "string" && value.trim() !== value) return false;
   if (PROFILE_ENUMS[id] !== undefined && !PROFILE_ENUMS[id]!.includes(value)) return false;
   if ((id === "C07" || id === "C29") && (typeof value !== "string" || !DIGEST.test(value))) return false;
   if (id === "C48" && (typeof value !== "number" || value > 1)) return false;
@@ -29,7 +31,7 @@ function familyMatches(fact: ObservationMappableFact): boolean {
   if (fact.signal === "span") return fact.fields.C08 === undefined
     || (fact.familySchema === "implementation@1" ? fact.fields.C08 === "implementation" : fact.fields.C08 === "system-design");
   const family = fact.fields.C08;
-  return fact.eventName === "sampling.decision"
+  return fact.eventName === "sampling.decision" || fact.eventName === "task.binding"
     ? fact.fields.C49 === undefined
     : (fact.familySchema === "implementation@1" ? family === "implementation" : family === "system-design")
       && fact.fields.C49 === fact.familySchema;
@@ -79,6 +81,7 @@ function spanComplete(fact: Extract<ObservationMappableFact, { signal: "span" }>
 export class DeliveryObservationMapper {
   readonly #resource: ObservationResource;
   readonly #scope: ObservationScope = Object.freeze({ name: "io.agentops.dsh.observation", version: "1.0.0", schema_url: "https://opentelemetry.io/schemas/1.41.0" });
+  readonly #taskScope: ObservationScope = Object.freeze({ name: "io.agentops.dsh.observation", version: "2.0.0", schema_url: "https://opentelemetry.io/schemas/1.41.0" });
   constructor(config: ObservationMapperConfig) {
     if (typeof config.serviceName !== "string" || config.serviceName.length === 0 || config.serviceName.length > 128
       || typeof config.serviceVersion !== "string" || config.serviceVersion.length === 0 || config.serviceVersion.length > 128) throw new TypeError("OBSERVATION_MAPPER_CONFIG_INVALID");
@@ -98,7 +101,8 @@ export class DeliveryObservationMapper {
         || (id.startsWith("S") && fact.familySchema !== "system-design@1"))) return invalid(fact, "OBSERVATION_FIELD_PROHIBITED");
       if (rule.required.some((id) => !ids.has(id)) || fact.fields.C09 !== fact.identity || !familyMatches(fact) || !eventComplete(fact)) return invalid(fact, "OBSERVATION_SHAPE_INCOMPLETE");
       const attributes = Object.freeze(Object.fromEntries(entries.map(([id, value]) => [PROFILE_FIELDS[id].name, value])));
-      return Object.freeze({ ok: true, record: Object.freeze({ profile_version: "1.0.0", record_type: "event", event_name: fact.eventName, resource: this.#resource, scope: this.#scope, attributes, family_schema: fact.familySchema }) });
+      const taskBinding = fact.eventName === "task.binding";
+      return Object.freeze({ ok: true, record: Object.freeze({ profile_version: taskBinding ? "2.0.0" : "1.0.0", record_type: "event", event_name: fact.eventName, resource: this.#resource, scope: taskBinding ? this.#taskScope : this.#scope, attributes, family_schema: fact.familySchema }) });
     }
     const standardEntries = Object.entries(fact.standard);
     const operation = fact.standard["gen_ai.operation.name"];
