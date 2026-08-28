@@ -131,9 +131,10 @@ export async function discardTaskPromptSnapshot(snapshot: ImmutableTaskPromptSna
 }
 
 export interface DeliveryManifest {
-  readonly schemaVersion: "execution.delivery-manifest@1.0.0";
+  readonly schemaVersion: "execution.delivery-manifest@1.1.0";
   readonly deliveryId: string;
   readonly taskId: string;
+  readonly taskDisplayName?: string;
   readonly createdAt: number;
   readonly canonicalWorktree: string;
   readonly resolvedPackage: ResolvedWorkflowPackage;
@@ -150,6 +151,7 @@ export interface DeliveryManifest {
 export interface CreateDeliveryManifestInput {
   readonly deliveryId: string;
   readonly taskId: string;
+  readonly taskDisplayName?: string;
   readonly createdAt: number;
   readonly canonicalWorktree: string;
   readonly resolvedPackage: ResolvedWorkflowPackage;
@@ -168,9 +170,15 @@ export function createDeliveryManifest(input: CreateDeliveryManifestInput): Deli
     || !SHA256.test(input.promptSnapshot.digest) || !SHA256.test(input.deliveryConfigProjection.identity)) {
     throw new DeliveryBindingError("DELIVERY_BINDING_INVALID");
   }
+  if (input.taskDisplayName !== undefined
+    && (input.taskDisplayName.length === 0 || input.taskDisplayName.length > 160
+      || input.taskDisplayName.trim() !== input.taskDisplayName)) {
+    throw new DeliveryBindingError("DELIVERY_BINDING_INVALID");
+  }
   const content = {
     deliveryId: input.deliveryId,
     taskId: input.taskId,
+    ...(input.taskDisplayName === undefined ? {} : { taskDisplayName: input.taskDisplayName }),
     createdAt: input.createdAt,
     canonicalWorktree: resolve(input.canonicalWorktree),
     resolvedPackage: input.resolvedPackage,
@@ -183,7 +191,7 @@ export function createDeliveryManifest(input: CreateDeliveryManifestInput): Deli
     deliveryConfigProjection: input.deliveryConfigProjection,
   };
   return deepFreeze({
-    schemaVersion: "execution.delivery-manifest@1.0.0",
+    schemaVersion: "execution.delivery-manifest@1.1.0",
     ...content,
     deliveryBindingIdentity: digestValue(bindingInput(content)),
   });
@@ -214,13 +222,21 @@ export class DeliveryManifestRepository {
       const absolute = resolve(path);
       if (!isAbsolute(path) || resolve(absolute, "..") !== this.#root || !(await stat(absolute)).isFile()) throw new Error("invalid path");
       const candidate = JSON.parse(await readFile(absolute, "utf8")) as DeliveryManifest;
-      if (candidate.schemaVersion !== "execution.delivery-manifest@1.0.0"
-        || Object.keys(candidate).sort().join(",") !== "canonicalWorktree,createdAt,deliveryBindingIdentity,deliveryConfigProjection,deliveryId,prompt,resolvedPackage,schemaVersion,taskId") {
+      const keys = Object.keys(candidate).sort().join(",");
+      const legacy = (candidate.schemaVersion as string) === "execution.delivery-manifest@1.0.0"
+        && keys === "canonicalWorktree,createdAt,deliveryBindingIdentity,deliveryConfigProjection,deliveryId,prompt,resolvedPackage,schemaVersion,taskId";
+      const current = candidate.schemaVersion === "execution.delivery-manifest@1.1.0"
+        && (keys === "canonicalWorktree,createdAt,deliveryBindingIdentity,deliveryConfigProjection,deliveryId,prompt,resolvedPackage,schemaVersion,taskId"
+          || keys === "canonicalWorktree,createdAt,deliveryBindingIdentity,deliveryConfigProjection,deliveryId,prompt,resolvedPackage,schemaVersion,taskDisplayName,taskId");
+      if (!legacy && !current) {
         throw new Error("invalid shape");
       }
       const reconstructed = createDeliveryManifest({
         deliveryId: candidate.deliveryId,
         taskId: candidate.taskId,
+        ...(candidate.taskDisplayName === undefined
+          ? {}
+          : { taskDisplayName: candidate.taskDisplayName }),
         createdAt: candidate.createdAt,
         canonicalWorktree: candidate.canonicalWorktree,
         resolvedPackage: candidate.resolvedPackage,

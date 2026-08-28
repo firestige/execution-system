@@ -1,0 +1,201 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:agentops:workflow-dsl:1.1.0:actions",
+  "title": "Agent Ops Action Catalog",
+  "description": "Reusable Agent or deterministic Actions. Graph composition, parallelism, routing and Runtime invocation identities are not Action fields.",
+  "type": "object",
+  "required": [
+    "kind",
+    "schemaVersion",
+    "actions"
+  ],
+  "properties": {
+    "kind": {
+      "const": "agentops.actions"
+    },
+    "schemaVersion": {
+      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "purpose",
+        "responsibleAuthority",
+        "gate",
+        "resultSchema"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interaction": {
+          "type": "object",
+          "required": [
+            "mode",
+            "completion"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "none",
+                "action-scoped"
+              ]
+            },
+            "completion": {
+              "const": "structured-only"
+            }
+          },
+          "additionalProperties": false
+        },
+        "inputSchema": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/schemaOrInline"
+        },
+        "resultSchema": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/schemaOrInline"
+        },
+        "responsibleAuthority": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "role"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "role"
+                },
+                "role": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "validator"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "runtime"
+                },
+                "validator": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "allowedRoutes": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "uniqueItems": true
+        },
+        "escalation": {
+          "type": "object",
+          "required": [
+            "allowed",
+            "scope"
+          ],
+          "properties": {
+            "allowed": {
+              "type": "boolean"
+            },
+            "scope": {
+              "const": "route-within-allowed"
+            },
+            "cannotChange": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "gate": {
+          "type": "object",
+          "required": [
+            "freeTextBypass"
+          ],
+          "properties": {
+            "deterministic": {
+              "type": "array",
+              "items": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "uniqueItems": true
+            },
+            "freeTextBypass": {
+              "const": "prohibited"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "responsibleAuthority": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "role"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "allowedRoutes"
+            ],
+            "properties": {
+              "allowedRoutes": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "allowedRoutes"
+              ]
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

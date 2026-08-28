@@ -111,11 +111,15 @@ async function fixture(runtimeResult: "start-failed" | "unknown" | "invalid" | "
     kind: "NEW" as const,
     holder,
     command: Object.freeze({
-      schemaVersion: "execution.prebinding-command@1.0.0" as const,
+      schemaVersion: "execution.prebinding-command@1.1.0" as const,
       admissionId: "admission-1",
       canonicalWorktree: worktree,
       selector: "implementation@1.1.0",
       prompt: Object.freeze({ text: "implement", attachments: Object.freeze([]) }),
+      taskSelection: Object.freeze({
+        schemaVersion: "execution.task-selection@0.1.0" as const,
+        mode: "NEW_TASK" as const,
+      }),
       refresh: false,
       deliveryConfigProjection: projection().value,
       deliveryConfigProjectionIdentity: projection().identity,
@@ -125,6 +129,46 @@ async function fixture(runtimeResult: "start-failed" | "unknown" | "invalid" | "
 }
 
 describe("M01 production Delivery lifecycle", () => {
+  it("creates a new Task by default and reuses only an explicitly selected exact Task ID", async () => {
+    const fresh = await fixture("unknown");
+    await fresh.service.activate(Object.freeze({
+      ...fresh.ready,
+      command: Object.freeze({
+        ...fresh.ready.command,
+        taskSelection: Object.freeze({
+          schemaVersion: "execution.task-selection@0.1.0" as const,
+          mode: "NEW_TASK" as const,
+          displayName: "Token tuning",
+        }),
+      }),
+    }));
+    const freshSlot = await fresh.slots.read(fresh.worktree);
+    if (freshSlot.state === "EMPTY") throw new Error("expected persisted fresh Task binding");
+    expect(await fresh.manifests.load(freshSlot.manifestPath)).toMatchObject({
+      taskId: "task-delivery-1",
+      taskDisplayName: "Token tuning",
+    });
+
+    const reused = await fixture("unknown");
+    await reused.service.activate(Object.freeze({
+      ...reused.ready,
+      command: Object.freeze({
+        ...reused.ready.command,
+        taskSelection: Object.freeze({
+          schemaVersion: "execution.task-selection@0.1.0" as const,
+          mode: "REUSE_TASK" as const,
+          taskId: "task-existing",
+        }),
+      }),
+    }));
+    const reusedSlot = await reused.slots.read(reused.worktree);
+    if (reusedSlot.state === "EMPTY") throw new Error("expected persisted reused Task binding");
+    expect(await reused.manifests.load(reusedSlot.manifestPath)).toMatchObject({
+      taskId: "task-existing",
+    });
+    expect(await reused.manifests.load(reusedSlot.manifestPath)).not.toHaveProperty("taskDisplayName");
+  });
+
   it("durably correlates the Runner start before its first Host or Action effect", async () => {
     const f = await fixture("terminal");
     let stateAtFirstEffect: string | undefined;
@@ -225,6 +269,7 @@ describe("M01 production Delivery lifecycle", () => {
       "package:resolve",
       "current-slot:BOUND",
       "holder:release",
+      "fact:M01:delivery-bound",
       "activation:project",
       "fact:M01:runner-launch-requested",
       "runtime:create",
@@ -317,6 +362,7 @@ describe("M01 production Delivery lifecycle", () => {
     });
     expect(await projectionFailure.activate(projection.ready)).toMatchObject({ kind: "ERROR", code: "DELIVERY_BINDING_FAILED" });
     expect(await projection.slots.read(projection.worktree)).toMatchObject({ state: "BOUND" });
+    expect(projection.events).toContain("fact:M01:delivery-bound");
 
     const startup = await fixture("unknown");
     const startupFailure = new DeliveryLifecycleService({

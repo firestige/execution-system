@@ -1,6 +1,9 @@
 export * from "./admission.js";
 export * from "./current-slot.js";
 export * from "./manifest.js";
+export * from "./manifest-v2.js";
+export * from "./repository-model-bindings.js";
+export * from "./resolved-role-model-bindings.js";
 export * from "./lifecycle.js";
 export * from "./delivery-admission-projector.js";
 export * from "./selector.js";
@@ -8,3 +11,4 @@ export * from "./source.js";
 export * from "./workflow-package-resolver.js";
 export * from "./workflow-package-store.js";
 export * from "./workflow-package-validation.js";
+export * from "./workflow-v2-role-snapshot.js";

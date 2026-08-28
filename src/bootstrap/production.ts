@@ -25,12 +25,12 @@ import {
   type WorkflowPackageCompatibilityTarget,
 } from "../delivery/index.js";
 import { loadExecutionInstallationConfig } from "../configuration/index.js";
-import { createDeliveryObservationEmitter, createObservationOwnerFact, createRunnerOwnerFactPort, type DeliveryObservationEmitter, type ObservationFamilySchema, type RunnerSettlementOwnerFact } from "../observation/index.js";
+import { createDeliveryObservationEmitter, createObservationOwnerFact, createRunnerOwnerFactPort, type DeliveryObservationEmitter, type ObservationFamilySchema, type ObservationProfileOwnerFact, type RunnerSettlementOwnerFact } from "../observation/index.js";
 import type { HostOperationHandler } from "../host/workflow-host-adapter-factory.js";
 import type { ExecutionRuntimeAdapter } from "../execution/runtime-adapter.js";
 import type { IntakeDeliveryBindingInventoryItem, IntakeDeliveryInventoryItem, WorkflowIntakeControlPort } from "../intake/index.js";
 import { BootstrapLifecycle, ImmediateConcurrencyController, admitExecutionBootstrapDependencies } from "./runtime-contracts.js";
-import type { ExecutionApplicationFactory, ExecutionBootstrapDependencies, OwnerFact, OwnerFactIngress } from "./contracts.js";
+import type { DeliveryBoundOwnerFact, ExecutionApplicationFactory, ExecutionBootstrapDependencies, OwnerFact, OwnerFactIngress } from "./contracts.js";
 import { ProductionInteractionBroker } from "./interaction-broker.js";
 
 function failure(code: ExecutionFailure["code"]): ExecutionFailure {
@@ -83,6 +83,32 @@ function nanoseconds(milliseconds: number): string {
   return (BigInt(Math.max(0, milliseconds)) * 1_000_000n).toString();
 }
 
+export function createTaskBindingObservationFact(
+  fact: DeliveryBoundOwnerFact,
+): ObservationProfileOwnerFact | undefined {
+  const family = observationFamily(fact.workflowIdentity);
+  if (family === undefined || fact.manifestProjection === undefined || fact.manifestProjectionDigest === undefined) return undefined;
+  const identity = `task-binding-${segment(fact.deliveryId).slice(0, 24)}`;
+  return createObservationOwnerFact({
+    owner: "M01",
+    phase: "DELIVERY_BOUND",
+    correlation: Object.freeze({ deliveryId: fact.deliveryId }),
+    identity,
+    signal: "event",
+    eventName: "task.binding",
+    familySchema: family.schema,
+    fields: Object.freeze({
+      C01: fact.deliveryId,
+      C02: fact.taskId,
+      C07: fact.deliveryBindingIdentity.replace(/^sha256:/u, ""),
+      C09: identity,
+      ...(fact.taskDisplayName === undefined ? {} : { C58: fact.taskDisplayName }),
+      C59: fact.manifestProjection,
+      C60: fact.manifestProjectionDigest,
+    }),
+  });
+}
+
 function deliveryOwnerFactIngress(
   manifest: DeliveryManifest,
   activation: RunnerActivationContext,
@@ -114,6 +140,7 @@ function deliveryOwnerFactIngress(
           }),
           fields: Object.freeze({
             C01: manifest.deliveryId,
+            C02: manifest.taskId,
             C03: activation.correlation.workflowIdentity as string,
             C04: manifest.resolvedPackage.exactVersion,
             C05: activation.correlation.packageIdentity as string,
@@ -124,7 +151,8 @@ function deliveryOwnerFactIngress(
           standard: Object.freeze({}),
         }));
         emitter.emit(createObservationOwnerFact({
-          owner: "M02", phase: "DELIVERY_TERMINAL", correlation: Object.freeze({ deliveryId: manifest.deliveryId }),
+          owner: "M02", phase: "DELIVERY_TERMINAL",
+          correlation: Object.freeze({ deliveryId: manifest.deliveryId, traceId, spanId }),
           identity: summaryIdentity, signal: "event", eventName: "delivery.summary", familySchema: family.schema,
           fields: Object.freeze({
             C08: family.value, C09: summaryIdentity, C10: outcome, C11: "FINAL", C49: family.schema,
@@ -329,7 +357,13 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       diagnostic() {},
     });
     const ownerFacts: OwnerFactIngress = Object.freeze({
-      emit() { /* Generic M01 facts are joined to complete per-Delivery facts by the runtime factory. */ },
+      emit(fact: OwnerFact) {
+        if (fact.name !== "delivery-bound" || !("deliveryId" in fact)) return;
+        try {
+          const taskBinding = createTaskBindingObservationFact(fact);
+          if (taskBinding !== undefined) observation.emit(taskBinding);
+        } catch { /* Observation remains non-controlling. */ }
+      },
     });
     const interactions = new ProductionInteractionBroker(dependencies.intake);
     const runtime = new ProductionRuntimeManager(config, dependencies, observation, interactions, this.#hostOperationFactories);

@@ -1,0 +1,1084 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:agentops:workflow-dsl:1.1.0:workflow-definition",
+  "title": "Agent Ops Workflow Definition",
+  "description": "Runtime-neutral graph, immutable parallel branch-result flow, typed Runtime event routes, Wait declarations, budgets, recovery policies and terminals.",
+  "type": "object",
+  "required": [
+    "kind",
+    "schemaVersion",
+    "workflow",
+    "state",
+    "graph",
+    "dataflow"
+  ],
+  "properties": {
+    "kind": {
+      "const": "agentops.workflow-definition"
+    },
+    "schemaVersion": {
+      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+    },
+    "workflow": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "version",
+        "purpose",
+        "contractVersion"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/version"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contractVersion": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+        }
+      },
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "fields"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9_]*$"
+              },
+              "type": {
+                "enum": [
+                  "string",
+                  "integer",
+                  "number",
+                  "boolean",
+                  "array",
+                  "object",
+                  "artifactRef"
+                ]
+              },
+              "items": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/inlineSchema"
+              },
+              "schema": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/schemaRef"
+              },
+              "required": {
+                "type": "boolean",
+                "default": false
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "graph": {
+      "type": "object",
+      "required": [
+        "start",
+        "nodes",
+        "edges",
+        "eventEdges",
+        "terminals"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "from": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "to": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "eventEdges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "from",
+              "event",
+              "to"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "from": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "event": {
+                "enum": [
+                  "budget-exhausted",
+                  "wait-expired",
+                  "cancelled",
+                  "nonretryable-failure",
+                  "continuation-invalid"
+                ]
+              },
+              "to": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "terminals": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "meaning"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "kind": {
+                "enum": [
+                  "success",
+                  "failure",
+                  "incomplete",
+                  "cancelled",
+                  "custom"
+                ]
+              },
+              "meaning": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+              },
+              "proposalCheckpoint": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "dataflow": {
+      "type": "object",
+      "required": [
+        "edges"
+      ],
+      "properties": {
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "source",
+              "target"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "source": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/sourcePort"
+              },
+              "target": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/targetPort"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "hostOperations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "contractIdentity",
+          "configuration",
+          "requiredCapabilities"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "contractIdentity": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "configuration": {
+            "type": "object"
+          },
+          "requiredCapabilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": [
+                "deterministic-validation",
+                "deterministic-selection",
+                "deterministic-transformation"
+              ]
+            },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "waits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "purpose",
+          "correlation"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "kind": {
+            "enum": [
+              "user",
+              "external",
+              "spike"
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "resumeSchema": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/schemaOrInline"
+          },
+          "correlation": {
+            "type": "object",
+            "required": [
+              "identitySource",
+              "staleRejected",
+              "duplicateRejected"
+            ],
+            "properties": {
+              "identitySource": {
+                "type": "string",
+                "minLength": 1
+              },
+              "staleRejected": {
+                "const": true
+              },
+              "duplicateRejected": {
+                "const": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "budgets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "resource",
+          "evaluator",
+          "accounting"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "resource": {
+            "enum": [
+              "time",
+              "tokens",
+              "context",
+              "custom"
+            ]
+          },
+          "resourceName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evaluator": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/schemaRef"
+          },
+          "accounting": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "resource": {
+                  "const": "custom"
+                }
+              },
+              "required": [
+                "resource"
+              ]
+            },
+            "then": {
+              "required": [
+                "resourceName"
+              ],
+              "properties": {
+                "resourceName": {}
+              }
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "resourceName"
+                ],
+                "properties": {
+                  "resourceName": {}
+                }
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "recovery": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "mode",
+          "noBlindReplay"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "mode": {
+            "enum": [
+              "continue",
+              "checkpoint-recovery",
+              "intervene",
+              "fail"
+            ]
+          },
+          "noBlindReplay": {
+            "const": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "handoffs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/handoff"
+      }
+    },
+    "consumedHandoffs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/consumedHandoff"
+      }
+    }
+  },
+  "$defs": {
+    "checkpoint": {
+      "type": "object",
+      "required": [
+        "mode",
+        "bindings"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "always",
+            "on-wait",
+            "on-terminal-proposal",
+            "never"
+          ]
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "delivery",
+              "snapshot",
+              "graphNode",
+              "action",
+              "attempt",
+              "inputBindings",
+              "artifactBindings",
+              "branchResults",
+              "budgets",
+              "pendingWait"
+            ]
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "routing": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "output",
+            "cases"
+          ],
+          "properties": {
+            "kind": {
+              "const": "deterministic"
+            },
+            "output": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9_]*$"
+            },
+            "cases": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "required": [
+                  "value",
+                  "target"
+                ],
+                "properties": {
+                  "value": {
+                    "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/scalar"
+                  },
+                  "target": {
+                    "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "branches",
+            "fallback"
+          ],
+          "properties": {
+            "kind": {
+              "const": "semantic"
+            },
+            "branches": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "meaning",
+                  "target"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+                  },
+                  "meaning": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "target": {
+                    "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "fallback": {
+              "type": "object",
+              "required": [
+                "kind",
+                "target"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "interrupt",
+                    "question"
+                  ]
+                },
+                "target": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "actionNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "action"
+        },
+        "action": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "type": "boolean",
+          "default": false
+        },
+        "routing": {
+          "$ref": "#/$defs/routing"
+        }
+      },
+      "additionalProperties": false
+    },
+    "parallelNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "branches",
+        "maxConcurrency",
+        "join"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "parallel"
+        },
+        "branches": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "action",
+              "required"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "action": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "required": {
+                "const": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "selection": {
+          "type": "object",
+          "required": [
+            "source"
+          ],
+          "properties": {
+            "source": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/sourcePort"
+            }
+          },
+          "additionalProperties": false
+        },
+        "join": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "collect"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "operator",
+                "inputType"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "reducer"
+                },
+                "operator": {
+                  "enum": [
+                    "sum",
+                    "min",
+                    "max",
+                    "all",
+                    "any",
+                    "set-union"
+                  ]
+                },
+                "inputType": {
+                  "enum": [
+                    "safe-integer",
+                    "boolean",
+                    "non-null-json-scalar-array"
+                  ]
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "sum",
+                          "min",
+                          "max"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputType": {
+                        "const": "safe-integer"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "all",
+                          "any"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputType": {
+                        "const": "boolean"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "const": "set-union"
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "inputType": {
+                        "const": "non-null-json-scalar-array"
+                      }
+                    }
+                  }
+                }
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "action"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "aggregator"
+                },
+                "action": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "type": "boolean",
+          "default": false
+        },
+        "routing": {
+          "$ref": "#/$defs/routing"
+        }
+      },
+      "additionalProperties": false
+    },
+    "waitNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "wait"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "wait"
+        },
+        "wait": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "waitRenewalNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "wait",
+        "maxRenewals"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "wait-renewal"
+        },
+        "wait": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "maxRenewals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        }
+      },
+      "additionalProperties": false
+    },
+    "recoveryNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "recovery"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "recovery"
+        },
+        "recovery": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "action": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "cleanupNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "disposition",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "cleanup"
+        },
+        "disposition": {
+          "enum": [
+            "cancellation",
+            "failure",
+            "continuation"
+          ]
+        },
+        "action": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/actionNode"
+        },
+        {
+          "$ref": "#/$defs/parallelNode"
+        },
+        {
+          "$ref": "#/$defs/waitNode"
+        },
+        {
+          "$ref": "#/$defs/waitRenewalNode"
+        },
+        {
+          "$ref": "#/$defs/recoveryNode"
+        },
+        {
+          "$ref": "#/$defs/cleanupNode"
+        }
+      ]
+    },
+    "handoff": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "domainSemantics",
+        "invalidationConditions",
+        "semanticDependency",
+        "requiredEvidence",
+        "returnLocation",
+        "reopenCondition",
+        "semanticOnly"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "enum": [
+            "CONTRACT_PREREQUISITE",
+            "IMPLEMENTATION_FEASIBILITY",
+            "IMPLEMENTATION_VERIFICATION",
+            "OPERATIONAL_TUNING",
+            "DESIGN_OWNED_PARAMETER",
+            "CUSTOM"
+          ]
+        },
+        "domainSemantics": {
+          "type": "string"
+        },
+        "invalidationConditions": {
+          "type": "string"
+        },
+        "semanticDependency": {
+          "type": "string"
+        },
+        "requiredEvidence": {
+          "type": "string"
+        },
+        "returnLocation": {
+          "type": "string"
+        },
+        "reopenCondition": {
+          "type": "string"
+        },
+        "semanticOnly": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "consumedHandoff": {
+      "type": "object",
+      "required": [
+        "id",
+        "upstreamHandoff",
+        "classification",
+        "owner",
+        "affectedLocal",
+        "preservesSemantics",
+        "mustNotWeaken"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "upstreamHandoff": {
+          "type": "object",
+          "required": [
+            "handoff"
+          ],
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "packageVersion": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/version"
+            },
+            "handoff": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+            }
+          },
+          "additionalProperties": false
+        },
+        "classification": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "affectedLocal": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+        },
+        "preservesSemantics": {
+          "type": "object",
+          "required": [
+            "semanticDependency",
+            "reopenCondition"
+          ],
+          "properties": {
+            "semanticDependency": {
+              "type": "string"
+            },
+            "reopenCondition": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "mustNotWeaken": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

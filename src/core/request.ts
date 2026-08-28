@@ -1,6 +1,10 @@
 import { isAbsolute } from "node:path";
 
-import type { TaskPrompt, TaskPromptAttachment } from "../application/execution-application.js";
+import type {
+  TaskPrompt,
+  TaskPromptAttachment,
+  TaskSelection,
+} from "../application/execution-application.js";
 import { createDeliveryConfigProjection, deepFreeze, type DeliveryConfigProjection, type ExecutionInstallationConfig } from "../configuration/index.js";
 
 export interface ExecutionEnvironment {
@@ -12,11 +16,12 @@ export interface ExecutionEnvironment {
 }
 
 export interface ExecutionPrebindingCommand {
-  readonly schemaVersion: "execution.prebinding-command@1.0.0";
+  readonly schemaVersion: "execution.prebinding-command@1.1.0";
   readonly admissionId: string;
   readonly canonicalWorktree: string;
   readonly selector: string;
   readonly prompt: TaskPrompt;
+  readonly taskSelection: TaskSelection;
   readonly refresh: boolean;
   readonly intakeCorrelation?: string;
   readonly deliveryConfigProjection: DeliveryConfigProjection["value"];
@@ -100,6 +105,40 @@ function taskPrompt(value: unknown): TaskPrompt {
   return deepFreeze({ text: data.text, attachments });
 }
 
+function taskSelection(value: unknown): TaskSelection {
+  if (value === undefined) return Object.freeze({
+    schemaVersion: "execution.task-selection@0.1.0",
+    mode: "NEW_TASK",
+  });
+  const candidate = exactObject(
+    value,
+    ["schemaVersion", "mode"],
+    ["schemaVersion", "mode", "displayName", "taskId"],
+  );
+  if (candidate.schemaVersion !== "execution.task-selection@0.1.0") {
+    throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+  }
+  if (candidate.mode === "NEW_TASK") {
+    if (candidate.taskId !== undefined) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+    if (candidate.displayName === undefined) return Object.freeze({
+      schemaVersion: candidate.schemaVersion,
+      mode: "NEW_TASK",
+    });
+    const displayName = boundedString(candidate.displayName, 1, 160);
+    if (displayName.trim() !== displayName) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+    return Object.freeze({ schemaVersion: candidate.schemaVersion, mode: "NEW_TASK", displayName });
+  }
+  if (candidate.mode === "REUSE_TASK") {
+    if (candidate.displayName !== undefined) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+    const taskId = boundedString(candidate.taskId, 1, 128);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/u.test(taskId)) {
+      throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+    }
+    return Object.freeze({ schemaVersion: candidate.schemaVersion, mode: "REUSE_TASK", taskId });
+  }
+  throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
+}
+
 export function createExecutionEnvironment(
   config: ExecutionInstallationConfig,
 ): ExecutionEnvironment {
@@ -120,7 +159,7 @@ export function captureRequestWorktree(candidate: unknown): string {
     throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
   }
   const keys = Reflect.ownKeys(candidate);
-  const allowed = ["worktree", "selector", "prompt", "refresh", "intakeCorrelation"];
+  const allowed = ["worktree", "selector", "prompt", "taskSelection", "refresh", "intakeCorrelation"];
   if (!keys.every((key): key is string => typeof key === "string")
     || !keys.includes("worktree") || !keys.includes("selector") || !keys.includes("prompt")
     || keys.some((key) => !allowed.includes(key))) throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
@@ -137,7 +176,11 @@ export function createPrebindingCommand(
   admissionId: string,
   environment: ExecutionEnvironment,
 ): ExecutionPrebindingCommand {
-  const data = exactObject(candidate, ["worktree", "selector", "prompt"], ["worktree", "selector", "prompt", "refresh", "intakeCorrelation"]);
+  const data = exactObject(
+    candidate,
+    ["worktree", "selector", "prompt"],
+    ["worktree", "selector", "prompt", "taskSelection", "refresh", "intakeCorrelation"],
+  );
   const selector = boundedString(data.selector, 1, 256);
   const refresh = data.refresh ?? false;
   if (typeof refresh !== "boolean") throw new CoreRequestError("INVALID_EXECUTION_REQUEST");
@@ -150,11 +193,12 @@ export function createPrebindingCommand(
     intakeCorrelation = data.intakeCorrelation;
   }
   return deepFreeze({
-    schemaVersion: "execution.prebinding-command@1.0.0",
+    schemaVersion: "execution.prebinding-command@1.1.0",
     admissionId,
     canonicalWorktree,
     selector,
     prompt: taskPrompt(data.prompt),
+    taskSelection: taskSelection(data.taskSelection),
     refresh,
     ...(intakeCorrelation === undefined ? {} : { intakeCorrelation }),
     deliveryConfigProjection: environment.deliveryConfigProjection.value,

@@ -4,6 +4,7 @@ import type {
   ExecutionApplication,
   ExecutionRequest,
   ExecutionResult,
+  TaskSelection,
   TaskPrompt,
 } from "../../src/application/execution-application.js";
 
@@ -30,6 +31,33 @@ describe("host-neutral Execution application contract", () => {
     expectTypeOf<ExecutionApplication["execute"]>().parameter(0).toEqualTypeOf<ExecutionRequest>();
     expectTypeOf<ExecutionRequest["prompt"]>().toEqualTypeOf<TaskPrompt>();
     expectTypeOf<Awaited<ReturnType<ExecutionApplication["execute"]>>>().toEqualTypeOf<ExecutionResult>();
+  });
+
+  it("models Task identity choice independently from the TaskPrompt", () => {
+    const createNew: TaskSelection = {
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "NEW_TASK",
+      displayName: "Token tuning",
+    };
+    const reuse: TaskSelection = {
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "REUSE_TASK",
+      taskId: "task-existing",
+    };
+
+    expect(createNew).toEqual({
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "NEW_TASK",
+      displayName: "Token tuning",
+    });
+    expect(reuse).toEqual({
+      schemaVersion: "execution.task-selection@0.1.0",
+      mode: "REUSE_TASK",
+      taskId: "task-existing",
+    });
+    expectTypeOf<ExecutionRequest["taskSelection"]>().toEqualTypeOf<
+      TaskSelection | undefined
+    >();
   });
 
   it("keeps lifecycle and inspection surfaces host-neutral", () => {

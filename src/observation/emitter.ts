@@ -43,6 +43,7 @@ export function createDeliveryObservationEmitter(options: DeliveryObservationEmi
   let queue: ObservationRecord[] = [];
   let closed = false;
   let flushing = Promise.resolve();
+  let interval: ReturnType<typeof setInterval> | undefined;
   const emitDiagnostic = (diagnostic: DeliveryObservationEmitterDiagnostic): void => {
     try { options.diagnostic(diagnostic); } catch { /* diagnostic is non-controlling */ }
   };
@@ -69,9 +70,18 @@ export function createDeliveryObservationEmitter(options: DeliveryObservationEmi
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
-      await emitter.flush();
-      await exporter.close();
+      if (interval !== undefined) clearInterval(interval);
+      const closing = (async () => {
+        await emitter.flush();
+        await exporter.close();
+      })();
+      await new Promise<void>((resolve) => {
+        const deadline = setTimeout(resolve, options.config.shutdownFlushMs);
+        void closing.then(() => { clearTimeout(deadline); resolve(); }, () => { clearTimeout(deadline); resolve(); });
+      });
     },
   };
+  interval = setInterval(() => { void emitter.flush(); }, options.config.flushIntervalMs);
+  interval.unref();
   return Object.freeze(emitter);
 }

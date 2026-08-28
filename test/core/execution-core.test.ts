@@ -70,10 +70,11 @@ describe("Execution Core admission", () => {
     if (result.kind !== "NEW") return;
     const command: ExecutionPrebindingCommand = result.command;
     expect(command).toMatchObject({
-      schemaVersion: "execution.prebinding-command@1.0.0",
+      schemaVersion: "execution.prebinding-command@1.1.0",
       canonicalWorktree: f.worktree,
       selector: "implementation@latest",
       prompt: { text: "implement the approved change", attachments: [] },
+      taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK" },
       deliveryConfigProjectionIdentity: f.environment.deliveryConfigProjection.identity,
     });
     expect(Object.isFrozen(command)).toBe(true);
@@ -83,6 +84,58 @@ describe("Execution Core admission", () => {
     expect(serialized).not.toContain("observation");
     expect(serialized).not.toContain("credentialStorePath");
     await result.holder.release();
+  });
+
+  it("defaults Task choice to NEW and preserves explicit NEW metadata or exact REUSE identity", async () => {
+    const first = await fixture();
+    const defaultResult = await new ExecutionCoreAdmission(first.environment, first.admission)
+      .begin(request(first.worktree));
+    expect(defaultResult).toMatchObject({
+      kind: "NEW",
+      command: { taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK" } },
+    });
+    if (defaultResult.kind === "NEW") await defaultResult.holder.release();
+
+    const second = await fixture();
+    const namedResult = await new ExecutionCoreAdmission(second.environment, second.admission)
+      .begin({
+        ...request(second.worktree),
+        taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK", displayName: "Token tuning" },
+      });
+    expect(namedResult).toMatchObject({
+      kind: "NEW",
+      command: { taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "NEW_TASK", displayName: "Token tuning" } },
+    });
+    if (namedResult.kind === "NEW") await namedResult.holder.release();
+
+    const third = await fixture();
+    const reuseResult = await new ExecutionCoreAdmission(third.environment, third.admission)
+      .begin({
+        ...request(third.worktree),
+        taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "REUSE_TASK", taskId: "task-existing" },
+      });
+    expect(reuseResult).toMatchObject({
+      kind: "NEW",
+      command: { schemaVersion: "execution.prebinding-command@1.1.0", taskSelection: { schemaVersion: "execution.task-selection@0.1.0", mode: "REUSE_TASK", taskId: "task-existing" } },
+    });
+    if (reuseResult.kind === "NEW") await reuseResult.holder.release();
+  });
+
+  it("rejects ambiguous, malformed, or name-only Task reuse choices", async () => {
+    for (const taskSelection of [
+      { mode: "NEW_TASK" },
+      { schemaVersion: "execution.task-selection@9.0.0", mode: "NEW_TASK" },
+      { mode: "NEW_TASK", taskId: "task-forbidden" },
+      { mode: "REUSE_TASK", taskId: "" },
+      { mode: "REUSE_TASK", taskId: "task-existing", displayName: "rename" },
+      { mode: "UNKNOWN" },
+    ]) {
+      const f = await fixture();
+      expect(await new ExecutionCoreAdmission(f.environment, f.admission).begin({
+        ...request(f.worktree),
+        taskSelection,
+      })).toMatchObject({ kind: "ERROR", code: "INVALID_EXECUTION_REQUEST" });
+    }
   });
 
   it("returns CONTENDED without reading selector or TaskPrompt while an ordinary holder exists", async () => {

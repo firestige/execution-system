@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,6 +12,7 @@ import {
   createObservationOwnerFact,
   type OtlpTransportDiagnostic,
 } from "../../src/observation/index.js";
+import { canonicalJsonBytes } from "../../src/configuration/index.js";
 
 const require = createRequire(import.meta.url);
 const oracle = require("../../../system-contracts/observation/tools/validator.cjs") as {
@@ -48,7 +50,63 @@ function terminalFact(identity: string) {
   });
 }
 
+function taskBindingFact() {
+  const resolvedMapDigest = `sha256:${createHash("sha256").update("[]").digest("hex")}`;
+  const projection = Buffer.from(canonicalJsonBytes({
+    schema_version: "execution.delivery-manifest-projection@1.0.0",
+    delivery_id: "delivery-1",
+    task_id: "task-1",
+    manifest_digest: "a".repeat(64),
+    workflow: { package_name: "system-design", exact_package_version: "2.0.0", package_digest: `sha256:${"b".repeat(64)}`, workflow_id: "workflow.system-design", workflow_version: "2.0.0", snapshot_id: "snapshot.system-design.2", snapshot_digest: `sha256:${"c".repeat(64)}` },
+    repository_model_bindings: { document_state: "ABSENT", resolved_map_digest: resolvedMapDigest },
+    roles: [],
+  } as never)).toString("utf8");
+  const identity = `task-binding-${createHash("sha256").update("delivery-1").digest("hex").slice(0, 24)}`;
+  return createObservationOwnerFact({
+    owner: "M01",
+    phase: "DELIVERY_BOUND",
+    correlation: { deliveryId: "delivery-1" },
+    identity,
+    signal: "event",
+    eventName: "task.binding",
+    familySchema: "implementation@1",
+    fields: {
+      C01: "delivery-1",
+      C02: "task-1",
+      C07: "a".repeat(64),
+      C09: identity,
+      C59: projection,
+      C60: createHash("sha256").update(projection).digest("hex"),
+    },
+  });
+}
+
 describe("M03 official OTLP/protobuf exporter", () => {
+  it("never batches different exact Observation profiles under the first record scope", async () => {
+    const mapper = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" });
+    const legacy = mapper.map(terminalFact("event-profile-1"));
+    const task = mapper.map(taskBindingFact());
+    if (!legacy.ok || !task.ok) throw new Error("mapping failed");
+    const requests: Uint8Array[] = [];
+    const exporter = new OtlpObservationExporter({
+      endpoint: "http://127.0.0.1:4318",
+      timeoutMs: 100,
+      maxBatchRecords: 512,
+      maxBatchBytes: 4_194_304,
+      diagnostic() {},
+      transport: {
+        send: async ({ body }) => {
+          requests.push(body);
+          return { kind: "SUCCEEDED", status: 200, body: new Uint8Array() };
+        },
+      },
+    });
+
+    await exporter.export([legacy.record, task.record]);
+
+    expect(requests).toHaveLength(2);
+  });
+
   it("posts exact protobuf bytes to the fixed log path and passes the shared producer oracle", async () => {
     const received: Array<{ url: string; type: string | undefined; bytes: Buffer }> = [];
     const server = createServer((request, response) => {
@@ -193,6 +251,28 @@ describe("M03 official OTLP/protobuf exporter", () => {
     await expect(enabled.flush()).resolves.toBeUndefined();
     expect(transportCreations).toBe(1);
     expect(diagnostics).toContain("OTLP_EXPORT_REFUSED");
+  });
+
+  it("flushes on the configured interval and bounds shutdown when transport never settles", async () => {
+    let sends = 0;
+    const emitter = createDeliveryObservationEmitter({
+      config: Object.freeze({ ...observationConfig(true, "http://127.0.0.1:4318"), flushIntervalMs: 100, shutdownFlushMs: 100 }),
+      serviceVersion: "0.1.0",
+      diagnostic() {},
+      transportFactory: () => ({
+        send: async () => { sends += 1; return new Promise<never>(() => {}); },
+        shutdown: async () => new Promise<never>(() => {}),
+      }),
+    });
+    emitter.emit(terminalFact("event-bounded-close"));
+
+    await expect.poll(() => sends, { timeout: 300 }).toBe(1);
+    const disposition = await Promise.race([
+      emitter.close().then(() => "closed" as const),
+      new Promise<"unbounded">((resolve) => setTimeout(() => resolve("unbounded"), 300)),
+    ]);
+
+    expect(disposition).toBe("closed");
   });
 
   it("contains incomplete/invalid owner facts and makes close idempotent", async () => {
