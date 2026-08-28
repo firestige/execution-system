@@ -258,6 +258,7 @@ describe("M01 production Delivery lifecycle", () => {
       "package:resolve",
       "current-slot:BOUND",
       "holder:release",
+      "fact:M01:delivery-bound",
       "activation:project",
       "fact:M01:runner-launch-requested",
       "runtime:create",
@@ -350,6 +351,7 @@ describe("M01 production Delivery lifecycle", () => {
     });
     expect(await projectionFailure.activate(projection.ready)).toMatchObject({ kind: "ERROR", code: "DELIVERY_BINDING_FAILED" });
     expect(await projection.slots.read(projection.worktree)).toMatchObject({ state: "BOUND" });
+    expect(projection.events).toContain("fact:M01:delivery-bound");
 
     const startup = await fixture("unknown");
     const startupFailure = new DeliveryLifecycleService({

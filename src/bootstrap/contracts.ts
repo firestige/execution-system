@@ -48,12 +48,23 @@ export interface PersistedDeliveryBinding {
   readonly projection: DeliveryConfigProjection;
 }
 
-export interface OwnerFact {
+export interface LifecycleOwnerFact {
   readonly owner: "M01" | "M02";
   readonly name: string;
   readonly occurredAt: number;
   readonly outcome?: "COMPLETED" | "FAILED" | "INCOMPLETE" | "CANCELLED" | "START_FAILED";
 }
+export interface DeliveryBoundOwnerFact {
+  readonly owner: "M01";
+  readonly name: "delivery-bound";
+  readonly occurredAt: number;
+  readonly deliveryId: string;
+  readonly taskId: string;
+  readonly taskDisplayName?: string;
+  readonly deliveryBindingIdentity: string;
+  readonly workflowIdentity: string;
+}
+export type OwnerFact = LifecycleOwnerFact | DeliveryBoundOwnerFact;
 export interface OwnerFactIngress { emit(fact: OwnerFact): void }
 
 export interface InstallationFactoryContext {

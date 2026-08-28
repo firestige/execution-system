@@ -48,7 +48,50 @@ function terminalFact(identity: string) {
   });
 }
 
+function taskBindingFact() {
+  return createObservationOwnerFact({
+    owner: "M01",
+    phase: "DELIVERY_BOUND",
+    correlation: { deliveryId: "delivery-1" },
+    identity: "task-binding-delivery-1",
+    signal: "event",
+    eventName: "task.binding",
+    familySchema: "implementation@1",
+    fields: {
+      C01: "delivery-1",
+      C02: "task-1",
+      C07: "a".repeat(64),
+      C09: "task-binding-delivery-1",
+    },
+  });
+}
+
 describe("M03 official OTLP/protobuf exporter", () => {
+  it("never batches different exact Observation profiles under the first record scope", async () => {
+    const mapper = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" });
+    const legacy = mapper.map(terminalFact("event-profile-1"));
+    const task = mapper.map(taskBindingFact());
+    if (!legacy.ok || !task.ok) throw new Error("mapping failed");
+    const requests: Uint8Array[] = [];
+    const exporter = new OtlpObservationExporter({
+      endpoint: "http://127.0.0.1:4318",
+      timeoutMs: 100,
+      maxBatchRecords: 512,
+      maxBatchBytes: 4_194_304,
+      diagnostic() {},
+      transport: {
+        send: async ({ body }) => {
+          requests.push(body);
+          return { kind: "SUCCEEDED", status: 200, body: new Uint8Array() };
+        },
+      },
+    });
+
+    await exporter.export([legacy.record, task.record]);
+
+    expect(requests).toHaveLength(2);
+  });
+
   it("posts exact protobuf bytes to the fixed log path and passes the shared producer oracle", async () => {
     const received: Array<{ url: string; type: string | undefined; bytes: Buffer }> = [];
     const server = createServer((request, response) => {

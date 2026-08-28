@@ -22,8 +22,9 @@ interface ObservationEventFactCore {
 }
 
 export type ObservationEventOwnerFact = ObservationEventFactCore & (
+  | Readonly<{ owner: "M01"; phase: "DELIVERY_BOUND"; eventName: "task.binding" }>
   | Readonly<{ owner: "M02"; phase: "DELIVERY_TERMINAL"; eventName: "delivery.summary" }>
-  | Readonly<{ owner: "DSH"; phase: "WORKFLOW_FACT"; eventName: Exclude<ObservationEventName, "delivery.summary" | "sampling.decision"> }>
+  | Readonly<{ owner: "DSH"; phase: "WORKFLOW_FACT"; eventName: Exclude<ObservationEventName, "delivery.summary" | "sampling.decision" | "task.binding"> }>
 );
 
 interface ObservationSpanFactCore {
@@ -88,8 +89,9 @@ export function createObservationOwnerFact(input: EventFactInput | SpanFactInput
   const allowedCorrelation = ["deliveryId", "traceId", "spanId"];
   const candidate = input as unknown as Readonly<{ signal: string; owner: string; phase: string; eventName?: string }>;
   const combinationAllowed = candidate.signal === "event"
-    ? (candidate.owner === "M02" && candidate.phase === "DELIVERY_TERMINAL" && candidate.eventName === "delivery.summary")
-      || (candidate.owner === "DSH" && candidate.phase === "WORKFLOW_FACT" && candidate.eventName !== "delivery.summary" && candidate.eventName !== "sampling.decision")
+    ? (candidate.owner === "M01" && candidate.phase === "DELIVERY_BOUND" && candidate.eventName === "task.binding")
+      || (candidate.owner === "M02" && candidate.phase === "DELIVERY_TERMINAL" && candidate.eventName === "delivery.summary")
+      || (candidate.owner === "DSH" && candidate.phase === "WORKFLOW_FACT" && candidate.eventName !== "delivery.summary" && candidate.eventName !== "sampling.decision" && candidate.eventName !== "task.binding")
     : (candidate.owner === "M01" && candidate.phase === "DELIVERY_BOUND")
       || (candidate.owner === "M02" && candidate.phase === "ACTIVITY")
       || (candidate.owner === "DSH" && candidate.phase === "ACTIVITY");
@@ -125,9 +127,9 @@ export function createObservationSamplingFact(input: SamplingFactInput): Observa
 }
 
 export interface ObservationResource { readonly "service.name": string; readonly "service.version": string }
-export interface ObservationScope { readonly name: "io.agentops.dsh.observation"; readonly version: "1.0.0"; readonly schema_url: "https://opentelemetry.io/schemas/1.41.0" }
+export interface ObservationScope { readonly name: "io.agentops.dsh.observation"; readonly version: "1.0.0" | "2.0.0"; readonly schema_url: "https://opentelemetry.io/schemas/1.41.0" }
 export interface ObservationEventRecord {
-  readonly profile_version: "1.0.0";
+  readonly profile_version: "1.0.0" | "2.0.0";
   readonly record_type: "event";
   readonly event_name: ObservationEventName;
   readonly resource: ObservationResource;
