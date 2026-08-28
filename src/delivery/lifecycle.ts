@@ -160,7 +160,12 @@ export class DeliveryLifecycleService {
     }
 
     const deliveryId = this.#options.ids.create();
-    const taskId = `task-${deliveryId}`;
+    const taskId = ready.command.taskSelection.mode === "REUSE_TASK"
+      ? ready.command.taskSelection.taskId
+      : `task-${deliveryId}`;
+    const taskDisplayName = ready.command.taskSelection.mode === "NEW_TASK"
+      ? ready.command.taskSelection.displayName
+      : undefined;
     let snapshot;
     try {
       snapshot = await captureTaskPromptSnapshot({
@@ -180,6 +185,7 @@ export class DeliveryLifecycleService {
       manifest = createDeliveryManifest({
         deliveryId,
         taskId,
+        ...(taskDisplayName === undefined ? {} : { taskDisplayName }),
         createdAt: this.#options.clock.now(),
         canonicalWorktree: ready.command.canonicalWorktree,
         resolvedPackage: resolved.value,
