@@ -77,7 +77,6 @@ export function createDeliveryObservationEmitter(options: DeliveryObservationEmi
       })();
       await new Promise<void>((resolve) => {
         const deadline = setTimeout(resolve, options.config.shutdownFlushMs);
-        deadline.unref();
         void closing.then(() => { clearTimeout(deadline); resolve(); }, () => { clearTimeout(deadline); resolve(); });
       });
     },
