@@ -46,6 +46,24 @@ describe("M03 production owner-fact mapper", () => {
         },
       },
     });
+
+    const invalid = createObservationOwnerFact({
+      owner: "M01",
+      phase: "DELIVERY_BOUND",
+      correlation: { deliveryId: "delivery-1" },
+      identity: "task-binding-delivery-1",
+      signal: "event",
+      eventName: "task.binding",
+      familySchema: "implementation@1",
+      fields: {
+        C01: "delivery-1",
+        C02: "task id with spaces",
+        C07: "a".repeat(64),
+        C09: "task-binding-delivery-1",
+      },
+    });
+    expect(new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
+      .map(invalid)).toMatchObject({ ok: false, diagnostic: { code: "OBSERVATION_FIELD_INVALID" } });
   });
 
   it("creates one stable Task binding owner fact from the persisted Manifest", () => {

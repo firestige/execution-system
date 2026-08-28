@@ -5,6 +5,7 @@ import type { ObservationDiagnostic, ObservationMappableFact, ObservationRecord,
 const DIGEST = /^[a-f0-9]{64}$/u;
 const TRACE_ID = /^[a-f0-9]{32}$/u;
 const SPAN_ID = /^[a-f0-9]{16}$/u;
+const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/u;
 const STANDARD = new Set(["gen_ai.operation.name","gen_ai.agent.id","gen_ai.agent.name","gen_ai.agent.version","gen_ai.provider.name","gen_ai.request.model","gen_ai.response.model","gen_ai.tool.name","gen_ai.tool.type","gen_ai.tool.call.id","gen_ai.usage.input_tokens","gen_ai.usage.output_tokens","error.type"]);
 
 export interface ObservationMapperConfig { readonly serviceName: string; readonly serviceVersion: string }
@@ -21,6 +22,7 @@ function fieldValid(id: ObservationFieldId, value: ObservationScalar): boolean {
   const stringLimit = id === "C50" ? 512 : id === "C58" ? 160 : 128;
   if (definition.type === "string" && (typeof value !== "string" || value.length === 0 || value.length > stringLimit)) return false;
   if (id === "C58" && typeof value === "string" && value.trim() !== value) return false;
+  if (id === "C02" && (typeof value !== "string" || !TASK_ID.test(value))) return false;
   if (PROFILE_ENUMS[id] !== undefined && !PROFILE_ENUMS[id]!.includes(value)) return false;
   if ((id === "C07" || id === "C29") && (typeof value !== "string" || !DIGEST.test(value))) return false;
   if (id === "C48" && (typeof value !== "number" || value > 1)) return false;
