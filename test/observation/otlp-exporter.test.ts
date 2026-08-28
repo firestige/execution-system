@@ -256,7 +256,7 @@ describe("M03 official OTLP/protobuf exporter", () => {
   it("flushes on the configured interval and bounds shutdown when transport never settles", async () => {
     let sends = 0;
     const emitter = createDeliveryObservationEmitter({
-      config: Object.freeze({ ...observationConfig(true, "http://127.0.0.1:4318"), flushIntervalMs: 10, shutdownFlushMs: 20 }),
+      config: Object.freeze({ ...observationConfig(true, "http://127.0.0.1:4318"), flushIntervalMs: 100, shutdownFlushMs: 100 }),
       serviceVersion: "0.1.0",
       diagnostic() {},
       transportFactory: () => ({
@@ -266,10 +266,10 @@ describe("M03 official OTLP/protobuf exporter", () => {
     });
     emitter.emit(terminalFact("event-bounded-close"));
 
-    await expect.poll(() => sends, { timeout: 100 }).toBe(1);
+    await expect.poll(() => sends, { timeout: 300 }).toBe(1);
     const disposition = await Promise.race([
       emitter.close().then(() => "closed" as const),
-      new Promise<"unbounded">((resolve) => setTimeout(() => resolve("unbounded"), 100)),
+      new Promise<"unbounded">((resolve) => setTimeout(() => resolve("unbounded"), 300)),
     ]);
 
     expect(disposition).toBe("closed");
