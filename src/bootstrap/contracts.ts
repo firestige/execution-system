@@ -63,6 +63,8 @@ export interface DeliveryBoundOwnerFact {
   readonly taskDisplayName?: string;
   readonly deliveryBindingIdentity: string;
   readonly workflowIdentity: string;
+  readonly manifestProjection?: string;
+  readonly manifestProjectionDigest?: string;
 }
 export type OwnerFact = LifecycleOwnerFact | DeliveryBoundOwnerFact;
 export interface OwnerFactIngress { emit(fact: OwnerFact): void }

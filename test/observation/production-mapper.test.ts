@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -10,17 +11,46 @@ import {
 } from "../../src/observation/index.js";
 import { createTaskBindingObservationFact } from "../../src/bootstrap/index.js";
 import type { DeliveryBoundOwnerFact } from "../../src/bootstrap/index.js";
+import { canonicalJsonBytes } from "../../src/configuration/index.js";
 
 const contractRoot = path.resolve("../system-contracts/observation");
 
+function manifestProjection(deliveryId = "delivery-1", taskId = "task-1", manifestDigest = "a".repeat(64)) {
+  const projection = {
+    schema_version: "execution.delivery-manifest-projection@1.0.0",
+    delivery_id: deliveryId,
+    task_id: taskId,
+    manifest_digest: manifestDigest,
+    workflow: {
+      package_name: "system-design",
+      exact_package_version: "2.0.0",
+      package_digest: `sha256:${"b".repeat(64)}`,
+      workflow_id: "workflow.system-design",
+      workflow_version: "2.0.0",
+      snapshot_id: "snapshot.system-design.2",
+      snapshot_digest: `sha256:${"c".repeat(64)}`,
+    },
+    repository_model_bindings: {
+      document_state: "ABSENT",
+      resolved_map_digest: `sha256:${createHash("sha256").update("[]").digest("hex")}`,
+    },
+    roles: [],
+  };
+  const canonical = Buffer.from(canonicalJsonBytes(projection as never)).toString("utf8");
+  return { canonical, digest: createHash("sha256").update(canonical).digest("hex") };
+}
+
+const taskBindingIdentity = (deliveryId: string): string => `task-binding-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 24)}`;
+
 describe("M03 production owner-fact mapper", () => {
   it("maps admission-time Task binding with display metadata outside identity", () => {
+    const portable = manifestProjection();
     const mapped = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
       .map(createObservationOwnerFact({
         owner: "M01",
         phase: "DELIVERY_BOUND",
         correlation: { deliveryId: "delivery-1" },
-        identity: "task-binding-delivery-1",
+        identity: taskBindingIdentity("delivery-1"),
         signal: "event",
         eventName: "task.binding",
         familySchema: "implementation@1",
@@ -28,8 +58,10 @@ describe("M03 production owner-fact mapper", () => {
           C01: "delivery-1",
           C02: "task-1",
           C07: "a".repeat(64),
-          C09: "task-binding-delivery-1",
+          C09: taskBindingIdentity("delivery-1"),
           C58: "Token tuning",
+          C59: portable.canonical,
+          C60: portable.digest,
         },
       }));
 
@@ -43,6 +75,8 @@ describe("M03 production owner-fact mapper", () => {
           "agentops.delivery.id": "delivery-1",
           "agentops.task.id": "task-1",
           "agentops.task.display_name": "Token tuning",
+          "agentops.delivery.manifest_projection": portable.canonical,
+          "agentops.delivery.manifest_projection_digest": portable.digest,
         },
       },
     });
@@ -51,7 +85,7 @@ describe("M03 production owner-fact mapper", () => {
       owner: "M01",
       phase: "DELIVERY_BOUND",
       correlation: { deliveryId: "delivery-1" },
-      identity: "task-binding-delivery-1",
+      identity: taskBindingIdentity("delivery-1"),
       signal: "event",
       eventName: "task.binding",
       familySchema: "implementation@1",
@@ -59,7 +93,9 @@ describe("M03 production owner-fact mapper", () => {
         C01: "delivery-1",
         C02: "task id with spaces",
         C07: "a".repeat(64),
-        C09: "task-binding-delivery-1",
+        C09: taskBindingIdentity("delivery-1"),
+        C59: portable.canonical,
+        C60: portable.digest,
       },
     });
     expect(new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
@@ -67,6 +103,7 @@ describe("M03 production owner-fact mapper", () => {
   });
 
   it("creates one stable Task binding owner fact from the persisted Manifest", () => {
+    const portable = manifestProjection();
     const fact: DeliveryBoundOwnerFact = {
       owner: "M01",
       name: "delivery-bound",
@@ -76,6 +113,8 @@ describe("M03 production owner-fact mapper", () => {
       taskDisplayName: "Token tuning",
       deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
       workflowIdentity: "implementation-workflow@0.3.0",
+      manifestProjection: portable.canonical,
+      manifestProjectionDigest: portable.digest,
     };
 
     const first = createTaskBindingObservationFact(fact);
@@ -91,8 +130,34 @@ describe("M03 production owner-fact mapper", () => {
         C02: "task-1",
         C07: "a".repeat(64),
         C58: "Token tuning",
+        C59: portable.canonical,
+        C60: portable.digest,
       },
     });
+  });
+
+  it("rejects noncanonical, digest-mismatched, identity-mismatched, or incomplete Manifest projections", () => {
+    const portable = manifestProjection();
+    const base = {
+      owner: "M01" as const,
+      phase: "DELIVERY_BOUND" as const,
+      correlation: { deliveryId: "delivery-1" },
+      identity: taskBindingIdentity("delivery-1"),
+      signal: "event" as const,
+      eventName: "task.binding" as const,
+      familySchema: "implementation@1" as const,
+      fields: { C01: "delivery-1", C02: "task-1", C07: "a".repeat(64), C09: taskBindingIdentity("delivery-1"), C59: portable.canonical, C60: portable.digest },
+    };
+    const cases = [
+      { ...base, fields: { ...base.fields, C60: "d".repeat(64) } },
+      { ...base, fields: { ...base.fields, C59: ` ${portable.canonical}` } },
+      { ...base, fields: { ...base.fields, C01: "delivery-other" } },
+      { ...base, fields: (({ C59: _removed, ...rest }) => rest)(base.fields) },
+    ];
+    const mapper = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" });
+    for (const candidate of cases) {
+      expect(mapper.map(createObservationOwnerFact(candidate as never))).toMatchObject({ ok: false });
+    }
   });
 
   it("accepts the canonical bounded OTel service strings without inventing a stricter identifier grammar", () => {
