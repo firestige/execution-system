@@ -253,6 +253,28 @@ describe("M03 official OTLP/protobuf exporter", () => {
     expect(diagnostics).toContain("OTLP_EXPORT_REFUSED");
   });
 
+  it("flushes on the configured interval and bounds shutdown when transport never settles", async () => {
+    let sends = 0;
+    const emitter = createDeliveryObservationEmitter({
+      config: Object.freeze({ ...observationConfig(true, "http://127.0.0.1:4318"), flushIntervalMs: 10, shutdownFlushMs: 20 }),
+      serviceVersion: "0.1.0",
+      diagnostic() {},
+      transportFactory: () => ({
+        send: async () => { sends += 1; return new Promise<never>(() => {}); },
+        shutdown: async () => new Promise<never>(() => {}),
+      }),
+    });
+    emitter.emit(terminalFact("event-bounded-close"));
+
+    await expect.poll(() => sends, { timeout: 100 }).toBe(1);
+    const disposition = await Promise.race([
+      emitter.close().then(() => "closed" as const),
+      new Promise<"unbounded">((resolve) => setTimeout(() => resolve("unbounded"), 100)),
+    ]);
+
+    expect(disposition).toBe("closed");
+  });
+
   it("contains incomplete/invalid owner facts and makes close idempotent", async () => {
     const diagnostics: string[] = [];
     const emitter = createDeliveryObservationEmitter({
