@@ -43,9 +43,13 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: firestige/workflow-self-recursive
-          ref: main
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.authority_ref || 'main' }}
           fetch-depth: 0
           submodules: recursive
+
+      - name: Verify dispatched authority pins the exact Execution candidate
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: test "$(git ls-tree HEAD execution-system | awk '{print $3}')" = "$GITHUB_SHA"
 
       - name: Checkout execution-system
         uses: actions/checkout@v6

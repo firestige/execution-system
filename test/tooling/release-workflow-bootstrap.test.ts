@@ -60,7 +60,11 @@ describe("release workflow bootstrap", () => {
   it("keeps ordinary component PR qualification on the stable super-project authority", async () => {
     const ci = await readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8");
 
-    expect(ci).toContain("ref: main");
+    expect(ci).toContain(
+      "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.authority_ref || 'main' }}",
+    );
+    expect(ci).toContain("Verify dispatched authority pins the exact Execution candidate");
+    expect(ci).toContain('test "$(git ls-tree HEAD execution-system | awk \'{print $3}\')" = "$GITHUB_SHA"');
     expect(ci).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(ci).toContain("submodules: recursive");
     expect(ci).toContain("fetch-depth: 0");
