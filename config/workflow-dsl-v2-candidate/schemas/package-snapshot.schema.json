@@ -1,0 +1,238 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:agentops:workflow-dsl:1.1.0:package-snapshot",
+  "title": "Agent Ops Workflow Package Snapshot",
+  "description": "Immutable, canonical content binding produced at admission. It records portable identities and relations, never provider-native checkpoint or session identities.",
+  "type": "object",
+  "required": [
+    "kind",
+    "schemaVersion",
+    "snapshot"
+  ],
+  "properties": {
+    "kind": {
+      "const": "agentops.workflow-package-snapshot"
+    },
+    "schemaVersion": {
+      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "id",
+        "digest",
+        "package",
+        "definition",
+        "documents",
+        "resources",
+        "routeBindings",
+        "graph",
+        "authority",
+        "resolutionProof"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "digest": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contentIdentity"
+        },
+        "package": {
+          "type": "object",
+          "required": [
+            "name",
+            "version",
+            "digest"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/version"
+            },
+            "digest": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contentIdentity"
+            }
+          },
+          "additionalProperties": false
+        },
+        "definition": {
+          "type": "object",
+          "required": [
+            "id",
+            "version",
+            "contentIdentity"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+            },
+            "version": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/version"
+            },
+            "contentIdentity": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contentIdentity"
+            }
+          },
+          "additionalProperties": false
+        },
+        "documents": {
+          "type": "array",
+          "minItems": 6,
+          "items": {
+            "type": "object",
+            "required": [
+              "kind",
+              "contentIdentity"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "workflow",
+                  "actions",
+                  "roles",
+                  "routes",
+                  "artifacts",
+                  "validation"
+                ]
+              },
+              "contentIdentity": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contentIdentity"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "owner",
+              "contentIdentity"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "owner": {
+                "enum": [
+                  "owned",
+                  "referenced"
+                ]
+              },
+              "contentIdentity": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contentIdentity"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "routeBindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "action",
+              "role",
+              "route"
+            ],
+            "properties": {
+              "action": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "role": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "route": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "graph": {
+          "type": "object",
+          "required": [
+            "nodes",
+            "eventEdges",
+            "dataEdges",
+            "hostOperations",
+            "terminals",
+            "continuationBindings"
+          ],
+          "properties": {
+            "nodes": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+            },
+            "eventEdges": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+            },
+            "dataEdges": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+            },
+            "hostOperations": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+            },
+            "terminals": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+            },
+            "continuationBindings": {
+              "type": "array",
+              "const": [
+                "delivery",
+                "snapshot",
+                "graphNode",
+                "action",
+                "attempt",
+                "inputBindings",
+                "artifactBindings",
+                "branchResults",
+                "budgets",
+                "pendingWait"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "authority": {
+          "type": "object",
+          "required": [
+            "order",
+            "mergeProof"
+          ],
+          "properties": {
+            "order": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/authorityOrder"
+            },
+            "mergeProof": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contentIdentity"
+            }
+          },
+          "additionalProperties": false
+        },
+        "resolutionProof": {
+          "type": "object",
+          "required": [
+            "noAmbientFallback",
+            "allBindingsExact"
+          ],
+          "properties": {
+            "noAmbientFallback": {
+              "const": true
+            },
+            "allBindingsExact": {
+              "const": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

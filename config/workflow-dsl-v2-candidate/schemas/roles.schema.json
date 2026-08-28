@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:agentops:workflow-dsl:1.1.0:roles",
+  "title": "Agent Ops Role Catalog",
+  "description": "Role catalog document (agentops.roles): stable responsibility, declared Workflow-semantic authority boundary (concerns, Workflow artifact/result authorship, prohibited effects) and independence requirements. It does not grant Provider, filesystem, network, credential, or sandbox permission.",
+  "type": "object",
+  "required": [
+    "kind",
+    "schemaVersion",
+    "roles"
+  ],
+  "properties": {
+    "kind": {
+      "const": "agentops.roles"
+    },
+    "schemaVersion": {
+      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "responsibility",
+          "authorityBoundary"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "name": {
+            "type": "string"
+          },
+          "responsibility": {
+            "type": "string"
+          },
+          "authorityBoundary": {
+            "type": "object",
+            "required": [
+              "concerns",
+              "writePermissions",
+              "prohibited"
+            ],
+            "properties": {
+              "concerns": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "responsibility",
+                    "authority",
+                    "write-permission",
+                    "mission",
+                    "method",
+                    "transition-selection",
+                    "gate",
+                    "budget",
+                    "terminal",
+                    "data",
+                    "session",
+                    "route"
+                  ]
+                },
+                "description": "Workflow-semantic concerns this Role prompt may instruct. Tool/model bindings are compatibility dependencies, not authority concerns (spec §7.2)."
+              },
+              "writePermissions": {
+                "type": "array",
+                "description": "Workflow artifact/result authorship boundary only; never a native filesystem or Provider permission grant.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "target",
+                    "scope"
+                  ],
+                  "properties": {
+                    "target": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "prohibited": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "independence": {
+            "type": "object",
+            "required": [
+              "isolation"
+            ],
+            "properties": {
+              "isolation": {
+                "enum": [
+                  "session-isolated",
+                  "shared"
+                ]
+              },
+              "barrier": {
+                "type": "boolean"
+              },
+              "sharedRawEvidenceOnly": {
+                "type": "boolean",
+                "description": "Isolated lenses may share raw evidence but never each other's conclusions (spec §6.8)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "maxItems": 128
+    }
+  },
+  "additionalProperties": false
+}
