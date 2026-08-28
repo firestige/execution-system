@@ -1,0 +1,300 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:agentops:workflow-dsl:1.1.0:workflow-definition",
+  "title": "Agent Ops Workflow Definition",
+  "description": "Runtime-neutral graph, immutable parallel branch-result flow, typed Runtime event routes, Wait declarations, budgets, recovery policies and terminals.",
+  "type": "object",
+  "required": [
+    "kind",
+    "schemaVersion",
+    "workflow",
+    "state",
+    "graph",
+    "dataflow"
+  ],
+  "properties": {
+    "kind": {
+      "const": "agentops.workflow-definition"
+    },
+    "schemaVersion": {
+      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+    },
+    "workflow": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "version",
+        "purpose",
+        "contractVersion"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/version"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contractVersion": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+        }
+      },
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "required": [
+        "fields"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9_]*$"
+              },
+              "type": {
+                "enum": [
+                  "string",
+                  "integer",
+                  "number",
+                  "boolean",
+                  "array",
+                  "object",
+                  "artifactRef"
+                ]
+              },
+              "items": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/inlineSchema"
+              },
+              "schema": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/schemaRef"
+              },
+              "required": {
+                "type": "boolean",
+                "default": false
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "graph": {
+      "type": "object",
+      "required": [
+        "start",
+        "nodes",
+        "edges",
+        "eventEdges",
+        "terminals"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "from",
+              "to"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "from": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "to": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "eventEdges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "from",
+              "event",
+              "to"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "from": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "event": {
+                "enum": [
+                  "budget-exhausted",
+                  "wait-expired",
+                  "cancelled",
+                  "nonretryable-failure",
+                  "continuation-invalid"
+                ]
+              },
+              "to": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/target"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "terminals": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "kind",
+              "meaning"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "kind": {
+                "enum": [
+                  "success",
+                  "failure",
+                  "incomplete",
+                  "cancelled",
+                  "custom"
+                ]
+              },
+              "meaning": {
+                "type": "string",
+                "minLength": 1
+              },
+              "validation": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+              },
+              "proposalCheckpoint": {
+                "type": "boolean",
+                "default": true
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "dataflow": {
+      "type": "object",
+      "required": [
+        "edges"
+      ],
+      "properties": {
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "source",
+              "target"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+              },
+              "source": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/sourcePort"
+              },
+              "target": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/targetPort"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "hostOperations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "contractIdentity",
+          "configuration",
+          "requiredCapabilities"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "contractIdentity": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "configuration": {
+            "type": "object"
+          },
+          "requiredCapabilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "enum": [
+                "deterministic-validation",
+                "deterministic-selection",
+                "deterministic-transformation"
+              ]
+            },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "waits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "purpose",
+          "correlation"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
