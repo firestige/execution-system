@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:agentops:workflow-dsl:1.1.0:routes",
+  "title": "Agent Ops Route Catalog and execution-resource binding",
+  "description": "Route catalog document (agentops.routes): Role route → exact Agent/resource compatibility binding plus Workflow data/artifact access intent and escalation policy. Tool/model/Driver references and access intent do not grant Provider-native permission.",
+  "type": "object",
+  "required": [
+    "kind",
+    "schemaVersion",
+    "routes"
+  ],
+  "properties": {
+    "kind": {
+      "const": "agentops.routes"
+    },
+    "schemaVersion": {
+      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/contractVersion"
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "resources",
+          "access",
+          "escalationAllowed"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "role": {
+            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+          },
+          "resources": {
+            "type": "object",
+            "required": [
+              "rolePrompt",
+              "actionPrompts",
+              "driver",
+              "sessionPolicy",
+              "capabilities"
+            ],
+            "properties": {
+              "rolePrompt": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/resourceRef"
+              },
+              "actionPrompts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "action",
+                    "prompt"
+                  ],
+                  "properties": {
+                    "action": {
+                      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+                    },
+                    "prompt": {
+                      "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/resourceRef"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/resourceRef"
+                }
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/resourceRef"
+                },
+                "description": "Exact required tool identities; availability is Runtime compatibility and native use remains subject to Provider Tool Policy."
+              },
+              "driver": {
+                "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/resourceRef",
+                "description": "Exact projection dependency; the Driver is not an authority layer."
+              },
+              "capabilities": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "structured-completion",
+                    "action-interaction"
+                  ]
+                },
+                "uniqueItems": true,
+                "contains": {
+                  "const": "structured-completion"
+                }
+              },
+              "sessionPolicy": {
+                "type": "object",
+                "required": [
+                  "scope",
+                  "isolation"
+                ],
+                "properties": {
+                  "scope": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "episode"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "source"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "const": "data-bound"
+                          },
+                          "source": {
+                            "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/sourcePort"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "isolation": {
+                    "enum": [
+                      "isolated",
+                      "shared"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "access": {
+            "type": "array",
+            "description": "Required Workflow data/artifact access intent. The selected Runtime independently authorizes native filesystem, network, credential, and side effects.",
+            "items": {
+              "type": "object",
+              "required": [
+                "target",
+                "mode"
+              ],
+              "properties": {
+                "target": {
+                  "type": "string"
+                },
+                "mode": {
+                  "enum": [
+                    "read",
+                    "write",
+                    "execute"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "escalationAllowed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
