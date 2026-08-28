@@ -898,3 +898,187 @@
         },
         "budget": {
           "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "continuationSource": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "cleanupNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "disposition",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "const": "cleanup"
+        },
+        "disposition": {
+          "enum": [
+            "cancellation",
+            "failure",
+            "continuation"
+          ]
+        },
+        "action": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "budget": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/actionNode"
+        },
+        {
+          "$ref": "#/$defs/parallelNode"
+        },
+        {
+          "$ref": "#/$defs/waitNode"
+        },
+        {
+          "$ref": "#/$defs/waitRenewalNode"
+        },
+        {
+          "$ref": "#/$defs/recoveryNode"
+        },
+        {
+          "$ref": "#/$defs/cleanupNode"
+        }
+      ]
+    },
+    "handoff": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "domainSemantics",
+        "invalidationConditions",
+        "semanticDependency",
+        "requiredEvidence",
+        "returnLocation",
+        "reopenCondition",
+        "semanticOnly"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "kind": {
+          "enum": [
+            "CONTRACT_PREREQUISITE",
+            "IMPLEMENTATION_FEASIBILITY",
+            "IMPLEMENTATION_VERIFICATION",
+            "OPERATIONAL_TUNING",
+            "DESIGN_OWNED_PARAMETER",
+            "CUSTOM"
+          ]
+        },
+        "domainSemantics": {
+          "type": "string"
+        },
+        "invalidationConditions": {
+          "type": "string"
+        },
+        "semanticDependency": {
+          "type": "string"
+        },
+        "requiredEvidence": {
+          "type": "string"
+        },
+        "returnLocation": {
+          "type": "string"
+        },
+        "reopenCondition": {
+          "type": "string"
+        },
+        "semanticOnly": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "consumedHandoff": {
+      "type": "object",
+      "required": [
+        "id",
+        "upstreamHandoff",
+        "classification",
+        "owner",
+        "affectedLocal",
+        "preservesSemantics",
+        "mustNotWeaken"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+        },
+        "upstreamHandoff": {
+          "type": "object",
+          "required": [
+            "handoff"
+          ],
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "packageVersion": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/version"
+            },
+            "handoff": {
+              "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identity"
+            }
+          },
+          "additionalProperties": false
+        },
+        "classification": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "affectedLocal": {
+          "$ref": "urn:agentops:workflow-dsl:1.1.0:meta#/$defs/identityList"
+        },
+        "preservesSemantics": {
+          "type": "object",
+          "required": [
+            "semanticDependency",
+            "reopenCondition"
+          ],
+          "properties": {
+            "semanticDependency": {
+              "type": "string"
+            },
+            "reopenCondition": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "mustNotWeaken": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
