@@ -1,6 +1,7 @@
 export * from "./admission.js";
 export * from "./current-slot.js";
 export * from "./manifest.js";
+export * from "./manifest-v2.js";
 export * from "./repository-model-bindings.js";
 export * from "./resolved-role-model-bindings.js";
 export * from "./lifecycle.js";
