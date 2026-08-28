@@ -11,3 +11,4 @@ export * from "./source.js";
 export * from "./workflow-package-resolver.js";
 export * from "./workflow-package-store.js";
 export * from "./workflow-package-validation.js";
+export * from "./workflow-v2-role-snapshot.js";
