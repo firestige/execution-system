@@ -20,6 +20,7 @@ export type { DeliveryConfigProjectionV2 } from "../configuration/index.js";
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const PORTABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,1023}$/u;
 const IDENTITY = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+const PACKAGE_NAME = /^[a-z][a-z0-9-]*$/u;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
 const MAX_ROLES = 128;
 const MAX_PROJECTION_BYTES = 64 * 1024;
@@ -150,9 +151,9 @@ export function createDeliveryManifestV2(input: CreateDeliveryManifestV2Input): 
   const repositoryValid = repo.documentState === "ABSENT"
     || (repo.documentState === "PRESENT" && SHA256.test(repo.documentDigest));
   const idsValid = PORTABLE_ID.test(input.deliveryId) && PORTABLE_ID.test(input.taskId)
-    && IDENTITY.test(input.workflowPackage.name) && VERSION.test(input.workflowPackage.exactVersion)
+    && PACKAGE_NAME.test(input.workflowPackage.name) && VERSION.test(input.workflowPackage.exactVersion)
     && IDENTITY.test(input.workflowSnapshot.workflowId) && VERSION.test(input.workflowSnapshot.workflowVersion)
-    && PORTABLE_ID.test(input.workflowSnapshot.snapshotId);
+    && IDENTITY.test(input.workflowSnapshot.snapshotId);
   const pathsValid = isAbsolute(input.canonicalWorktree) && isAbsolute(input.workflowPackage.localMaterializationPath)
     && isAbsolute(input.promptSnapshot.path);
   const digestsValid = SHA256.test(input.workflowPackage.packageDigest) && SHA256.test(input.workflowSnapshot.snapshotDigest)

@@ -74,7 +74,7 @@ async function fixture(): Promise<CreateDeliveryManifestV2Input> {
     workflowSnapshot: {
       workflowId: "workflow.system-design",
       workflowVersion: "2.0.0",
-      snapshotId: `workflow.system-design@2.0.0:${sha("2")}`,
+      snapshotId: "snapshot.system-design.2",
       snapshotDigest: sha("2"),
     },
     agentActionRoles,
