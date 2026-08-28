@@ -298,3 +298,107 @@
             "slot": {
               "$ref": "#/$defs/valueSlot"
             }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "controlIdentity",
+            "slot"
+          ],
+          "properties": {
+            "kind": {
+              "const": "control-result"
+            },
+            "controlIdentity": {
+              "$ref": "#/$defs/identity"
+            },
+            "slot": {
+              "$ref": "#/$defs/valueSlot"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "targetPort": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "site",
+            "slot"
+          ],
+          "properties": {
+            "kind": {
+              "const": "site-input"
+            },
+            "site": {
+              "$ref": "#/$defs/executionSite"
+            },
+            "slot": {
+              "$ref": "#/$defs/valueSlot"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "controlIdentity",
+            "slot"
+          ],
+          "properties": {
+            "kind": {
+              "const": "control-input"
+            },
+            "controlIdentity": {
+              "$ref": "#/$defs/identity"
+            },
+            "slot": {
+              "$ref": "#/$defs/valueSlot"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "field"
+          ],
+          "properties": {
+            "kind": {
+              "const": "state"
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "artifactIdentity"
+          ],
+          "properties": {
+            "kind": {
+              "const": "artifact"
+            },
+            "artifactIdentity": {
+              "$ref": "#/$defs/identity"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
