@@ -76,6 +76,59 @@ async function resolverFixture(source: WorkflowPackageSource) {
 }
 
 describe("Workflow Package Store and frozen validation", () => {
+  it("fails closed when an exact READY record is malformed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "workflow-package-malformed-ready-"));
+    const readyRoot = join(root, "ready");
+    const exactRoot = join(readyRoot, "packages", "demo", "1.0.0");
+    await mkdir(exactRoot, { recursive: true });
+    await writeFile(join(exactRoot, "ready.json"), "{not-json\n");
+    const store = new WorkflowPackageStore({ readyRoot, stagingRoot: join(root, "staging") });
+
+    await expect(store.lookupExact("demo", "1.0.0"))
+      .rejects.toMatchObject({ code: "WORKFLOW_PACKAGE_INVALID" });
+  });
+
+  it("fails closed when READY metadata has an untrusted material coordinate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "workflow-package-untrusted-ready-"));
+    const readyRoot = join(root, "ready");
+    const exactRoot = join(readyRoot, "packages", "demo", "1.0.0");
+    await mkdir(exactRoot, { recursive: true });
+    await writeFile(join(exactRoot, "ready.json"), `${JSON.stringify({
+      schemaVersion: "execution.workflow-package-ready@1.0.0",
+      name: "demo",
+      exactVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      workflowId: "workflow.demo",
+      localPath: "/tmp/outside-store",
+      relativePackagePath: "../../outside-store",
+    })}\n`);
+    const store = new WorkflowPackageStore({ readyRoot, stagingRoot: join(root, "staging") });
+
+    await expect(store.lookupExact("demo", "1.0.0"))
+      .rejects.toMatchObject({ code: "WORKFLOW_PACKAGE_INVALID" });
+  });
+
+  it("fails closed when an exact READY record outlives its cached material", async () => {
+    const root = await mkdtemp(join(tmpdir(), "workflow-package-missing-material-"));
+    const readyRoot = join(root, "ready");
+    const exactRoot = join(readyRoot, "packages", "demo", "1.0.0");
+    const localPath = join(exactRoot, "material", "package");
+    await mkdir(exactRoot, { recursive: true });
+    await writeFile(join(exactRoot, "ready.json"), `${JSON.stringify({
+      schemaVersion: "execution.workflow-package-ready@1.0.0",
+      name: "demo",
+      exactVersion: "1.0.0",
+      packageDigest: `sha256:${"a".repeat(64)}`,
+      workflowId: "workflow.demo",
+      localPath,
+      relativePackagePath: "package",
+    })}\n`);
+    const store = new WorkflowPackageStore({ readyRoot, stagingRoot: join(root, "staging") });
+
+    await expect(store.lookupExact("demo", "1.0.0"))
+      .rejects.toMatchObject({ code: "WORKFLOW_PACKAGE_INVALID" });
+  });
+
   it("rejects relative Store roots and fabricated staging authority", async () => {
     expect(() => new WorkflowPackageStore({ readyRoot: "relative", stagingRoot: "/tmp/staging" }))
       .toThrow("roots must be absolute");
@@ -94,7 +147,7 @@ describe("Workflow Package Store and frozen validation", () => {
       exactVersion: candidate.exactVersion,
       packageDigest: `sha256:${"a".repeat(64)}`,
       workflowId: "fabricated",
-    }, false)).rejects.toMatchObject({ code: "WORKFLOW_CACHE_PUBLISH_FAILED" });
+    })).rejects.toMatchObject({ code: "WORKFLOW_CACHE_PUBLISH_FAILED" });
   });
 
   it.each([
@@ -152,13 +205,40 @@ describe("Workflow Package Store and frozen validation", () => {
     const validator = new FrozenWorkflowPackageValidator(compatibility);
     const firstStaging = await f.store.stage(candidate);
     const validated = await validator.validate(firstStaging);
-    await f.store.publish(firstStaging, validated, false);
+    await f.store.publish(firstStaging, validated);
     const conflictingStaging = await f.store.stage(candidate);
     await expect(f.store.publish(conflictingStaging, {
       ...validated,
       packageDigest: `sha256:${"f".repeat(64)}`,
-    }, false)).rejects.toMatchObject({ code: "WORKFLOW_CACHE_PUBLISH_FAILED" });
+    })).rejects.toMatchObject({ code: "WORKFLOW_CACHE_PUBLISH_FAILED" });
     await f.store.discard(conflictingStaging);
+  });
+
+  it("reuses an identical READY publication and consumes the duplicate staging directory", async () => {
+    const candidate = await candidateFrom(contributedDefinition);
+    const f = await resolverFixture(new QueuedSource([]));
+    const validator = new FrozenWorkflowPackageValidator(compatibility);
+    const firstStaging = await f.store.stage(candidate);
+    const validated = await validator.validate(firstStaging);
+    const first = await f.store.publish(firstStaging, validated);
+    const duplicateStaging = await f.store.stage(candidate);
+
+    await expect(f.store.publish(duplicateStaging, validated)).resolves.toEqual(first);
+    await expect(f.store.publish(duplicateStaging, validated))
+      .rejects.toMatchObject({ code: "WORKFLOW_CACHE_PUBLISH_FAILED" });
+    await expect(f.store.discard(duplicateStaging)).resolves.toBeUndefined();
+  });
+
+  it("maps an atomic publication collision to a cache publication failure", async () => {
+    const candidate = await candidateFrom(contributedDefinition);
+    const f = await resolverFixture(new QueuedSource([]));
+    const staging = await f.store.stage(candidate);
+    const validated = await new FrozenWorkflowPackageValidator(compatibility).validate(staging);
+    await mkdir(join(f.root, "store", "packages", validated.name, validated.exactVersion, "occupied"), { recursive: true });
+
+    await expect(f.store.publish(staging, validated))
+      .rejects.toMatchObject({ code: "WORKFLOW_CACHE_PUBLISH_FAILED" });
+    await f.store.discard(staging);
   });
 });
 

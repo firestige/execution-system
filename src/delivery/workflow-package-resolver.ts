@@ -54,7 +54,7 @@ export class WorkflowPackageResolver {
     try {
       staging = await this.store.stage(sourced.candidate);
       const validated = await this.validator.validate(staging);
-      const resolved = await this.store.publish(staging, validated, false);
+      const resolved = await this.store.publish(staging, validated);
       return Object.freeze({ ok: true, value: resolved });
     } catch (cause) {
       if (staging !== undefined) await this.store.discard(staging);
