@@ -6,6 +6,7 @@ import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  AgentProviderFactoryRegistry,
   CodexCliProviderRealmFactory,
   type CodexCliProviderConfiguration,
 } from "../../../src/index.js";
@@ -115,6 +116,16 @@ async function acquire(value: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe("Codex CLI Agent Provider", () => {
+  it("registers the production factory through the frozen Delivery registry contract", async () => {
+    const value = await fixture("success");
+    const factory = new CodexCliProviderRealmFactory(value.configuration);
+
+    const registry = new AgentProviderFactoryRegistry([factory]);
+
+    expect(registry.admit({ identity: "provider.codex", version: "0.144.5" }, ["structured-completion"]))
+      .toMatchObject({ identity: "provider.codex", version: "0.144.5", adapterKey: "codex-cli" });
+  });
+
   it("pins the qualified Codex CLI payload as an exact production dependency", async () => {
     const packageDocument = JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf8"));
     expect(packageDocument.dependencies?.["@openai/codex"]).toBe("0.144.5");
