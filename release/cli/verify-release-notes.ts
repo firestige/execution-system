@@ -11,16 +11,36 @@ function sha256(value: string): string {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
+function currentChangelogSection(version: string, changelog: string): string {
+  const headings = [...changelog.matchAll(/^## \[([^\]\n]+)\][^\n]*\n/gmu)];
+  const unreleasedIndex = headings.findIndex((heading) => heading[1] === "Unreleased");
+  let selectedIndex = unreleasedIndex;
+  let emptyCode = "CHANGELOG_UNRELEASED_SECTION_EMPTY";
+  if (selectedIndex === -1) {
+    const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const currentPrerelease = new RegExp(`^${escapedVersion}-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*$`, "u");
+    if (headings[0]?.[1] === undefined || !currentPrerelease.test(headings[0][1])) {
+      throw new Error("CHANGELOG_CURRENT_PRERELEASE_SECTION_MISSING");
+    }
+    selectedIndex = 0;
+    emptyCode = "CHANGELOG_CURRENT_PRERELEASE_SECTION_EMPTY";
+  }
+  const selected = headings[selectedIndex];
+  if (selected === undefined || selected.index === undefined) {
+    throw new Error("CHANGELOG_UNRELEASED_SECTION_MISSING");
+  }
+  const contentStart = selected.index + selected[0].length;
+  const contentEnd = headings[selectedIndex + 1]?.index ?? changelog.length;
+  const content = changelog.slice(contentStart, contentEnd).trim();
+  if (content.length === 0) throw new Error(emptyCode);
+  return content;
+}
+
 export function renderReleaseNotes(version: string, compatibility: Compatibility, changelog: string): Readonly<{
   notes: string;
   changelogSectionSha256: string;
 }> {
-  const heading = /^## \[Unreleased\][^\n]*\n/mu.exec(changelog);
-  if (heading === null) throw new Error("CHANGELOG_UNRELEASED_SECTION_MISSING");
-  const tail = changelog.slice(heading.index + heading[0].length);
-  const nextHeading = /^## \[/mu.exec(tail);
-  const section = tail.slice(0, nextHeading?.index ?? tail.length).trim();
-  if (section.length === 0) throw new Error("CHANGELOG_UNRELEASED_SECTION_EMPTY");
+  const section = currentChangelogSection(version, changelog);
   const notes = [
     `# WSR Execution ${version}`,
     "",
