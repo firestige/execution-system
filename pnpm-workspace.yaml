@@ -13,4 +13,4 @@ allowBuilds:
   "protobufjs": true
 
 minimumReleaseAgeExclude:
-  - wsr-execution@0.1.3
+  - wsr-execution@0.1.4
