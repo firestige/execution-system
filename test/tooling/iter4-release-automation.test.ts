@@ -83,7 +83,7 @@ describe("Iteration 4 release automation", () => {
   });
 
   it("checks every lockstep coordinate and rejects a dependency or workflow filename drift", async () => {
-    await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.1.3");
+    await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.1.4");
 
     const authorityWorkflow = await readFile(
       path.join(repository, "../.github/workflows/iter3-execution-ci.yml"),
@@ -119,6 +119,25 @@ describe("Iteration 4 release automation", () => {
       intake: { ...intake, dependencies: { "wsr-execution": "0.1.3" } },
       workflow: "wsr-execution-0.1.3.tgz",
     })).toThrowError("RELEASE_WORKFLOW_VERSION_HARDCODED");
+  });
+
+  it("pins the minimum non-vulnerable tar release across the manifest and lockfile", async () => {
+    const [manifest, lockfile] = await Promise.all([
+      readFile(path.join(repository, "package.json"), "utf8").then(JSON.parse),
+      readFile(path.join(repository, "pnpm-lock.yaml"), "utf8"),
+    ]);
+
+    expect(manifest.dependencies.tar).toBe("7.5.21");
+    expect(lockfile).toContain("specifier: 7.5.21");
+    expect(lockfile).toContain("version: 7.5.21");
+
+    const lockedTarVersions = [...lockfile.matchAll(/^  tar@(\d+\.\d+\.\d+):$/gmu)]
+      .map((match) => match[1]);
+    expect(lockedTarVersions).not.toHaveLength(0);
+    expect(lockedTarVersions.every((version) => {
+      const [major = 0, minor = 0, patch = 0] = (version ?? "0.0.0").split(".").map(Number);
+      return major > 7 || (major === 7 && (minor > 5 || (minor === 5 && patch >= 21)));
+    })).toBe(true);
   });
 
   it("publishes core before intake and resumes only an exact already-published coordinate", async () => {
@@ -307,7 +326,7 @@ describe("Iteration 4 release automation", () => {
     const workspace = await readFile(path.join(repository, "pnpm-workspace.yaml"), "utf8");
     expect(workspace).toContain('"better-sqlite3": true');
     expect(workspace).toContain("minimumReleaseAgeExclude:");
-    expect(workspace).toContain("wsr-execution@0.1.3");
+    expect(workspace).toContain("wsr-execution@0.1.4");
 
     const cleanEnvironment = { ...process.env };
     delete cleanEnvironment.WSR_RELEASE_PACK_MODE;
