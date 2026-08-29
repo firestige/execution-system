@@ -7,7 +7,7 @@ English | [中文](README.zh-CN.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
 [![npm](https://img.shields.io/npm/v/wsr-dsh-intake)](https://www.npmjs.com/package/wsr-dsh-intake)
-[![CI](https://github.com/firestige/execution-system/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/execution-system/actions)
+[![CI](https://github.com/firestige/wsr-execution/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/wsr-execution/actions)
 
 **Turn every agent conversation into an auditable, recoverable, version-bound delivery.**
 
@@ -42,7 +42,7 @@ Three modules carry the responsibility:
 - **Runtime Interaction** owns canonical worktree exclusivity, the current Delivery slot, Manifest persistence, Runtime invocation, recovery, and final handling.
 - **Delivery Observation** maps outbound bounded facts to a one-way, best-effort OTLP profile without controlling execution.
 
-The default Source is the configured `firestige/workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
+The default Source is the configured `firestige/wsr-workflow-package` GitHub Release. `implementation-workflow@0.3.0` and `system-design-workflow@0.3.0` are downloaded, validated, and published to the local READY store; neither is embedded in an Execution artifact.
 
 ![Architecture](docs/assets/architecture.png)
 
@@ -138,7 +138,7 @@ git clone --recurse-submodules https://github.com/firestige/workflow-self-recurs
 To clone it standalone:
 
 ```sh
-git clone https://github.com/firestige/execution-system.git
+git clone https://github.com/firestige/wsr-execution.git
 ```
 
 ## Documentation

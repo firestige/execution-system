@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
 [![npm](https://img.shields.io/npm/v/wsr-dsh-intake)](https://www.npmjs.com/package/wsr-dsh-intake)
-[![CI](https://github.com/firestige/execution-system/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/execution-system/actions)
+[![CI](https://github.com/firestige/wsr-execution/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/wsr-execution/actions)
 
 **把每一次 Agent 对话变成一条可审计、可恢复、版本绑定的交付。**
 
@@ -42,7 +42,7 @@ DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runn
 - **Runtime Interaction** 拥有规范工作区排他性、当前 Delivery 槽位、Manifest 持久化、Runtime 调用、恢复与最终处理。
 - **Delivery Observation** 将出站有界事实映射到单向、尽力而为的 OTLP profile，但不控制执行。
 
-默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
+默认 Source 是配置指定的 `firestige/wsr-workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 
 ![架构图](docs/assets/architecture.png)
 
@@ -138,7 +138,7 @@ git clone --recurse-submodules https://github.com/firestige/workflow-self-recurs
 单独克隆：
 
 ```sh
-git clone https://github.com/firestige/execution-system.git
+git clone https://github.com/firestige/wsr-execution.git
 ```
 
 ## 文档

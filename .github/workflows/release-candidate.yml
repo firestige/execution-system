@@ -105,7 +105,7 @@ jobs:
       - name: Checkout exact publisher tooling revision
         uses: actions/checkout@v6
         with:
-          repository: firestige/execution-system
+          repository: firestige/wsr-execution
           ref: ${{ github.sha }}
           path: release-publisher
 
@@ -199,7 +199,7 @@ jobs:
           app-id: ${{ vars.WSR_RELEASE_APP_ID }}
           private-key: ${{ secrets.WSR_RELEASE_APP_PRIVATE_KEY }}
           owner: firestige
-          repositories: execution-system
+          repositories: wsr-execution
           permission-contents: write
           permission-workflows: write
 

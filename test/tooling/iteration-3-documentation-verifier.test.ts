@@ -53,7 +53,7 @@ describe.skipIf(!existsSync(path.join(repositorySuperRoot, "docs/guides/dsh-exec
     const roots = await fixture();
     const file = path.join(roots.superRoot, "docs/guides/dsh-execution-local-e2e.md");
     const value = await readFile(file, "utf8");
-    await writeFile(file, `${value}\ncurl https://github.com/firestige/execution-system/releases/download/0.1.1/plugin.tgz\n`);
+    await writeFile(file, `${value}\ncurl https://github.com/firestige/wsr-execution/releases/download/0.1.1/plugin.tgz\n`);
 
     await expect(verifyIteration3Documentation(roots)).rejects.toMatchObject({
       code: "DOCUMENTATION_INSTALL_SOURCE_INVALID",

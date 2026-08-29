@@ -1,6 +1,6 @@
 {
   "schemaVersion": "wsr.release-component@1.0.0",
-  "repository": "firestige/execution-system",
+  "repository": "firestige/wsr-execution",
   "releaseBranch": "main",
   "triggerBranch": "release/next",
   "assetMode": "npm-pair",

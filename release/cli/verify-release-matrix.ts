@@ -14,11 +14,11 @@ type CapabilityMatrix = Readonly<{
 }>;
 
 const EXPECTED = new Map([
-  ["firestige/execution-system", "active"],
-  ["firestige/evidence-system", "active"],
-  ["firestige/system-contracts", "active"],
-  ["firestige/workflow-package", "active"],
-  ["firestige/evolution-system", "parameter-only"],
+  ["firestige/wsr-execution", "active"],
+  ["firestige/wsr-evidence", "active"],
+  ["firestige/wsr-contracts", "active"],
+  ["firestige/wsr-workflow-package", "active"],
+  ["firestige/wsr-evolution", "parameter-only"],
   ["firestige/bi", "excluded"],
 ]);
 
