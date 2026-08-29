@@ -502,9 +502,11 @@ export class CodexCliProviderRealmFactory implements AgentProviderRealmFactory {
 
   constructor(configuration: CodexCliProviderConfiguration) {
     this.#configuration = exactConfiguration(configuration);
+    Object.setPrototypeOf(this, Object.prototype);
+    Object.freeze(this);
   }
 
-  async acquire(request: AgentProviderDeliveryRealmRequest): Promise<AgentProviderDeliveryRealmLease> {
+  readonly acquire = async (request: AgentProviderDeliveryRealmRequest): Promise<AgentProviderDeliveryRealmLease> => {
     exactRealmRequest(request);
     await access(this.#configuration.executablePath, constants.X_OK).catch(() => {
       throw new CodexCliProviderError("CODEX_ADMISSION_FAILED", "CLI executable unavailable");
@@ -590,5 +592,5 @@ export class CodexCliProviderRealmFactory implements AgentProviderRealmFactory {
         await adapter.dispose();
       },
     });
-  }
+  };
 }
