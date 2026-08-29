@@ -61,6 +61,7 @@
     "prepublishOnly": "pnpm release:prepublish-guard"
   },
   "dependencies": {
+    "@github/copilot": "1.0.78",
     "@langchain/core": "1.2.9",
     "@langchain/langgraph": "1.4.12",
     "@langchain/langgraph-checkpoint-sqlite": "1.0.4",
