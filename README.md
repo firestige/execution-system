@@ -125,6 +125,8 @@ For host-neutral embedding, import `ExecutionApplicationFactory`, `DefaultExecut
 
 `execution.config@2.0.0` contains no installation-wide Provider or model default. The embedding product registers any number of exact, immutable Agent Provider factories through `AgentProviderFactoryRegistry`; duplicate identities fail closed. Each Agent-action Role must be present in `<canonical-worktree>/.wsr/role-provider-bindings.json` with an exact Provider identity/version and Provider-owned model coordinate. Admission validates required Workflow capabilities, freezes the factory descriptor digest into `execution.delivery-manifest@2.0.0`, and never performs priority selection or fallback. Recovery accepts only the same descriptor and starts realms only for Providers actually used by the persisted Delivery. See `config/schema/execution.config.v2.schema.json`.
 
+The package-root `createCopilotAgentProviderFactory()` registers `provider.copilot@1.0.78`. It imports the SDK bundled by the exact `@github/copilot@1.0.78` platform payload, reuses the local logged-in user through the SDK, and never asks the embedding host for token material. A Delivery realm admits only `github-copilot` model coordinates frozen for its Roles, runs sessions in the canonical worktree with an allowlisted Action tool surface, and fails closed on runtime, login, model, recovery, or binding drift.
+
 ## Get the source
 
 This repository is normally consumed as a submodule of [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive):

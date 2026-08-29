@@ -18,7 +18,7 @@ import {
   type NativeProviderSessionFactory,
   type NativeTurnEvent,
 } from "../../src/invocation/index.js";
-import { createCopilotProviderShell } from "../../src/providers/copilot/index.js";
+import { createCodexProviderShell } from "../../src/providers/codex/index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -566,17 +566,17 @@ describe("managed Invocation", () => {
     const directory = await mkdtemp(join(tmpdir(), "g03-journal-"));
     temporaryDirectories.push(directory);
     const input = dispatch();
-    const copilot = structuredClone(input) as InvocationDispatch;
-    (copilot.executor.session.driver as { providerIdentity: string }).providerIdentity = "copilot-sdk";
-    bindDispatch(copilot);
+    const codex = structuredClone(input) as InvocationDispatch;
+    (codex.executor.session.driver as { providerIdentity: string }).providerIdentity = "codex-cli";
+    bindDispatch(codex);
     const manager = createManagedInvocation({
-      providers: { "copilot-sdk": createCopilotProviderShell() },
+      providers: { "codex-cli": createCodexProviderShell() },
       credentials: new LeaseBroker(),
       journal: new FileInvocationJournalStore(directory),
       resultValidator: { validate: () => true },
     });
 
-    expect(await manager.host.start(copilot, sink().value)).toEqual({ ok: false, error: { code: "PROVIDER_NOT_IMPLEMENTED" } });
+    expect(await manager.host.start(codex, sink().value)).toEqual({ ok: false, error: { code: "PROVIDER_NOT_IMPLEMENTED" } });
   });
 
   it("rejects stale input correlation before provider effects", async () => {
