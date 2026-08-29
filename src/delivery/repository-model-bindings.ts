@@ -6,12 +6,13 @@ import { parseDocument } from "yaml";
 
 import { canonicalJsonBytes, deepFreeze } from "../configuration/index.js";
 
-const DOCUMENT_SCHEMA_VERSION = "execution.repository-model-bindings@1.0.0" as const;
-const SNAPSHOT_SCHEMA_VERSION = "execution.repository-model-bindings-snapshot@1.0.0" as const;
-const DOCUMENT_RELATIVE_PATH = ".wsr/model-bindings.json" as const;
-const MAX_DOCUMENT_BYTES = 64 * 1024;
+const DOCUMENT_SCHEMA_VERSION = "execution.repository-role-provider-bindings@1.0.0" as const;
+const SNAPSHOT_SCHEMA_VERSION = "execution.repository-role-provider-bindings-snapshot@1.0.0" as const;
+const DOCUMENT_RELATIVE_PATH = ".wsr/role-provider-bindings.json" as const;
+const MAX_DOCUMENT_BYTES = 256 * 1024;
 const MAX_BINDINGS = 1_024;
 const IDENTITY = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
 type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 type UnknownRecord = Record<string, unknown>;
@@ -38,6 +39,14 @@ export interface ExactModelSelection {
   readonly model: string;
 }
 
+export interface ExactRoleProviderModelSelection {
+  readonly agentProvider: Readonly<{
+    identity: string;
+    version: string;
+  }>;
+  readonly model: ExactModelSelection;
+}
+
 export type RepositoryModelBindingsSnapshot =
   | Readonly<{
     schemaVersion: typeof SNAPSHOT_SCHEMA_VERSION;
@@ -47,7 +56,7 @@ export type RepositoryModelBindingsSnapshot =
     schemaVersion: typeof SNAPSHOT_SCHEMA_VERSION;
     documentState: "PRESENT";
     documentDigest: string;
-    bindings: Readonly<Record<string, ExactModelSelection>>;
+    bindings: Readonly<Record<string, ExactRoleProviderModelSelection>>;
   }>;
 
 function inside(parent: string, child: string): boolean {
@@ -80,7 +89,7 @@ function parseStrictJson(text: string): unknown {
   return value;
 }
 
-function normalizeDocument(value: unknown): Readonly<Record<string, ExactModelSelection>> {
+function normalizeDocument(value: unknown): Readonly<Record<string, ExactRoleProviderModelSelection>> {
   const root = record(value);
   if (root === undefined) throw new RepositoryModelBindingsError("REPOSITORY_MODEL_BINDINGS_INVALID");
   if (root.schemaVersion !== DOCUMENT_SCHEMA_VERSION) {
@@ -94,15 +103,24 @@ function normalizeDocument(value: unknown): Readonly<Record<string, ExactModelSe
   if (Object.keys(bindings).length > MAX_BINDINGS) {
     throw new RepositoryModelBindingsError("REPOSITORY_MODEL_BINDINGS_TOO_MANY");
   }
-  const normalized: Record<string, ExactModelSelection> = {};
+  const normalized: Record<string, ExactRoleProviderModelSelection> = {};
   for (const [roleId, candidate] of Object.entries(bindings)) {
     const selection = record(candidate);
-    if (!IDENTITY.test(roleId) || selection === undefined || !exactKeys(selection, ["model", "provider"])
-      || typeof selection.provider !== "string" || !IDENTITY.test(selection.provider)
-      || typeof selection.model !== "string" || !IDENTITY.test(selection.model)) {
+    const agentProvider = record(selection?.agentProvider);
+    const model = record(selection?.model);
+    if (!IDENTITY.test(roleId) || selection === undefined || !exactKeys(selection, ["agentProvider", "model"])
+      || agentProvider === undefined || !exactKeys(agentProvider, ["identity", "version"])
+      || typeof agentProvider.identity !== "string" || !IDENTITY.test(agentProvider.identity)
+      || typeof agentProvider.version !== "string" || !VERSION.test(agentProvider.version)
+      || model === undefined || !exactKeys(model, ["model", "provider"])
+      || typeof model.provider !== "string" || !IDENTITY.test(model.provider)
+      || typeof model.model !== "string" || !IDENTITY.test(model.model)) {
       throw new RepositoryModelBindingsError("REPOSITORY_MODEL_BINDINGS_INVALID");
     }
-    normalized[roleId] = { provider: selection.provider, model: selection.model };
+    normalized[roleId] = {
+      agentProvider: { identity: agentProvider.identity, version: agentProvider.version },
+      model: { provider: model.provider, model: model.model },
+    };
   }
   return normalized;
 }

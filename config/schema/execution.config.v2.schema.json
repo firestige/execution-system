@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:wsr:execution:config:2.0.0",
+  "type": "object",
+  "required": ["schemaVersion", "paths", "workflowSource", "runner", "observation", "controls", "intake"],
+  "properties": {
+    "schemaVersion": {"const": "execution.config@2.0.0"},
+    "paths": {
+      "type": "object",
+      "required": ["repositoryRoot", "workspaceRoot", "allowedWorktreeRoots", "stateRoot"],
+      "properties": {
+        "repositoryRoot": {"type": "string", "minLength": 1},
+        "workspaceRoot": {"type": "string", "minLength": 1},
+        "allowedWorktreeRoots": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "stateRoot": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "workflowSource": {
+      "oneOf": [
+        {"type": "object", "required": ["kind", "repository", "releasesBaseUrl", "assetPattern"], "properties": {"kind": {"const": "github"}, "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"}, "releasesBaseUrl": {"type": "string", "format": "uri"}, "assetPattern": {"const": "workflow-package-{name}-{version}.tar.gz"}}, "additionalProperties": false},
+        {"type": "object", "required": ["kind", "adapterKey", "adapterConfigFile"], "properties": {"kind": {"const": "adapter"}, "adapterKey": {"$ref": "#/$defs/inputString"}, "adapterConfigFile": {"$ref": "#/$defs/inputString"}}, "additionalProperties": false}
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "required": ["implementationKey", "host", "maxParallelToolCalls"],
+      "properties": {
+        "implementationKey": {"const": "runner.v2"},
+        "host": {"type": "object", "required": ["engine"], "properties": {"engine": {"const": "langgraph"}}, "additionalProperties": false},
+        "maxParallelToolCalls": {"type": "integer", "minimum": 1, "maximum": 32}
+      },
+      "additionalProperties": false
+    },
+    "observation": {
+      "type": "object",
+      "required": ["enabled", "timeoutMs", "maxBatchRecords", "maxBatchBytes", "flushIntervalMs", "shutdownFlushMs", "serviceName"],
+      "properties": {"enabled": {"type": "boolean"}, "endpoint": {"type": "string", "format": "uri"}, "timeoutMs": {"type": "integer", "minimum": 100, "maximum": 10000}, "maxBatchRecords": {"type": "integer", "minimum": 1, "maximum": 512}, "maxBatchBytes": {"type": "integer", "minimum": 1024, "maximum": 4194304}, "flushIntervalMs": {"type": "integer", "minimum": 100, "maximum": 10000}, "shutdownFlushMs": {"type": "integer", "minimum": 100, "maximum": 10000}, "serviceName": {"$ref": "#/$defs/inputString"}},
+      "additionalProperties": false
+    },
+    "controls": {
+      "type": "object",
+      "required": ["startupTimeoutMs", "executionTimeoutMs", "shutdownTimeoutMs", "maxConcurrentDeliveries", "allowExplicitRefresh", "diagnosticMaxBytes"],
+      "properties": {"startupTimeoutMs": {"type": "integer", "minimum": 1000, "maximum": 120000}, "executionTimeoutMs": {"type": "integer", "minimum": 1000, "maximum": 86400000}, "shutdownTimeoutMs": {"type": "integer", "minimum": 1000, "maximum": 120000}, "maxConcurrentDeliveries": {"type": "integer", "minimum": 1, "maximum": 32}, "allowExplicitRefresh": {"type": "boolean"}, "diagnosticMaxBytes": {"type": "integer", "minimum": 256, "maximum": 16384}},
+      "additionalProperties": false
+    },
+    "intake": {
+      "type": "object",
+      "required": ["maxCorrelationBytes", "maxOutputBytes"],
+      "properties": {"maxCorrelationBytes": {"type": "integer", "minimum": 16, "maximum": 1024}, "maxOutputBytes": {"type": "integer", "minimum": 256, "maximum": 65536}},
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {"inputString": {"type": "string", "minLength": 1, "maxLength": 1024}}
+}

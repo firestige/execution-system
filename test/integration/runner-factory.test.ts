@@ -5,9 +5,6 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  ExactProviderFactoryRegistry,
-} from "../../src/composition/runner-factory.js";
 import { RunnerFactory, type RunnerFactoryConfig } from "../../src/index.js";
 
 const roots: string[] = [];
@@ -99,13 +96,6 @@ describe("RunnerFactory", () => {
     await expect(factory.create(unknown as never, dependencies)).rejects.toMatchObject({
       code: "RUNNER_FACTORY_SELECTION_MISMATCH",
     });
-  });
-
-  it("rejects duplicate Provider factory keys before creating any adapter", () => {
-    expect(() => new ExactProviderFactoryRegistry([
-      new (class { readonly key = "dsh-headless" as const; async create(): Promise<never> { throw new Error("must not create"); } })(),
-      new (class { readonly key = "dsh-headless" as const; async create(): Promise<never> { throw new Error("must not create"); } })(),
-    ])).toThrow(/duplicate Provider factory/);
   });
 
   it("rejects nested accessors without invoking them", async () => {

@@ -15,7 +15,20 @@ import { canonicalJsonBytes } from "../../src/configuration/index.js";
 
 const contractRoot = path.resolve("../system-contracts/observation");
 
-function manifestProjection(deliveryId = "delivery-1", taskId = "task-1", manifestDigest = "a".repeat(64)) {
+function manifestProjection(deliveryId = "delivery-1", taskId = "task-1", manifestDigest = "a".repeat(64), roles: readonly Record<string, unknown>[] = []) {
+  const resolvedRoles = roles.map((role) => ({
+    roleId: role.role_id,
+    rolePromptIdentity: role.role_prompt_identity,
+    rolePromptDigest: role.role_prompt_digest,
+    agentProviderId: role.agent_provider_id,
+    agentProviderVersion: role.agent_provider_version,
+    agentProviderAdapterKey: role.agent_provider_adapter_key,
+    agentProviderDescriptorDigest: role.agent_provider_descriptor_digest,
+    requiredCapabilities: role.required_capabilities,
+    modelProviderId: role.model_provider_id,
+    modelId: role.model_id,
+    resolutionSource: role.resolution_source,
+  }));
   const projection = {
     schema_version: "execution.delivery-manifest-projection@1.0.0",
     delivery_id: deliveryId,
@@ -32,9 +45,9 @@ function manifestProjection(deliveryId = "delivery-1", taskId = "task-1", manife
     },
     repository_model_bindings: {
       document_state: "ABSENT",
-      resolved_map_digest: `sha256:${createHash("sha256").update("[]").digest("hex")}`,
+      resolved_map_digest: `sha256:${createHash("sha256").update(canonicalJsonBytes(resolvedRoles as never)).digest("hex")}`,
     },
-    roles: [],
+    roles,
   };
   const canonical = Buffer.from(canonicalJsonBytes(projection as never)).toString("utf8");
   return { canonical, digest: createHash("sha256").update(canonical).digest("hex") };
@@ -129,6 +142,68 @@ describe("M03 production owner-fact mapper", () => {
     });
     expect(new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" })
       .map(invalid)).toMatchObject({ ok: false, diagnostic: { code: "OBSERVATION_FIELD_INVALID" } });
+  });
+
+  it("accepts exact multi-Provider attribution and rejects descriptor drift", () => {
+    const roles = [
+      {
+        role_id: "role.facilitator",
+        role_prompt_identity: "role.prompt.facilitator",
+        role_prompt_digest: `sha256:${"1".repeat(64)}`,
+        agent_provider_id: "provider.dsh",
+        agent_provider_version: "0.1.1-rc.2",
+        agent_provider_adapter_key: "dsh-headless",
+        agent_provider_descriptor_digest: `sha256:${"2".repeat(64)}`,
+        required_capabilities: ["action-interaction", "structured-completion"],
+        model_provider_id: "deepseek-official",
+        model_id: "deepseek-chat",
+        resolution_source: "REPOSITORY",
+      },
+      {
+        role_id: "role.reviewer",
+        role_prompt_identity: "role.prompt.reviewer",
+        role_prompt_digest: `sha256:${"3".repeat(64)}`,
+        agent_provider_id: "provider.codex",
+        agent_provider_version: "0.144.5",
+        agent_provider_adapter_key: "codex-cli",
+        agent_provider_descriptor_digest: `sha256:${"4".repeat(64)}`,
+        required_capabilities: ["structured-completion"],
+        model_provider_id: "openai",
+        model_id: "gpt-5.3-codex",
+        resolution_source: "REPOSITORY",
+      },
+    ];
+    const portable = manifestProjection("delivery-1", "task-1", "a".repeat(64), roles);
+    const fact = createObservationOwnerFact({
+      owner: "M01",
+      phase: "DELIVERY_BOUND",
+      correlation: { deliveryId: "delivery-1" },
+      identity: taskBindingIdentity("delivery-1"),
+      signal: "event",
+      eventName: "task.binding",
+      familySchema: "implementation@1",
+      fields: { C01: "delivery-1", C02: "task-1", C07: "a".repeat(64), C09: taskBindingIdentity("delivery-1"), C59: portable.canonical, C60: portable.digest },
+    });
+    const mapper = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" });
+
+    expect(mapper.map(fact)).toMatchObject({ ok: true });
+
+    const driftedRoles = structuredClone(roles);
+    driftedRoles[1]!.agent_provider_descriptor_digest = `sha256:${"5".repeat(64)}`;
+    const driftedProjection = JSON.parse(portable.canonical) as Record<string, unknown>;
+    driftedProjection.roles = driftedRoles;
+    const canonical = Buffer.from(canonicalJsonBytes(driftedProjection as never)).toString("utf8");
+    const drifted = createObservationOwnerFact({
+      owner: "M01",
+      phase: "DELIVERY_BOUND",
+      correlation: { deliveryId: "delivery-1" },
+      identity: taskBindingIdentity("delivery-1"),
+      signal: "event",
+      eventName: "task.binding",
+      familySchema: "implementation@1",
+      fields: { ...fact.fields, C59: canonical, C60: createHash("sha256").update(canonical).digest("hex") },
+    });
+    expect(mapper.map(drifted)).toMatchObject({ ok: false });
   });
 
   it("creates one stable Task binding owner fact from the persisted Manifest", () => {

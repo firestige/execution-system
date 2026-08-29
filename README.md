@@ -121,6 +121,10 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 
 For host-neutral embedding, import `ExecutionApplicationFactory`, `DefaultExecutionApplicationFactory`, `ExecutionRequest`, `TaskPrompt`, and the configuration types from the package root. Calling the default factory's `create(configFile, dependencies)` is the single production bootstrap path. The exact DSH runtime is an optional peer: package-root import/type consumers need not install it, while executing the current `dsh` Provider requires the embedding profile to provide `@deepseek-ai/dsh@0.1.1-rc.2`. The release includes `config/schema/execution.config.schema.json`, versioned defaults/examples, compiled TypeScript declarations, and `execution-config init|copy|validate|dump-effective`.
 
+## Multi-Provider 2.0 candidate
+
+`execution.config@2.0.0` contains no installation-wide Provider or model default. The embedding product registers any number of exact, immutable Agent Provider factories through `AgentProviderFactoryRegistry`; duplicate identities fail closed. Each Agent-action Role must be present in `<canonical-worktree>/.wsr/role-provider-bindings.json` with an exact Provider identity/version and Provider-owned model coordinate. Admission validates required Workflow capabilities, freezes the factory descriptor digest into `execution.delivery-manifest@2.0.0`, and never performs priority selection or fallback. Recovery accepts only the same descriptor and starts realms only for Providers actually used by the persisted Delivery. See `config/schema/execution.config.v2.schema.json`.
+
 ## Get the source
 
 This repository is normally consumed as a submodule of [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive):

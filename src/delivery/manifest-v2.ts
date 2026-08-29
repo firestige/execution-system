@@ -22,6 +22,7 @@ const PORTABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,1023}$/u;
 const IDENTITY = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 const PACKAGE_NAME = /^[a-z][a-z0-9-]*$/u;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u;
+const PROVIDER_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 const MAX_ROLES = 128;
 const MAX_PROJECTION_BYTES = 64 * 1024;
 
@@ -97,9 +98,13 @@ export interface DeliveryManifestPortableProjection {
     role_prompt_identity: string;
     role_prompt_digest: string;
     agent_provider_id: string;
+    agent_provider_version: string;
+    agent_provider_adapter_key: string;
+    agent_provider_descriptor_digest: string;
+    required_capabilities: readonly string[];
     model_provider_id: string;
     model_id: string;
-    resolution_source: "REPOSITORY" | "EXECUTION_DEFAULT";
+    resolution_source: "REPOSITORY";
   }>[];
 }
 
@@ -115,8 +120,13 @@ function digest(value: JsonValue): string {
 
 function validRole(role: ResolvedRoleModelBinding): boolean {
   return IDENTITY.test(role.roleId) && IDENTITY.test(role.rolePromptIdentity) && SHA256.test(role.rolePromptDigest)
-    && IDENTITY.test(role.agentProviderId) && IDENTITY.test(role.modelProviderId) && IDENTITY.test(role.modelId)
-    && (role.resolutionSource === "REPOSITORY" || role.resolutionSource === "EXECUTION_DEFAULT");
+    && IDENTITY.test(role.agentProviderId) && PROVIDER_VERSION.test(role.agentProviderVersion)
+    && IDENTITY.test(role.agentProviderAdapterKey) && SHA256.test(role.agentProviderDescriptorDigest)
+    && Array.isArray(role.requiredCapabilities) && role.requiredCapabilities.length > 0
+    && role.requiredCapabilities.every((capability, index) => IDENTITY.test(capability)
+      && (index === 0 || role.requiredCapabilities[index - 1]! < capability))
+    && IDENTITY.test(role.modelProviderId) && IDENTITY.test(role.modelId)
+    && role.resolutionSource === "REPOSITORY";
 }
 
 function expectedResolvedMapDigest(roles: readonly ResolvedRoleModelBinding[]): string {
@@ -130,7 +140,9 @@ function exactRoleClosure(snapshotRoles: readonly AgentActionRoleSnapshot[], res
     const resolved = resolvedRoles[index];
     return resolved !== undefined && role.roleId === resolved.roleId
       && role.rolePromptIdentity === resolved.rolePromptIdentity
-      && role.rolePromptDigest === resolved.rolePromptDigest;
+      && role.rolePromptDigest === resolved.rolePromptDigest
+      && role.requiredCapabilities.length === resolved.requiredCapabilities.length
+      && [...role.requiredCapabilities].sort().every((capability, capabilityIndex) => capability === resolved.requiredCapabilities[capabilityIndex]);
   });
 }
 
@@ -140,9 +152,8 @@ function validDeliveryProjection(projection: DeliveryConfigProjectionV2): boolea
     && projection.identity === coordinateIdentity("execution.delivery-config@2.0.0", value as unknown as JsonValue)
     && value.runner.implementationKey === "runner.v2"
     && value.runner.host.engine === "langgraph"
-    && IDENTITY.test(value.runner.provider.identity)
-    && Number.isSafeInteger(value.runner.provider.maxParallelToolCalls)
-    && value.runner.provider.maxParallelToolCalls >= 1 && value.runner.provider.maxParallelToolCalls <= 32;
+    && Number.isSafeInteger(value.runner.maxParallelToolCalls)
+    && value.runner.maxParallelToolCalls >= 1 && value.runner.maxParallelToolCalls <= 32;
 }
 
 export function createDeliveryManifestV2(input: CreateDeliveryManifestV2Input): DeliveryManifestV2 {
@@ -162,9 +173,8 @@ export function createDeliveryManifestV2(input: CreateDeliveryManifestV2Input): 
     && input.resolvedRoleBindings.resolvedMapDigest === expectedResolvedMapDigest(resolvedRoles);
   const orderAndShapeValid = resolvedRoles.length <= MAX_ROLES
     && resolvedRoles.every((role, index) => validRole(role) && (index === 0 || resolvedRoles[index - 1]!.roleId < role.roleId));
-  const providerMatchesProjection = resolvedRoles.every((role) => role.agentProviderId === input.deliveryConfigProjection.value.runner.provider.identity);
   if (!idsValid || !pathsValid || !digestsValid || !repositoryValid || !orderAndShapeValid
-    || !exactRoleClosure(input.agentActionRoles, resolvedRoles) || !providerMatchesProjection
+    || !exactRoleClosure(input.agentActionRoles, resolvedRoles)
     || !validDeliveryProjection(input.deliveryConfigProjection)
     || !Number.isSafeInteger(input.createdAt) || input.createdAt < 0
     || (input.taskDisplayName !== undefined && (input.taskDisplayName.length === 0 || input.taskDisplayName.length > 160
@@ -230,6 +240,10 @@ export function createDeliveryManifestProjection(manifest: DeliveryManifestV2): 
       role_prompt_identity: role.rolePromptIdentity,
       role_prompt_digest: role.rolePromptDigest,
       agent_provider_id: role.agentProviderId,
+      agent_provider_version: role.agentProviderVersion,
+      agent_provider_adapter_key: role.agentProviderAdapterKey,
+      agent_provider_descriptor_digest: role.agentProviderDescriptorDigest,
+      required_capabilities: role.requiredCapabilities,
       model_provider_id: role.modelProviderId,
       model_id: role.modelId,
       resolution_source: role.resolutionSource,

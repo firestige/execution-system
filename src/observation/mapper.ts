@@ -107,23 +107,33 @@ function manifestProjectionComplete(fields: Readonly<Partial<Record<ObservationF
       || typeof repository.document_digest !== "string" || !SHA256.test(repository.document_digest)) return false;
   } else return false;
   if (typeof repository.resolved_map_digest !== "string" || !SHA256.test(repository.resolved_map_digest)) return false;
-  const resolvedRoles: Record<string, string>[] = [];
+  const resolvedRoles: Record<string, unknown>[] = [];
   let prior = "";
   for (const role of projection.roles) {
-    if (!plain(role) || !keys(role, ["role_id","role_prompt_identity","role_prompt_digest","agent_provider_id","model_provider_id","model_id","resolution_source"])
+    if (!plain(role) || !keys(role, ["role_id","role_prompt_identity","role_prompt_digest","agent_provider_id","agent_provider_version","agent_provider_adapter_key","agent_provider_descriptor_digest","required_capabilities","model_provider_id","model_id","resolution_source"])
       || typeof role.role_id !== "string" || !IDENTITY.test(role.role_id) || role.role_id <= prior
       || typeof role.role_prompt_identity !== "string" || !IDENTITY.test(role.role_prompt_identity)
       || typeof role.role_prompt_digest !== "string" || !SHA256.test(role.role_prompt_digest)
       || typeof role.agent_provider_id !== "string" || !IDENTITY.test(role.agent_provider_id)
+      || typeof role.agent_provider_version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(role.agent_provider_version)
+      || typeof role.agent_provider_adapter_key !== "string" || !["dsh-headless", "copilot-sdk", "codex-cli"].includes(role.agent_provider_adapter_key)
+      || typeof role.agent_provider_descriptor_digest !== "string" || !SHA256.test(role.agent_provider_descriptor_digest)
+      || !Array.isArray(role.required_capabilities) || role.required_capabilities.length === 0
+      || role.required_capabilities.some((capability: unknown, index: number) => typeof capability !== "string" || !IDENTITY.test(capability)
+        || (index > 0 && role.required_capabilities[index - 1] >= capability))
       || typeof role.model_provider_id !== "string" || !IDENTITY.test(role.model_provider_id)
       || typeof role.model_id !== "string" || !IDENTITY.test(role.model_id)
-      || (role.resolution_source !== "REPOSITORY" && role.resolution_source !== "EXECUTION_DEFAULT")) return false;
+      || role.resolution_source !== "REPOSITORY") return false;
     prior = role.role_id;
     resolvedRoles.push({
       roleId: role.role_id,
       rolePromptIdentity: role.role_prompt_identity,
       rolePromptDigest: role.role_prompt_digest,
       agentProviderId: role.agent_provider_id,
+      agentProviderVersion: role.agent_provider_version,
+      agentProviderAdapterKey: role.agent_provider_adapter_key,
+      agentProviderDescriptorDigest: role.agent_provider_descriptor_digest,
+      requiredCapabilities: role.required_capabilities,
       modelProviderId: role.model_provider_id,
       modelId: role.model_id,
       resolutionSource: role.resolution_source,

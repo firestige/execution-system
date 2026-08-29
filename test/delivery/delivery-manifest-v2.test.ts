@@ -15,24 +15,39 @@ import {
   type ImmutableTaskPromptSnapshot,
   type RepositoryModelBindingsSnapshot,
 } from "../../src/delivery/index.js";
+import { AgentProviderFactoryRegistry, type AgentProviderRealmFactory } from "../../src/providers/provider.js";
 
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
+
+function factory(identity: string, version: string, adapterKey: "dsh-headless" | "codex-cli", capabilities: readonly string[]): AgentProviderRealmFactory {
+  return Object.freeze({
+    descriptor: Object.freeze({ schemaVersion: "execution.agent-provider-factory@1.0.0", identity, version, adapterKey, capabilities: Object.freeze([...capabilities]) }),
+    async acquire() { throw new Error("not used during admission"); },
+  });
+}
+
+const registry = new AgentProviderFactoryRegistry([
+  factory("provider.dsh", "0.1.1-rc.2", "dsh-headless", ["action-interaction", "structured-completion"]),
+  factory("provider.codex", "0.144.5", "codex-cli", ["structured-completion"]),
+]);
 
 async function fixture(): Promise<CreateDeliveryManifestV2Input> {
   const root = await mkdtemp(join(tmpdir(), "delivery-manifest-v2-"));
   const repository: RepositoryModelBindingsSnapshot = Object.freeze({
-    schemaVersion: "execution.repository-model-bindings-snapshot@1.0.0",
+    schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0",
     documentState: "PRESENT",
     documentDigest: sha("c"),
-    bindings: Object.freeze({ "role.reviewer": Object.freeze({ provider: "anthropic-official", model: "claude-sonnet" }) }),
+    bindings: Object.freeze({
+      "role.facilitator": Object.freeze({ agentProvider: Object.freeze({ identity: "provider.dsh", version: "0.1.1-rc.2" }), model: Object.freeze({ provider: "deepseek-official", model: "deepseek-chat" }) }),
+      "role.reviewer": Object.freeze({ agentProvider: Object.freeze({ identity: "provider.codex", version: "0.144.5" }), model: Object.freeze({ provider: "openai", model: "gpt-5.3-codex" }) }),
+    }),
   });
   const agentActionRoles = Object.freeze([
-    Object.freeze({ roleId: "role.facilitator", rolePromptIdentity: "role.prompt.facilitator", rolePromptDigest: sha("a") }),
-    Object.freeze({ roleId: "role.reviewer", rolePromptIdentity: "role.prompt.reviewer", rolePromptDigest: sha("b") }),
+    Object.freeze({ roleId: "role.facilitator", rolePromptIdentity: "role.prompt.facilitator", rolePromptDigest: sha("a"), requiredCapabilities: Object.freeze(["action-interaction", "structured-completion"]) }),
+    Object.freeze({ roleId: "role.reviewer", rolePromptIdentity: "role.prompt.reviewer", rolePromptDigest: sha("b"), requiredCapabilities: Object.freeze(["structured-completion"]) }),
   ]);
   const resolved = resolveRoleModelBindings({
-    agentProviderId: "provider.dsh",
-    defaultModel: { provider: "deepseek-official", model: "deepseek-chat" },
+    registry,
     repository,
     agentActionRoles,
   });
@@ -52,7 +67,7 @@ async function fixture(): Promise<CreateDeliveryManifestV2Input> {
         allowedWorktreeRoots: Object.freeze([join(root, "workspace", "worktrees")]),
         runnerResources: Object.freeze({ journal: "runner/journal", checkpoints: "runner/checkpoints", sessions: "runner/sessions", custody: "runner/custody" }),
       }),
-      runner: Object.freeze({ implementationKey: "runner.v2", host: Object.freeze({ engine: "langgraph" }), provider: Object.freeze({ identity: "provider.dsh", maxParallelToolCalls: 4 }) }),
+      runner: Object.freeze({ implementationKey: "runner.v2", host: Object.freeze({ engine: "langgraph" }), maxParallelToolCalls: 4 }),
       controls: Object.freeze({ executionTimeoutMs: 1000, maxConcurrentDeliveries: 4, allowExplicitRefresh: false }),
     });
   const deliveryConfigProjection: DeliveryConfigProjectionV2 = Object.freeze({
@@ -161,11 +176,15 @@ describe("Delivery Manifest 2.0", () => {
           role_prompt_identity: "role.prompt.facilitator",
           role_prompt_digest: sha("a"),
           agent_provider_id: "provider.dsh",
+          agent_provider_version: "0.1.1-rc.2",
+          agent_provider_adapter_key: "dsh-headless",
+          agent_provider_descriptor_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+          required_capabilities: ["action-interaction", "structured-completion"],
           model_provider_id: "deepseek-official",
           model_id: "deepseek-chat",
-          resolution_source: "EXECUTION_DEFAULT",
+          resolution_source: "REPOSITORY",
         },
-        { role_id: "role.reviewer", resolution_source: "REPOSITORY" },
+        { role_id: "role.reviewer", agent_provider_id: "provider.codex", resolution_source: "REPOSITORY" },
       ],
     });
     expect(first.projectionDigest).toMatch(/^[0-9a-f]{64}$/u);
@@ -178,16 +197,15 @@ describe("Delivery Manifest 2.0", () => {
   it("represents absent repository policy without a document digest", async () => {
     const input = await fixture();
     const repositoryModelBindings: RepositoryModelBindingsSnapshot = Object.freeze({
-      schemaVersion: "execution.repository-model-bindings-snapshot@1.0.0",
+      schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0",
       documentState: "ABSENT",
     });
     const resolvedRoleBindings = resolveRoleModelBindings({
-      agentProviderId: "provider.dsh",
-      defaultModel: { provider: "deepseek-official", model: "deepseek-chat" },
+      registry,
       repository: repositoryModelBindings,
-      agentActionRoles: input.agentActionRoles,
+      agentActionRoles: [],
     });
-    const manifest = createDeliveryManifestV2({ ...input, repositoryModelBindings, resolvedRoleBindings });
+    const manifest = createDeliveryManifestV2({ ...input, agentActionRoles: [], repositoryModelBindings, resolvedRoleBindings });
 
     expect(manifest.repositoryModelBindings).toEqual({ documentState: "ABSENT", resolvedMapDigest: resolvedRoleBindings.resolvedMapDigest });
     expect(createDeliveryManifestProjection(manifest).projection.repository_model_bindings).not.toHaveProperty("document_digest");

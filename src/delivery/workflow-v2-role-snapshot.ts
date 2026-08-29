@@ -124,6 +124,12 @@ export function extractWorkflowV2RoleSnapshot(input: WorkflowV2RoleSnapshotInput
     }
     observedBindings.add(key);
     const promptIdentity = document(document(route.resources).rolePrompt).id;
+    const capabilities = document(route.resources).capabilities;
+    if (!Array.isArray(capabilities) || capabilities.length === 0
+      || capabilities.some((capability) => typeof capability !== "string" || !IDENTITY.test(capability))
+      || new Set(capabilities).size !== capabilities.length) {
+      throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
+    }
     const packagePrompt = typeof promptIdentity === "string" ? packageResourceById.get(promptIdentity) : undefined;
     const snapshotPrompt = typeof promptIdentity === "string" ? snapshotResourceById.get(promptIdentity) : undefined;
     if (packagePrompt?.kind !== "role-prompt" || snapshotPrompt === undefined
@@ -134,13 +140,17 @@ export function extractWorkflowV2RoleSnapshot(input: WorkflowV2RoleSnapshotInput
       roleId: expected.roleId,
       rolePromptIdentity: promptIdentity,
       rolePromptDigest: snapshotPrompt.contentIdentity,
+      requiredCapabilities: [...capabilities].sort(),
     };
     const prior = promptByRole.get(expected.roleId);
     if (prior !== undefined && (prior.rolePromptIdentity !== roleSnapshot.rolePromptIdentity
       || prior.rolePromptDigest !== roleSnapshot.rolePromptDigest)) {
       throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
     }
-    promptByRole.set(expected.roleId, roleSnapshot);
+    promptByRole.set(expected.roleId, prior === undefined ? roleSnapshot : {
+      ...prior,
+      requiredCapabilities: [...new Set([...prior.requiredCapabilities, ...roleSnapshot.requiredCapabilities])].sort(),
+    });
   }
   if (observedBindings.size !== expectedBindings.size) throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
 

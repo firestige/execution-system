@@ -19,7 +19,7 @@ async function worktree(): Promise<string> {
 
 async function writeBindings(root: string, text: string): Promise<void> {
   await mkdir(join(root, ".wsr"), { recursive: true });
-  await writeFile(join(root, ".wsr", "model-bindings.json"), text);
+  await writeFile(join(root, ".wsr", "role-provider-bindings.json"), text);
 }
 
 function digest(value: unknown): string {
@@ -33,12 +33,12 @@ function digest(value: unknown): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(ordered(value)), "utf8").digest("hex")}`;
 }
 
-describe("repository Role-to-model bindings", () => {
+describe("repository Role-to-Provider/model bindings", () => {
   it("represents an absent conventional document without inventing an empty-document digest", async () => {
     const root = await worktree();
 
     await expect(loadRepositoryModelBindings(root)).resolves.toEqual({
-      schemaVersion: "execution.repository-model-bindings-snapshot@1.0.0",
+      schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0",
       documentState: "ABSENT",
     });
   });
@@ -47,17 +47,23 @@ describe("repository Role-to-model bindings", () => {
     const root = await worktree();
     const document = {
       bindings: {
-        "role.evidence-scout": { model: "deepseek-chat", provider: "deepseek-official" },
-        "role.architecture-reviewer": { provider: "deepseek-official", model: "deepseek-reasoner" },
+        "role.evidence-scout": {
+          agentProvider: { identity: "provider.codex", version: "0.144.5" },
+          model: { provider: "openai", model: "gpt-5.3-codex" },
+        },
+        "role.architecture-reviewer": {
+          agentProvider: { identity: "provider.dsh", version: "0.1.1-rc.2" },
+          model: { provider: "deepseek-official", model: "deepseek-reasoner" },
+        },
       },
-      schemaVersion: "execution.repository-model-bindings@1.0.0",
+      schemaVersion: "execution.repository-role-provider-bindings@1.0.0",
     };
     await writeBindings(root, JSON.stringify(document, null, 2));
 
     const loaded = await loadRepositoryModelBindings(root);
 
     expect(loaded).toEqual({
-      schemaVersion: "execution.repository-model-bindings-snapshot@1.0.0",
+      schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0",
       documentState: "PRESENT",
       documentDigest: digest(document),
       bindings: document.bindings,
@@ -69,12 +75,13 @@ describe("repository Role-to-model bindings", () => {
 
   it("rejects duplicate members, unknown fields, malformed identities, and unsupported versions", async () => {
     const cases: ReadonlyArray<readonly [string, string]> = [
-      ['{"schemaVersion":"execution.repository-model-bindings@1.0.0","bindings":{},"bindings":{}}', "REPOSITORY_MODEL_BINDINGS_DUPLICATE_KEY"],
-      [JSON.stringify({ schemaVersion: "execution.repository-model-bindings@1.0.0", bindings: {}, fallback: {} }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
-      [JSON.stringify({ schemaVersion: "execution.repository-model-bindings@2.0.0", bindings: {} }), "REPOSITORY_MODEL_BINDINGS_VERSION_UNSUPPORTED"],
-      [JSON.stringify({ schemaVersion: "execution.repository-model-bindings@1.0.0", bindings: { "bad role": { provider: "route", model: "model" } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
-      [JSON.stringify({ schemaVersion: "execution.repository-model-bindings@1.0.0", bindings: { role: { provider: "route", model: "" } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
-      [JSON.stringify({ schemaVersion: "execution.repository-model-bindings@1.0.0", bindings: { role: { provider: "route", model: "model", credentialRef: "secret" } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
+      ['{"schemaVersion":"execution.repository-role-provider-bindings@1.0.0","bindings":{},"bindings":{}}', "REPOSITORY_MODEL_BINDINGS_DUPLICATE_KEY"],
+      [JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: {}, fallback: {} }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
+      [JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@2.0.0", bindings: {} }), "REPOSITORY_MODEL_BINDINGS_VERSION_UNSUPPORTED"],
+      [JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: { "bad role": { agentProvider: { identity: "provider.dsh", version: "1.0.0" }, model: { provider: "route", model: "model" } } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
+      [JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: { role: { agentProvider: { identity: "provider.dsh", version: "latest" }, model: { provider: "route", model: "model" } } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
+      [JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: { role: { agentProvider: { identity: "provider.dsh", version: "1.0.0" }, model: { provider: "route", model: "" } } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
+      [JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: { role: { agentProvider: { identity: "provider.dsh", version: "1.0.0" }, model: { provider: "route", model: "model" }, fallback: "provider.other" } } }), "REPOSITORY_MODEL_BINDINGS_INVALID"],
     ];
 
     for (const [text, code] of cases) {
@@ -84,25 +91,25 @@ describe("repository Role-to-model bindings", () => {
     }
   });
 
-  it("enforces the 64 KiB and 1,024-binding bounds", async () => {
+  it("enforces the 256 KiB and 1,024-binding bounds", async () => {
     const tooMany = await worktree();
     await writeBindings(tooMany, JSON.stringify({
-      schemaVersion: "execution.repository-model-bindings@1.0.0",
-      bindings: Object.fromEntries(Array.from({ length: 1_025 }, (_, index) => [`role${index}`, { provider: "route", model: "model" }])),
+      schemaVersion: "execution.repository-role-provider-bindings@1.0.0",
+      bindings: Object.fromEntries(Array.from({ length: 1_025 }, (_, index) => [`role${index}`, { agentProvider: { identity: "provider.dsh", version: "1.0.0" }, model: { provider: "route", model: "model" } }])),
     }));
     await expect(loadRepositoryModelBindings(tooMany)).rejects.toMatchObject({ code: "REPOSITORY_MODEL_BINDINGS_TOO_MANY" });
 
     const tooLarge = await worktree();
-    await writeBindings(tooLarge, `${JSON.stringify({ schemaVersion: "execution.repository-model-bindings@1.0.0", bindings: {} })}${" ".repeat(65_537)}`);
+    await writeBindings(tooLarge, `${JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: {} })}${" ".repeat(262_145)}`);
     await expect(loadRepositoryModelBindings(tooLarge)).rejects.toMatchObject({ code: "REPOSITORY_MODEL_BINDINGS_TOO_LARGE" });
   });
 
   it("fails closed for a binding document whose resolved path escapes the canonical worktree", async () => {
     const root = await worktree();
     const outside = await worktree();
-    await writeBindings(outside, JSON.stringify({ schemaVersion: "execution.repository-model-bindings@1.0.0", bindings: {} }));
+    await writeBindings(outside, JSON.stringify({ schemaVersion: "execution.repository-role-provider-bindings@1.0.0", bindings: {} }));
     await mkdir(join(root, ".wsr"));
-    await symlink(join(outside, ".wsr", "model-bindings.json"), join(root, ".wsr", "model-bindings.json"));
+    await symlink(join(outside, ".wsr", "role-provider-bindings.json"), join(root, ".wsr", "role-provider-bindings.json"));
 
     await expect(loadRepositoryModelBindings(root)).rejects.toMatchObject({ code: "REPOSITORY_MODEL_BINDINGS_PATH_INVALID" });
   });
