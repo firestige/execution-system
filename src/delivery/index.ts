@@ -1,5 +1,6 @@
 export * from "./admission.js";
 export * from "./current-slot.js";
+export * from "./control-plane-projection.js";
 export * from "./manifest.js";
 export * from "./manifest-v2.js";
 export * from "./repository-model-bindings.js";

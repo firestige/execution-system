@@ -20,10 +20,14 @@ import {
   createConfiguredWorkflowPackageSource,
   type AlternateWorkflowPackageSourceFactory,
   type DeliveryManifest,
+  DeliveryControlPlaneProjection,
+  type DeliveryControlPlaneReadModel,
+  type DeliveryProjectionManifest,
   type DeliveryRuntimeFactory,
   type OccupiedCurrentSlot,
   type WorkflowPackageCompatibilityTarget,
 } from "../delivery/index.js";
+import { DeliveryCompletedFactJournal } from "../delivery/control-plane-journal.js";
 import { loadExecutionInstallationConfig } from "../configuration/index.js";
 import { createDeliveryObservationEmitter, createObservationOwnerFact, createRunnerOwnerFactPort, type DeliveryObservationEmitter, type ObservationFamilySchema, type ObservationProfileOwnerFact, type RunnerSettlementOwnerFact } from "../observation/index.js";
 import type { HostOperationHandler } from "../host/workflow-host-adapter-factory.js";
@@ -35,6 +39,25 @@ import { ProductionInteractionBroker } from "./interaction-broker.js";
 
 function failure(code: ExecutionFailure["code"]): ExecutionFailure {
   return Object.freeze({ kind: "ERROR", code, message: code });
+}
+
+function controlPlaneManifest(manifest: DeliveryManifest): DeliveryProjectionManifest {
+  return Object.freeze({
+    deliveryId: manifest.deliveryId,
+    taskId: manifest.taskId,
+    ...(manifest.taskDisplayName === undefined ? {} : { taskDisplayName: manifest.taskDisplayName }),
+    createdAt: manifest.createdAt,
+    canonicalWorktree: manifest.canonicalWorktree,
+    deliveryBindingIdentity: manifest.deliveryBindingIdentity,
+    workflow: Object.freeze({
+      identity: manifest.resolvedPackage.workflowId,
+      packageName: manifest.resolvedPackage.name,
+      exactPackageVersion: manifest.resolvedPackage.exactVersion,
+      packageDigest: manifest.resolvedPackage.packageDigest,
+      snapshotIdentity: manifest.prompt.snapshotIdentity,
+      snapshotDigest: manifest.prompt.snapshotDigest,
+    }),
+  });
 }
 
 export class ExecutionBootstrapStartupError extends Error {
@@ -255,7 +278,14 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
       host: Object.freeze({ engine: "langgraph", checkpointDirectory: path.join(runnerRoot, "checkpoints") }),
       implementationIdentity: manifest.deliveryConfigProjection.value.runner.implementationKey,
     });
-    this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`, manifest.deliveryBindingIdentity);
+    const actionBySite = Object.freeze(Object.fromEntries(activation.program.execution.sites.map((site) => {
+      const value = site.site;
+      const key = value.kind === "node" ? `node:${value.nodeIdentity}`
+        : value.kind === "parallel-branch" ? `parallel-branch:${value.nodeIdentity}:${value.branchIdentity}`
+          : `parallel-join:${value.nodeIdentity}`;
+      return [key, site.actionIdentity];
+    })));
+    this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`, manifest.deliveryBindingIdentity, actionBySite);
     const interaction = this.interactions.bridge(manifest.deliveryId);
     const workflow = this.interactions.workflowBridge(manifest.deliveryId);
     const observation = createRunnerOwnerFactPort(Object.freeze({ emit: (fact: RunnerSettlementOwnerFact) => this.observation.emit(fact) }));
@@ -265,6 +295,7 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
       observation,
       startCorrelation,
       hostOperations: createProductionHostOperationHandlers(activation, this.hostOperationFactories),
+      activity: Object.freeze({ track: this.interactions.trackAction.bind(this.interactions) }),
     }));
     this.#live.add(adapter);
     this.#composed.add(manifest.deliveryId);
@@ -302,10 +333,18 @@ export interface ExecutionApplicationControl extends WorkflowIntakeControlPort {
 }
 
 const CONTROLS = new WeakMap<ExecutionApplication, ExecutionApplicationControl>();
+const CONTROL_PLANE = new WeakMap<ExecutionApplication, DeliveryControlPlaneReadModel>();
 export function getExecutionApplicationControl(application: ExecutionApplication): ExecutionApplicationControl {
   const control = CONTROLS.get(application);
   if (control === undefined) throw new TypeError("EXECUTION_APPLICATION_CONTROL_UNKNOWN");
   return control;
+}
+
+/** Public host-neutral, read-only projection seam for product adapters. */
+export function getExecutionControlPlaneProjection(application: ExecutionApplication): DeliveryControlPlaneReadModel {
+  const projection = CONTROL_PLANE.get(application);
+  if (projection === undefined) throw new TypeError("EXECUTION_CONTROL_PLANE_UNKNOWN");
+  return projection;
 }
 
 /** The sole production assembly owner. Delivery runtime composition is completed behind this factory. */
@@ -328,6 +367,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     const config = loaded.config;
     const slots = new CurrentSlotRepository(config.paths.currentSlotRoot);
     const manifests = new DeliveryManifestRepository(config.paths.manifestRoot);
+    const completed = new DeliveryCompletedFactJournal(`${config.paths.stateRoot}/control-plane/completed`);
     const recovery = new DeliveryRecoveryService(slots, Object.freeze({
       verify: async (slot: OccupiedCurrentSlot) => {
         const manifest = await manifests.load(slot.manifestPath);
@@ -356,6 +396,11 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       serviceVersion: "0.1.3",
       diagnostic() {},
     });
+    const projectionListeners = new Set<() => void>();
+    const invalidations = Object.freeze({
+      publish() { for (const listener of [...projectionListeners]) listener(); },
+      subscribe(listener: () => void) { projectionListeners.add(listener); return () => projectionListeners.delete(listener); },
+    });
     const ownerFacts: OwnerFactIngress = Object.freeze({
       emit(fact: OwnerFact) {
         if (fact.name !== "delivery-bound" || !("deliveryId" in fact)) return;
@@ -365,7 +410,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
         } catch { /* Observation remains non-controlling. */ }
       },
     });
-    const interactions = new ProductionInteractionBroker(dependencies.intake);
+    const interactions = new ProductionInteractionBroker(dependencies.intake, invalidations.publish);
     const runtime = new ProductionRuntimeManager(config, dependencies, observation, interactions, this.#hostOperationFactories);
     const delivery = new DeliveryLifecycleService({
       resolver,
@@ -378,6 +423,21 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       slots,
       clock: dependencies.clock,
       ids: dependencies.ids,
+      invalidations,
+      completed: Object.freeze({
+        async publish(manifest, terminal, error) {
+          await completed.persist(Object.freeze({
+            schemaVersion: "execution.delivery-completed@1.0.0",
+            manifest: controlPlaneManifest(manifest),
+            updatedAt: terminal.finishedAt,
+            terminal,
+            error,
+            ...(interactions.bindingForDelivery(manifest.deliveryId) === undefined
+              ? {}
+              : { sessionCorrelation: interactions.bindingForDelivery(manifest.deliveryId) }),
+          }));
+        },
+      }),
     });
     const core = new ExecutionCoreAdmission(createExecutionEnvironment(config), admission);
     const lifecycle = new BootstrapLifecycle();
@@ -526,6 +586,20 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       },
     });
     CONTROLS.set(application, control);
+    CONTROL_PLANE.set(application, new DeliveryControlPlaneProjection({
+      slots,
+      manifests: Object.freeze({
+        async loadProjection(manifestPath: string) {
+          const manifest = await manifests.load(manifestPath);
+          return controlPlaneManifest(manifest);
+        },
+      }),
+      bindings: interactions,
+      runtime: interactions,
+      completed,
+      invalidations,
+      now: dependencies.clock.now,
+    }));
     return application;
   }
 }

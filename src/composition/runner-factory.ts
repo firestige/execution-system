@@ -49,6 +49,9 @@ export interface RunnerFactoryDependencies {
   readonly observation: RunnerObservationPort;
   readonly startCorrelation: RunnerStartCorrelationPort;
   readonly hostOperations: Readonly<Record<string, HostOperationHandler>>;
+  readonly activity?: Readonly<{
+    track(request: Readonly<{ deliveryId: string; actionIdentity?: string; site?: import("../contracts/index.js").ExecutionSiteRef }>): () => void;
+  }>;
 }
 
 export class RunnerFactorySelectionError extends Error {
@@ -166,12 +169,17 @@ function admitConfiguration(candidate: RunnerFactoryConfig): RunnerFactoryConfig
 
 function admitDependencies(candidate: RunnerFactoryDependencies): RunnerFactoryDependencies {
   if (!Object.isFrozen(candidate)) throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact and immutable");
-  const root = exactData(candidate, ["interaction", "workflow", "observation", "startCorrelation", "hostOperations"]);
+  const keys = Object.keys(candidate).sort().join(",");
+  const expected = "hostOperations,interaction,observation,startCorrelation,workflow";
+  const expectedWithActivity = "activity,hostOperations,interaction,observation,startCorrelation,workflow";
+  if (keys !== expected && keys !== expectedWithActivity) throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact capabilities");
+  const root = candidate as unknown as Readonly<Record<string, unknown>>;
   const interaction = exactMethods(root?.interaction, ["publish", "requestInput"]);
   const workflow = exactMethods(root?.workflow, ["request"]);
   const observation = exactMethods(root?.observation, ["observe"]);
   const startCorrelation = exactMethods(root?.startCorrelation, ["acknowledge"]);
   const hostOperations = exactHostOperations(root?.hostOperations);
+  const activity = root.activity === undefined ? undefined : exactMethods(root.activity, ["track"]);
   if (root === undefined || interaction === undefined || workflow === undefined || observation === undefined || startCorrelation === undefined || hostOperations === undefined) {
     throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact capabilities");
   }
@@ -181,6 +189,7 @@ function admitDependencies(candidate: RunnerFactoryDependencies): RunnerFactoryD
     observation: observation as unknown as RunnerObservationPort,
     startCorrelation: startCorrelation as unknown as RunnerStartCorrelationPort,
     hostOperations,
+    ...(activity === undefined ? {} : { activity: activity as unknown as NonNullable<RunnerFactoryDependencies["activity"]> }),
   });
 }
 
@@ -290,10 +299,16 @@ export const RUNNER_INVOCATION_RESULT_VALIDATOR: InvocationResultValidator = Obj
   },
 });
 
-function invocationFacade(invocation: HostInvocation): HostInvocation {
+function invocationFacade(invocation: HostInvocation, activity?: RunnerFactoryDependencies["activity"]): HostInvocation {
   return Object.freeze({
-    start: invocation.start.bind(invocation),
-    continueWithInput: invocation.continueWithInput.bind(invocation),
+    async start(dispatch: Parameters<HostInvocation["start"]>[0], output: Parameters<HostInvocation["start"]>[1]) {
+      const release = activity?.track({ deliveryId: dispatch.episode.thread.delivery.deliveryIdentity, actionIdentity: dispatch.action.identity }) ?? (() => undefined);
+      try { return await invocation.start(dispatch, output); } finally { release(); }
+    },
+    async continueWithInput(request: Parameters<HostInvocation["continueWithInput"]>[0], output: Parameters<HostInvocation["continueWithInput"]>[1]) {
+      const release = activity?.track({ deliveryId: request.episode.thread.delivery.deliveryIdentity, site: request.episode.site }) ?? (() => undefined);
+      try { return await invocation.continueWithInput(request, output); } finally { release(); }
+    },
   });
 }
 
@@ -337,7 +352,7 @@ export class RunnerFactory {
       const host = await new LangGraphWorkflowHostAdapterFactory().create(
         config.host,
         Object.freeze({
-          invocation: invocationFacade(invocation.host),
+          invocation: invocationFacade(invocation.host, admittedDependencies.activity),
           custody: custodyFacade(custody),
           hostOperations: admittedDependencies.hostOperations,
         }),
