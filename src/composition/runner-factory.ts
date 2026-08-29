@@ -19,7 +19,7 @@ import type { HostOperationHandler } from "../host/workflow-host-adapter-factory
 import { FileInvocationJournalStore } from "../invocation/journal.js";
 import { createManagedInvocation, type InvocationResultValidator } from "../invocation/managed-invocation.js";
 import { DshProviderAdapterFactory, type DshProviderAdapterConfiguration } from "../providers/dsh/index.js";
-import type { ProviderAdapter, ProviderAdapterFactory, ProviderAdapterKey } from "../providers/provider.js";
+import type { ProviderAdapter } from "../providers/provider.js";
 import type { RunnerObservationPort, RunnerStartCorrelationPort } from "../coordinator/runner-coordinator.js";
 import { createExecutionRuntimeAdapter } from "./create-execution-runtime-adapter.js";
 
@@ -290,25 +290,6 @@ export const RUNNER_INVOCATION_RESULT_VALIDATOR: InvocationResultValidator = Obj
   },
 });
 
-export class ExactProviderFactoryRegistry {
-  readonly #factories: ReadonlyMap<ProviderAdapterKey, ProviderAdapterFactory>;
-
-  constructor(factories: readonly ProviderAdapterFactory[]) {
-    const byKey = new Map<ProviderAdapterKey, ProviderAdapterFactory>();
-    for (const factory of factories) {
-      if (byKey.has(factory.key)) throw new RunnerFactoryConfigurationError(`duplicate Provider factory '${factory.key}'`);
-      byKey.set(factory.key, factory);
-    }
-    this.#factories = byKey;
-  }
-
-  async create(key: string, configuration: unknown): Promise<ProviderAdapter> {
-    const factory = this.#factories.get(key as ProviderAdapterKey);
-    if (factory === undefined) throw new RunnerFactorySelectionError(key);
-    return factory.create(configuration);
-  }
-}
-
 function invocationFacade(invocation: HostInvocation): HostInvocation {
   return Object.freeze({
     start: invocation.start.bind(invocation),
@@ -327,7 +308,7 @@ function custodyFacade(custody: HostCustody): HostCustody {
 }
 
 export class RunnerFactory {
-  readonly #providers = new ExactProviderFactoryRegistry([new DshProviderAdapterFactory()]);
+  readonly #historicalDshProvider = new DshProviderAdapterFactory();
   readonly #resources = new WeakMap<ExecutionRuntimeAdapter, { provider: ProviderAdapter; disposed: boolean }>();
 
   async create(candidate: RunnerFactoryConfig, dependencies: RunnerFactoryDependencies): Promise<ExecutionRuntimeAdapter> {
@@ -336,7 +317,7 @@ export class RunnerFactory {
     if (config.provider.key !== "dsh-headless") throw new RunnerFactorySelectionError(config.provider.key);
     let provider: ProviderAdapter | undefined;
     try {
-      provider = await this.#providers.create(config.provider.key, config.provider.configuration);
+      provider = await this.#historicalDshProvider.create(config.provider.configuration);
       const journal = new FileInvocationJournalStore(config.invocation.journalDirectory);
       const invocation = createManagedInvocation({
         providers: Object.freeze({ [provider.key]: provider.sessions }),

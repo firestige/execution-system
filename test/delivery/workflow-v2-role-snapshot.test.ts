@@ -44,8 +44,8 @@ function documents() {
     routesDocument: {
       schemaVersion: "agentops.workflow-dsl@2.0.0",
       routes: [
-        { id: "route.facilitator.intake", role: "role.facilitator", resources: { rolePrompt: { id: "role.prompt.facilitator" } } },
-        { id: "route.reviewer.review", role: "role.reviewer", resources: { rolePrompt: { id: "role.prompt.reviewer" } } },
+        { id: "route.facilitator.intake", role: "role.facilitator", resources: { rolePrompt: { id: "role.prompt.facilitator" }, capabilities: ["action-interaction", "structured-completion"] } },
+        { id: "route.reviewer.review", role: "role.reviewer", resources: { rolePrompt: { id: "role.prompt.reviewer" }, capabilities: ["structured-completion"] } },
       ],
     },
   };
@@ -61,8 +61,8 @@ describe("Workflow DSL 2.0 Role Snapshot extraction", () => {
         snapshotDigest: sha("2"),
       },
       agentActionRoles: [
-        { roleId: "role.facilitator", rolePromptIdentity: "role.prompt.facilitator", rolePromptDigest: sha("a") },
-        { roleId: "role.reviewer", rolePromptIdentity: "role.prompt.reviewer", rolePromptDigest: sha("b") },
+        { roleId: "role.facilitator", rolePromptIdentity: "role.prompt.facilitator", rolePromptDigest: sha("a"), requiredCapabilities: ["action-interaction", "structured-completion"] },
+        { roleId: "role.reviewer", rolePromptIdentity: "role.prompt.reviewer", rolePromptDigest: sha("b"), requiredCapabilities: ["structured-completion"] },
       ],
     });
   });
@@ -80,7 +80,7 @@ describe("Workflow DSL 2.0 Role Snapshot extraction", () => {
   it("fails when one Role resolves to different Role prompts across Routes", () => {
     const value = structuredClone(documents());
     value.actionsDocument.actions.push({ id: "action.aggregate", responsibleAuthority: { kind: "role", role: "role.facilitator" }, allowedRoutes: ["route.facilitator.aggregate"] });
-    value.routesDocument.routes.push({ id: "route.facilitator.aggregate", role: "role.facilitator", resources: { rolePrompt: { id: "role.prompt.reviewer" } } });
+    value.routesDocument.routes.push({ id: "route.facilitator.aggregate", role: "role.facilitator", resources: { rolePrompt: { id: "role.prompt.reviewer" }, capabilities: ["structured-completion"] } });
     value.snapshotDocument.snapshot.routeBindings.push({ action: "action.aggregate", role: "role.facilitator", route: "route.facilitator.aggregate" });
 
     expect(() => extractWorkflowV2RoleSnapshot(value)).toThrowError(expect.objectContaining({ code: "WORKFLOW_PACKAGE_INVALID" }));

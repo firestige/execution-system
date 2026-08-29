@@ -121,6 +121,10 @@ dsh plugin --profile web add wsr-dsh-intake
 
 宿主无关嵌入从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。
 
+## 多 Provider 2.0 候选
+
+`execution.config@2.0.0` 不含 installation-wide Provider 或 model default。Embedding product 通过唯一 `AgentProviderFactoryRegistry` 注册任意多个 exact、immutable Agent Provider factory；duplicate identity fail closed。每个 Agent-action Role 必须在 `<canonical-worktree>/.wsr/role-provider-bindings.json` 中显式绑定 exact Provider identity/version 与 Provider-owned model coordinate。Admission 校验 Workflow required capabilities，把 factory descriptor digest 冻结进 `execution.delivery-manifest@2.0.0`，且从不做 priority selection 或 fallback。Recovery 只接受同一 descriptor，并且只为 persisted Delivery 实际使用的 Provider 启动 realm。Machine schema 见 `config/schema/execution.config.v2.schema.json`。
+
 ## 获取源码
 
 本仓库通常作为 [workflow-self-recursive](https://github.com/firestige/workflow-self-recursive) 的 submodule 使用：

@@ -16,13 +16,8 @@ const DERIVED_PATH_KEYS = ["packageStoreRoot", "intakeBindingStoreRoot", "manife
 const OBSERVATION_KEYS = ["enabled", "endpoint", "timeoutMs", "maxBatchRecords", "maxBatchBytes", "flushIntervalMs", "shutdownFlushMs", "serviceName"] as const;
 const CONTROL_KEYS = ["startupTimeoutMs", "executionTimeoutMs", "shutdownTimeoutMs", "maxConcurrentDeliveries", "allowExplicitRefresh", "diagnosticMaxBytes"] as const;
 const INTAKE_KEYS = ["maxCorrelationBytes", "maxOutputBytes"] as const;
-const IDENTITY = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 
 type RecordValue = Record<string, unknown>;
-
-export interface AgentProviderRealmFactoryCapability {
-  readonly agentProviderIdentity: string;
-}
 
 export interface ExecutionInstallationConfigV2 {
   readonly schemaVersion: typeof EXECUTION_CONFIG_SCHEMA_VERSION_V2;
@@ -48,11 +43,7 @@ export interface ExecutionInstallationConfigV2 {
   readonly runner: Readonly<{
     implementationKey: "runner.v2";
     host: Readonly<{ engine: "langgraph" }>;
-    provider: Readonly<{
-      identity: string;
-      defaultModel: Readonly<{ provider: string; model: string }>;
-      maxParallelToolCalls: number;
-    }>;
+    maxParallelToolCalls: number;
   }>;
   readonly observation: ExecutionInstallationConfig["observation"];
   readonly controls: ExecutionInstallationConfig["controls"];
@@ -81,7 +72,7 @@ export interface DeliveryConfigProjectionV2 {
     runner: Readonly<{
       implementationKey: "runner.v2";
       host: Readonly<{ engine: "langgraph" }>;
-      provider: Readonly<{ identity: string; maxParallelToolCalls: number }>;
+      maxParallelToolCalls: number;
     }>;
     controls: Readonly<{
       executionTimeoutMs: number;
@@ -113,12 +104,6 @@ function exact(value: unknown, path: string, allowed: readonly string[]): Record
 function string(value: unknown, path: string, code: ConfigurationErrorCode = "CONFIG_REQUIRED_VALUE"): string {
   if (typeof value !== "string" || value.trim().length === 0 || value.length > 1024) throw new ConfigurationError(code, [path]);
   return value;
-}
-
-function identity(value: unknown, path: string): string {
-  const normalized = string(value, path, "CONFIG_PROVIDER_INVALID");
-  if (!IDENTITY.test(normalized)) throw new ConfigurationError("CONFIG_PROVIDER_INVALID", [path]);
-  return normalized;
 }
 
 function integer(value: unknown, path: string, minimum: number, maximum: number): number {
@@ -195,7 +180,7 @@ function normalizeSource(value: unknown): WorkflowSourceConfiguration {
   throw new ConfigurationError("CONFIG_SOURCE_INVALID", ["workflowSource.kind"]);
 }
 
-export function validateExecutionInstallationConfigV2(candidate: unknown, capability: AgentProviderRealmFactoryCapability): ExecutionInstallationConfigV2 {
+export function validateExecutionInstallationConfigV2(candidate: unknown): ExecutionInstallationConfigV2 {
   const placeholders = requiredMarkers(candidate);
   if (placeholders.length > 0) throw new ConfigurationError("CONFIG_REQUIRED_INPUT_MISSING", placeholders.slice(0, 16));
   const root = exact(candidate, "config", ROOT_KEYS);
@@ -215,17 +200,9 @@ export function validateExecutionInstallationConfigV2(candidate: unknown, capabi
     throw new ConfigurationError("CONFIG_PATH_OUT_OF_SCOPE", ["paths"]);
   }
 
-  const runner = exact(root.runner, "runner", ["implementationKey", "host", "provider"]);
+  const runner = exact(root.runner, "runner", ["implementationKey", "host", "maxParallelToolCalls"]);
   const host = exact(runner.host, "runner.host", ["engine"]);
-  const provider = exact(runner.provider, "runner.provider", ["identity", "defaultModel", "maxParallelToolCalls"]);
-  const defaultModel = exact(provider.defaultModel, "runner.provider.defaultModel", ["provider", "model"]);
   if (runner.implementationKey !== "runner.v2" || host.engine !== "langgraph") throw new ConfigurationError("CONFIG_RUNNER_INVALID", ["runner"]);
-  const providerIdentity = identity(provider.identity, "runner.provider.identity");
-  if (!IDENTITY.test(capability.agentProviderIdentity) || providerIdentity !== capability.agentProviderIdentity) {
-    throw new ConfigurationError("CONFIG_PROVIDER_INVALID", ["runner.provider.identity"]);
-  }
-  const modelProvider = identity(defaultModel.provider, "runner.provider.defaultModel.provider");
-  const model = identity(defaultModel.model, "runner.provider.defaultModel.model");
 
   const observation = exact(root.observation, "observation", OBSERVATION_KEYS);
   const observationEnabled = boolean(observation.enabled, "observation.enabled");
@@ -259,11 +236,7 @@ export function validateExecutionInstallationConfigV2(candidate: unknown, capabi
     runner: {
       implementationKey: "runner.v2",
       host: { engine: "langgraph" },
-      provider: {
-        identity: providerIdentity,
-        defaultModel: { provider: modelProvider, model },
-        maxParallelToolCalls: integer(provider.maxParallelToolCalls, "runner.provider.maxParallelToolCalls", 1, 32),
-      },
+      maxParallelToolCalls: integer(runner.maxParallelToolCalls, "runner.maxParallelToolCalls", 1, 32),
     },
     observation: {
       enabled: observationEnabled,
@@ -343,12 +316,12 @@ async function preflight(config: ExecutionInstallationConfigV2): Promise<Executi
   }
 }
 
-export async function loadExecutionInstallationConfigV2(configFile: string, capability: AgentProviderRealmFactoryCapability): Promise<LoadedExecutionInstallationConfigV2> {
+export async function loadExecutionInstallationConfigV2(configFile: string): Promise<LoadedExecutionInstallationConfigV2> {
   if (!isAbsolute(configFile)) throw new ConfigurationError("CONFIG_PATH_INVALID", ["configFile"]);
   let text: string;
   try { text = await readFile(configFile, "utf8"); }
   catch { throw new ConfigurationError("CONFIG_PATH_INVALID", ["configFile"]); }
-  const config = await preflight(validateExecutionInstallationConfigV2(parseExecutionConfigurationDocument(configFile, text), capability));
+  const config = await preflight(validateExecutionInstallationConfigV2(parseExecutionConfigurationDocument(configFile, text)));
   const canonical = JSON.parse(Buffer.from(canonicalJsonBytes(config as unknown as never)).toString("utf8")) as never;
   return deepFreeze({ config, installationConfigIdentity: coordinateIdentity(EXECUTION_CONFIG_SCHEMA_VERSION_V2, canonical) });
 }
@@ -370,10 +343,7 @@ export function createDeliveryConfigProjectionV2(config: ExecutionInstallationCo
     runner: {
       implementationKey: config.runner.implementationKey,
       host: config.runner.host,
-      provider: {
-        identity: config.runner.provider.identity,
-        maxParallelToolCalls: config.runner.provider.maxParallelToolCalls,
-      },
+      maxParallelToolCalls: config.runner.maxParallelToolCalls,
     },
     controls: {
       executionTimeoutMs: config.controls.executionTimeoutMs,

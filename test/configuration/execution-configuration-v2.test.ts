@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,11 +42,7 @@ function input(paths: Awaited<ReturnType<typeof deployment>>) {
     runner: {
       implementationKey: "runner.v2",
       host: { engine: "langgraph" },
-      provider: {
-        identity: "provider.dsh",
-        defaultModel: { provider: "deepseek-official", model: "deepseek-chat" },
-        maxParallelToolCalls: 4,
-      },
+      maxParallelToolCalls: 4,
     },
     observation: {
       enabled: false,
@@ -69,30 +65,37 @@ function input(paths: Awaited<ReturnType<typeof deployment>>) {
   } as const;
 }
 
-async function load(document: unknown, agentProviderIdentity = "provider.dsh") {
+async function load(document: unknown) {
   const paths = await deployment();
   const path = join(paths.root, "execution.json");
   await writeFile(path, JSON.stringify(document));
-  return loadExecutionInstallationConfigV2(path, Object.freeze({ agentProviderIdentity }));
+  return loadExecutionInstallationConfigV2(path);
 }
 
 describe("Execution configuration 2.0", () => {
+  it("ships a closed machine schema without Provider selection or credential authority", async () => {
+    const schema = JSON.parse(await readFile(new URL("../../config/schema/execution.config.v2.schema.json", import.meta.url), "utf8")) as Record<string, any>;
+    expect(schema).toMatchObject({
+      $id: "urn:wsr:execution:config:2.0.0",
+      additionalProperties: false,
+      properties: { runner: { additionalProperties: false, required: ["implementationKey", "host", "maxParallelToolCalls"] } },
+    });
+    const bytes = JSON.stringify(schema).toLowerCase();
+    for (const prohibited of ["credential", "defaultmodel", "defaultprovider", "providerpriority", "fallbackprovider"]) expect(bytes).not.toContain(prohibited);
+  });
+
   it("loads WSR-owned settings without reading or representing Provider configuration", async () => {
     const paths = await deployment();
     const path = join(paths.root, "execution.json");
     await writeFile(path, JSON.stringify(input(paths)));
 
-    const loaded = await loadExecutionInstallationConfigV2(path, { agentProviderIdentity: "provider.dsh" });
+    const loaded = await loadExecutionInstallationConfigV2(path);
 
     expect(loaded.config).toMatchObject({
       schemaVersion: "execution.config@2.0.0",
       runner: {
         implementationKey: "runner.v2",
-        provider: {
-          identity: "provider.dsh",
-          defaultModel: { provider: "deepseek-official", model: "deepseek-chat" },
-          maxParallelToolCalls: 4,
-        },
+        maxParallelToolCalls: 4,
       },
     });
     expect(loaded.installationConfigIdentity).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -107,11 +110,11 @@ describe("Execution configuration 2.0", () => {
     const valid = input(paths);
     const candidates = [
       { ...valid, paths: { ...valid.paths, credentialStorePath: join(paths.root, "credentials.json") } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, key: "dsh" } } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, route: "deepseek-official" } } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, modelId: "deepseek-chat" } } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, baseUrl: "https://api.example" } } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, credentialRef: "PROVIDER_KEY" } } },
+      { ...valid, runner: { ...valid.runner, provider: { key: "dsh" } } },
+      { ...valid, runner: { ...valid.runner, provider: { route: "deepseek-official" } } },
+      { ...valid, runner: { ...valid.runner, provider: { modelId: "deepseek-chat" } } },
+      { ...valid, runner: { ...valid.runner, provider: { baseUrl: "https://api.example" } } },
+      { ...valid, runner: { ...valid.runner, provider: { credentialRef: "PROVIDER_KEY" } } },
       { ...valid, runner: { ...valid.runner, implementationKey: "runner.v1" } },
     ];
 
@@ -120,35 +123,23 @@ describe("Execution configuration 2.0", () => {
     });
   });
 
-  it("requires the configured Agent Provider identity to match the supplied factory capability", async () => {
-    const paths = await deployment();
-    await expect(load(input(paths), "provider.other")).rejects.toMatchObject({
-      code: "CONFIG_PROVIDER_INVALID",
-      fieldPaths: ["runner.provider.identity"],
-    });
-  });
-
-  it("validates the closed exact default model selection without probing a model catalog", async () => {
+  it("rejects installation-wide Provider selection, defaults, priority, and fallback", async () => {
     const paths = await deployment();
     const valid = input(paths);
     const candidates = [
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, defaultModel: { provider: "bad route", model: "model" } } } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, defaultModel: { provider: "route", model: "" } } } },
-      { ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, defaultModel: { provider: "route", model: "model", fallback: "other" } } } },
+      { ...valid, runner: { ...valid.runner, provider: { identity: "provider.dsh" } } },
+      { ...valid, runner: { ...valid.runner, defaultProvider: "provider.dsh" } },
+      { ...valid, runner: { ...valid.runner, providerPriority: ["provider.dsh"] } },
+      { ...valid, runner: { ...valid.runner, fallbackProvider: "provider.dsh" } },
     ];
-    for (const candidate of candidates) await expect(load(candidate)).rejects.toMatchObject({ code: expect.stringMatching(/^CONFIG_(PROVIDER_INVALID|UNKNOWN_KEY)$/u) });
-
-    await expect(load({
-      ...valid,
-      runner: { ...valid.runner, provider: { ...valid.runner.provider, defaultModel: { provider: "private-route", model: "unlisted-dynamic-model" } } },
-    })).resolves.toMatchObject({ config: { runner: { provider: { defaultModel: { model: "unlisted-dynamic-model" } } } } });
+    for (const candidate of candidates) await expect(load(candidate)).rejects.toMatchObject({ code: "CONFIG_UNKNOWN_KEY" });
   });
 
   it("projects only WSR-owned recovery inputs and excludes the admission-only default model", async () => {
     const paths = await deployment();
     const path = join(paths.root, "execution.json");
     await writeFile(path, JSON.stringify(input(paths)));
-    const loaded = await loadExecutionInstallationConfigV2(path, { agentProviderIdentity: "provider.dsh" });
+    const loaded = await loadExecutionInstallationConfigV2(path);
 
     const projection = createDeliveryConfigProjectionV2(loaded.config);
 
@@ -158,7 +149,7 @@ describe("Execution configuration 2.0", () => {
         runner: {
           implementationKey: "runner.v2",
           host: { engine: "langgraph" },
-          provider: { identity: "provider.dsh", maxParallelToolCalls: 4 },
+          maxParallelToolCalls: 4,
         },
       },
       identity: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
@@ -189,9 +180,7 @@ describe("Execution configuration 2.0", () => {
       },
     }));
 
-    await expect(loadExecutionInstallationConfigV2(configFile, {
-      agentProviderIdentity: "provider.dsh",
-    })).resolves.toMatchObject({
+    await expect(loadExecutionInstallationConfigV2(configFile)).resolves.toMatchObject({
       config: {
         workflowSource: {
           kind: "adapter",
@@ -223,21 +212,15 @@ describe("Execution configuration 2.0", () => {
       [{ ...valid, observation: { ...valid.observation, enabled: true } }, "CONFIG_OBSERVATION_INVALID"],
       [{ ...valid, observation: { ...valid.observation, enabled: true, endpoint: "https://example.test/v1/traces" } }, "CONFIG_OBSERVATION_ENDPOINT_INVALID"],
       [{ ...valid, controls: { ...valid.controls, allowExplicitRefresh: "false" } }, "CONFIG_TYPE_INVALID"],
-      [{ ...valid, runner: { ...valid.runner, provider: { ...valid.runner.provider, maxParallelToolCalls: 0 } } }, "CONFIG_RANGE_INVALID"],
+      [{ ...valid, runner: { ...valid.runner, maxParallelToolCalls: 0 } }, "CONFIG_RANGE_INVALID"],
     ];
 
     for (const [candidate, code] of cases) {
-      expect(() => validateExecutionInstallationConfigV2(candidate, {
-        agentProviderIdentity: "provider.dsh",
-      })).toThrow(expect.objectContaining({ code }));
+      expect(() => validateExecutionInstallationConfigV2(candidate)).toThrow(expect.objectContaining({ code }));
     }
 
-    await expect(loadExecutionInstallationConfigV2("relative.json", {
-      agentProviderIdentity: "provider.dsh",
-    })).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
-    await expect(loadExecutionInstallationConfigV2(join(paths.root, "missing.json"), {
-      agentProviderIdentity: "provider.dsh",
-    })).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
+    await expect(loadExecutionInstallationConfigV2("relative.json")).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
+    await expect(loadExecutionInstallationConfigV2(join(paths.root, "missing.json"))).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
 
     const unresolvedPathConfig = join(paths.root, "unresolved-path.json");
     await writeFile(unresolvedPathConfig, JSON.stringify({
@@ -247,9 +230,7 @@ describe("Execution configuration 2.0", () => {
         allowedWorktreeRoots: [join(paths.workspaceRoot, "missing-worktree")],
       },
     }));
-    await expect(loadExecutionInstallationConfigV2(unresolvedPathConfig, {
-      agentProviderIdentity: "provider.dsh",
-    })).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
+    await expect(loadExecutionInstallationConfigV2(unresolvedPathConfig)).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
 
     const outsideWorktree = join(paths.root, "outside-worktree");
     const linkedWorktree = join(paths.workspaceRoot, "linked-worktree");
@@ -260,8 +241,6 @@ describe("Execution configuration 2.0", () => {
       ...valid,
       paths: { ...valid.paths, allowedWorktreeRoots: [linkedWorktree] },
     }));
-    await expect(loadExecutionInstallationConfigV2(escapedPathConfig, {
-      agentProviderIdentity: "provider.dsh",
-    })).rejects.toMatchObject({ code: "CONFIG_PATH_OUT_OF_SCOPE" });
+    await expect(loadExecutionInstallationConfigV2(escapedPathConfig)).rejects.toMatchObject({ code: "CONFIG_PATH_OUT_OF_SCOPE" });
   });
 });
