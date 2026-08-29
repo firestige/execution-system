@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "execution.artifact-publication@1.0.0",
+  "package": {
+    "name": "wsr-dsh-intake",
+    "version": "0.1.4"
+  },
+  "compatibility": {
+    "node": ">=24.12.0 <25",
+    "dsh": "0.1.1-rc.2",
+    "workflowContract": "agentops.workflow-dsl@1.1.0",
+    "observationContract": "agentops.observation@1.0.0"
+  },
+  "artifact": {
+    "name": "wsr-dsh-intake-0.1.4.tgz",
+    "bytes": 22184,
+    "sha256": "sha256:f108d58bd2c891c4b7447e1c459717c2b5ea80e1a16888d1313eac933b26a4c2",
+    "inventory": [
+      "package/README.md",
+      "package/README.zh-CN.md",
+      "package/cordis.patch.yml",
+      "package/lib/client.js",
+      "package/package.json",
+      "package/skills/workflow-execution/SKILL.md",
+      "package/src/binding-repository.js",
+      "package/src/command.js",
+      "package/src/index.d.ts",
+      "package/src/index.js",
+      "package/src/plugin.js"
+    ]
+  }
+}
