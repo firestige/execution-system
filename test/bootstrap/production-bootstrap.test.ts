@@ -158,6 +158,41 @@ describe("Wave 6 production bootstrap", () => {
     });
   });
 
+  it("projects exact host-neutral Action and Intervention facts without exposing Provider sessions", async () => {
+    let invalidations = 0;
+    const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }), () => { invalidations += 1; });
+    broker.register("delivery-projection", "/worktree", "fixture@1.0.0", `sha256:${"d".repeat(64)}`, Object.freeze({ "node:node-review": "action.review" }));
+    broker.attach("delivery-projection", "conversation-projection");
+    broker.beginAction("delivery-projection", "action.review");
+    expect(broker.enumerateRuntime()).toMatchObject([{ current: { kind: "ACTION", identity: "action.review" } }]);
+    broker.endAction("delivery-projection", "action.review");
+    expect(broker.enumerateRuntime()).toMatchObject([{ current: null }]);
+    const episode = Object.freeze({
+      thread: Object.freeze({ delivery: Object.freeze({}), threadIdentity: "thread-1" }),
+      site: Object.freeze({ kind: "node", nodeIdentity: "node-review" }),
+      invocationIdentity: "invocation-1",
+      attemptIdentity: "attempt-1",
+    }) as any;
+    const pendingAction = broker.bridge("delivery-projection").requestInput(Object.freeze({
+      identity: "request-1", episode, prompt: Object.freeze({ question: "review?" }), responseSchema: Object.freeze({ type: "string" }),
+    }) as any);
+    expect(broker.enumerateBindings()).toEqual([{ deliveryId: "delivery-projection", deliveryBindingIdentity: `sha256:${"d".repeat(64)}`, sessionCorrelation: "conversation-projection" }]);
+    expect(broker.enumerateRuntime()).toMatchObject([{ current: { kind: "ACTION", identity: "action.review" }, terminal: null }]);
+    expect(JSON.stringify(broker.enumerateRuntime())).not.toMatch(/session|credential|dsh/iu);
+    broker.respond("delivery-projection", "ANSWER", { text: "continue", attachments: [] });
+    await pendingAction;
+
+    const pendingIntervention = broker.workflowBridge("delivery-projection").request(Object.freeze({
+      controlIdentity: "control.approval", correlationIdentity: "correlation-1", kind: "user",
+      content: Object.freeze({ approve: true }), contentIdentity: `sha256:${"e".repeat(64)}`,
+    }) as any);
+    expect(broker.enumerateRuntime()).toMatchObject([{ current: { kind: "INTERVENTION", identity: "control.approval" } }]);
+    broker.respond("delivery-projection", "ANSWER", { text: "{\"approve\":true}", attachments: [] });
+    await pendingIntervention;
+    expect(broker.enumerateRuntime()).toMatchObject([{ current: null }]);
+    expect(invalidations).toBeGreaterThanOrEqual(6);
+  });
+
   it("bridges Workflow Wait through the bound Intake with exact JSON correlation", async () => {
     const presentations: any[] = [];
     const broker = new ProductionInteractionBroker(Object.freeze({ async publish(message: any) { presentations.push(message); } }));

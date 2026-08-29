@@ -43,6 +43,10 @@ export interface DeliveryLifecycleOptions {
   readonly slots: CurrentSlotRepository;
   readonly clock: ClockPort;
   readonly ids: IdPort;
+  readonly invalidations?: Readonly<{ publish(): void }>;
+  readonly completed?: Readonly<{
+    publish(manifest: DeliveryManifest, terminal: Readonly<{ outcome: "SUCCEEDED" | "FAILED" | "CANCELLED"; finishedAt: number }>, error: Readonly<{ code: string }> | null): Promise<void>;
+  }>;
 }
 
 export const DISABLED_DELIVERY_OBSERVATION_SINK: DisabledObservationSink = Object.freeze({
@@ -150,6 +154,15 @@ export class DeliveryLifecycleService {
     this.#ownerFacts = Object.freeze({ emit: (fact: OwnerFact) => safeEmit(options.ownerFacts, fact) });
   }
 
+  #publishChange(): void {
+    try { this.#options.invalidations?.publish(); } catch { /* Read models are non-controlling. */ }
+  }
+
+  async #publishCompleted(manifest: DeliveryManifest, outcome: "SUCCEEDED" | "FAILED" | "CANCELLED", finishedAt: number, error: Readonly<{ code: string }> | null): Promise<void> {
+    await this.#options.completed?.publish(manifest, Object.freeze({ outcome, finishedAt }), error).catch(() => undefined);
+    this.#publishChange();
+  }
+
   async activate(ready: ExecutionPrebindingReady): Promise<ExecutionResult> {
     let resolved: WorkflowPackageResolutionResult;
     try { resolved = await this.#options.resolver.resolve(ready.command.selector, ready.command.refresh); }
@@ -206,6 +219,7 @@ export class DeliveryLifecycleService {
         deliveryBindingIdentity: manifest.deliveryBindingIdentity,
         updatedAt: this.#options.clock.now(),
       });
+      this.#publishChange();
       await ready.holder.release();
       safeEmit(this.#ownerFacts, {
         owner: "M01",
@@ -249,7 +263,10 @@ export class DeliveryLifecycleService {
       workflowIdentity: manifest.resolvedPackage.workflowId,
     });
     if (slot.state === "START_FAILED") {
-      await this.#options.slots.transition(slot.worktree, "M01_START_FAILURE_HANDLED", this.#options.clock.now());
+      const finishedAt = this.#options.clock.now();
+      await this.#options.slots.transition(slot.worktree, "M01_START_FAILURE_HANDLED", finishedAt);
+      this.#publishChange();
+      await this.#publishCompleted(manifest, "FAILED", finishedAt, Object.freeze({ code: "RUNNER_START_FAILED" }));
       return failure("RUNNER_START_FAILED");
     }
     if (slot.state === "TERMINAL_HANDLING") {
@@ -262,7 +279,12 @@ export class DeliveryLifecycleService {
     try {
       const current = await this.#options.slots.read(worktree);
       if (current.state === "EMPTY" || current.deliveryId !== deliveryId) return failure("DELIVERY_UNKNOWN");
-      await this.#options.slots.transition(worktree, "ADMINISTRATIVE_CLOSE", this.#options.clock.now(), { authorization: deliveryId });
+      const manifest = await this.#options.manifests.load(current.manifestPath);
+      if (manifest.deliveryBindingIdentity !== current.deliveryBindingIdentity) return failure("DELIVERY_UNKNOWN");
+      const finishedAt = this.#options.clock.now();
+      await this.#options.slots.transition(worktree, "ADMINISTRATIVE_CLOSE", finishedAt, { authorization: deliveryId });
+      this.#publishChange();
+      await this.#publishCompleted(manifest, "CANCELLED", finishedAt, null);
       this.#ownerFacts.emit({ owner: "M01", name: "authorized-abandonment", occurredAt: this.#options.clock.now() });
       return Object.freeze({ kind: "TERMINAL", worktree, deliveryId, outcome: "CANCELLED", summary: "AUTHORIZED_ABANDONMENT" });
     } catch {
@@ -289,6 +311,7 @@ export class DeliveryLifecycleService {
         }
         if (current.state === "START_UNCERTAIN") {
           await this.#options.slots.transition(manifest.canonicalWorktree, "M02_START_CORRELATED", this.#options.clock.now());
+          this.#publishChange();
           safeEmit(ownerFacts, { owner: "M02", name: "start-correlated", occurredAt: this.#options.clock.now() });
         } else if (current.state !== "RUNNING_CORRELATED") {
           return Object.freeze({ ok: false as const, error: Object.freeze({ code: "CORRELATION_MISMATCH" as const }) });
@@ -300,6 +323,7 @@ export class DeliveryLifecycleService {
     if (state === "BOUND") {
       ownerFacts.emit({ owner: "M01", name: "runner-launch-requested", occurredAt: this.#options.clock.now() });
       await this.#options.slots.transition(manifest.canonicalWorktree, "M01_RUNNER_LAUNCH_REQUESTED", this.#options.clock.now());
+      this.#publishChange();
       state = "START_UNCERTAIN";
     }
     let runtime: ExecutionRuntimeAdapter;
@@ -327,11 +351,13 @@ export class DeliveryLifecycleService {
         if (state === "START_UNCERTAIN") {
           ownerFacts.emit({ owner: "M02", name: "start-correlated", occurredAt: this.#options.clock.now() });
           await this.#options.slots.transition(manifest.canonicalWorktree, "M02_START_CORRELATED", this.#options.clock.now());
+          this.#publishChange();
           state = "RUNNING_CORRELATED";
         }
         if (state === "RUNNING_CORRELATED") {
           ownerFacts.emit({ owner: "M02", name: "result-unresolved", occurredAt: this.#options.clock.now() });
           await this.#options.slots.transition(manifest.canonicalWorktree, "M02_RESULT_UNRESOLVED", this.#options.clock.now());
+          this.#publishChange();
         }
       }
       return failure("RUNNER_RESULT_INVALID");
@@ -340,8 +366,12 @@ export class DeliveryLifecycleService {
       if (state !== "START_UNCERTAIN") return failure("RUNNER_RESULT_INVALID");
       ownerFacts.emit({ owner: "M02", name: "start-failed", occurredAt: this.#options.clock.now(), outcome: "START_FAILED" });
       await this.#options.slots.transition(manifest.canonicalWorktree, "M02_START_FAILED", this.#options.clock.now());
+      this.#publishChange();
       ownerFacts.emit({ owner: "M01", name: "start-failure-handled", occurredAt: this.#options.clock.now() });
-      await this.#options.slots.transition(manifest.canonicalWorktree, "M01_START_FAILURE_HANDLED", this.#options.clock.now());
+      const finishedAt = this.#options.clock.now();
+      await this.#options.slots.transition(manifest.canonicalWorktree, "M01_START_FAILURE_HANDLED", finishedAt);
+      this.#publishChange();
+      await this.#publishCompleted(manifest, "FAILED", finishedAt, Object.freeze({ code: "RUNNER_START_FAILED" }));
       return failure("RUNNER_START_FAILED");
     }
     if (result.kind === "unknown") {
@@ -349,11 +379,13 @@ export class DeliveryLifecycleService {
       if (state === "START_UNCERTAIN") {
         ownerFacts.emit({ owner: "M02", name: "start-correlated", occurredAt: this.#options.clock.now() });
         await this.#options.slots.transition(manifest.canonicalWorktree, "M02_START_CORRELATED", this.#options.clock.now());
+        this.#publishChange();
         state = "RUNNING_CORRELATED";
       }
       if (state === "RUNNING_CORRELATED") {
         ownerFacts.emit({ owner: "M02", name: "result-unresolved", occurredAt: this.#options.clock.now() });
         await this.#options.slots.transition(manifest.canonicalWorktree, "M02_RESULT_UNRESOLVED", this.#options.clock.now());
+        this.#publishChange();
       }
       return Object.freeze({ kind: "UNKNOWN", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, state: "RESULT_UNRESOLVED" });
     }
@@ -361,14 +393,19 @@ export class DeliveryLifecycleService {
     if (state === "START_UNCERTAIN") {
       ownerFacts.emit({ owner: "M02", name: "start-correlated", occurredAt: this.#options.clock.now() });
       await this.#options.slots.transition(manifest.canonicalWorktree, "M02_START_CORRELATED", this.#options.clock.now());
+      this.#publishChange();
       state = "RUNNING_CORRELATED";
     }
     ownerFacts.emit({ owner: "M02", name: "terminal-validated", occurredAt: this.#options.clock.now(), outcome: result.outcome });
     await this.#options.slots.transition(manifest.canonicalWorktree,
       state === "RESULT_UNRESOLVED" ? "M02_RECONCILED_TERMINAL" : "M02_TERMINAL_VALIDATED", this.#options.clock.now());
+    this.#publishChange();
     ownerFacts.emit({ owner: "M01", name: "terminal-handling-complete", occurredAt: this.#options.clock.now() });
-    await this.#options.slots.transition(manifest.canonicalWorktree, "M01_TERMINAL_HANDLING_COMPLETE", this.#options.clock.now());
+    const finishedAt = this.#options.clock.now();
+    await this.#options.slots.transition(manifest.canonicalWorktree, "M01_TERMINAL_HANDLING_COMPLETE", finishedAt);
+    this.#publishChange();
     const outcome = result.outcome === "COMPLETED" ? "SUCCEEDED" : result.outcome === "CANCELLED" ? "CANCELLED" : "FAILED";
+    await this.#publishCompleted(manifest, outcome, finishedAt, outcome === "FAILED" ? Object.freeze({ code: result.outcome }) : null);
     return Object.freeze({ kind: "TERMINAL", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, outcome });
   }
 }
