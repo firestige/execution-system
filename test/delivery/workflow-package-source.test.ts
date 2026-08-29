@@ -11,13 +11,11 @@ import {
 } from "../../src/delivery/index.js";
 
 describe("Workflow Package selector", () => {
-  it("normalizes bare and @latest selectors to latest and preserves an exact version", () => {
-    expect(parseWorkflowSelector("contributed")).toEqual({ name: "contributed", version: { kind: "LATEST" } });
-    expect(parseWorkflowSelector("contributed@latest")).toEqual({ name: "contributed", version: { kind: "LATEST" } });
+  it("accepts only an exact name@version selector", () => {
     expect(parseWorkflowSelector("contributed@1.2.3")).toEqual({ name: "contributed", version: { kind: "EXACT", value: "1.2.3" } });
   });
 
-  it.each(["", "@latest", "bad/name", "name@", "name@v1", "name@1", "name@1.2", "name@1.2.3@latest"])(
+  it.each(["", "contributed", "contributed@latest", "@latest", "bad/name", "name@", "name@v1", "name@1", "name@1.2", "name@1.2.3@latest"])(
     "rejects invalid selector %j without fallback",
     (selector) => expect(() => parseWorkflowSelector(selector)).toThrowError(expect.objectContaining({ code: "INVALID_WORKFLOW_SELECTOR" })),
   );

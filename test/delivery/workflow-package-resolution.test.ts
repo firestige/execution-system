@@ -138,34 +138,12 @@ describe("Workflow Package Store and frozen validation", () => {
     expect(source.calls).toHaveLength(1);
   });
 
-  it("uses a sticky READY alias for bare/latest and refresh failure preserves it", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
-    const source = new QueuedSource([
-      { kind: "FOUND", candidate },
-      { kind: "INVALID" },
-    ]);
+  it("rejects bare/latest selectors before cache or Source access", async () => {
+    const source = new QueuedSource([]);
     const f = await resolverFixture(source);
-    const first = await f.resolver.resolve(candidate.name);
-    expect(first.ok).toBe(true);
-    expect(await f.resolver.resolve(`${candidate.name}@latest`)).toEqual(first);
-    expect(source.calls).toHaveLength(1);
-    expect(await f.resolver.resolve(candidate.name, true)).toEqual({ ok: false, error: { code: "WORKFLOW_PACKAGE_INVALID" } });
-    expect(await f.resolver.resolve(candidate.name)).toEqual(first);
-    expect(source.calls).toHaveLength(2);
-  });
-
-  it("refreshes through the configured Source and updates the alias only after READY exists", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
-    const source = new QueuedSource([
-      { kind: "FOUND", candidate },
-      { kind: "FOUND", candidate },
-    ]);
-    const f = await resolverFixture(source);
-    const first = await f.resolver.resolve(candidate.name);
-    const refreshed = await f.resolver.resolve(`${candidate.name}@latest`, true);
-    expect(refreshed).toEqual(first);
-    expect(source.calls).toHaveLength(2);
-    expect(await f.store.lookupLatest(candidate.name)).toEqual(first.ok ? first.value : undefined);
+    expect(await f.resolver.resolve("contributed")).toEqual({ ok: false, error: { code: "INVALID_WORKFLOW_SELECTOR" } });
+    expect(await f.resolver.resolve("contributed@latest", true)).toEqual({ ok: false, error: { code: "INVALID_WORKFLOW_SELECTOR" } });
+    expect(source.calls).toHaveLength(0);
   });
 
   it("rejects a conflicting digest for an already READY exact version", async () => {
@@ -194,6 +172,7 @@ describe("Workflow Package resolution failures", () => {
   it.each([
     ["NOT_FOUND", "WORKFLOW_NOT_FOUND"],
     ["UNAVAILABLE", "WORKFLOW_FETCH_FAILED"],
+    ["DIGEST_MISMATCH", "WORKFLOW_DIGEST_MISMATCH"],
     ["INVALID", "WORKFLOW_PACKAGE_INVALID"],
   ] as const)("maps configured Source %s without fallback", async (kind, code) => {
     const source = new QueuedSource([{ kind }]);
@@ -248,24 +227,6 @@ describe("Workflow Package resolution failures", () => {
     expect(await store.lookupExact(candidate.name, candidate.exactVersion)).toBeUndefined();
   });
 
-  it("rolls back a newly published exact candidate when initial sticky-alias publication fails", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
-    const root = await mkdtemp(join(tmpdir(), "workflow-package-alias-failure-"));
-    const readyRoot = join(root, "store");
-    const store = new WorkflowPackageStore({ readyRoot, stagingRoot: join(root, "staging") });
-    const source: WorkflowPackageSource = Object.freeze({
-      fetch: async () => {
-        await mkdir(readyRoot, { recursive: true });
-        await writeFile(join(readyRoot, "aliases"), "blocks alias directory");
-        return Object.freeze({ kind: "FOUND" as const, candidate });
-      },
-    });
-    const resolver = new WorkflowPackageResolver(store, source, new FrozenWorkflowPackageValidator(compatibility));
-    expect(await resolver.resolve(candidate.name))
-      .toEqual({ ok: false, error: { code: "WORKFLOW_CACHE_PUBLISH_FAILED" } });
-    expect(await store.lookupExact(candidate.name, candidate.exactVersion)).toBeUndefined();
-  });
-
   it("distinguishes package digest and schema/closure failures", async () => {
     const root = await mkdtemp(join(tmpdir(), "workflow-package-invalid-"));
     const definition = join(root, "definition");
@@ -302,14 +263,4 @@ describe("Workflow Package resolution failures", () => {
       .toEqual({ ok: false, error: { code: "WORKFLOW_PACKAGE_INVALID" } });
   });
 
-  it("fails closed on a corrupt sticky alias instead of contacting Source", async () => {
-    const source = new QueuedSource([]);
-    const f = await resolverFixture(source);
-    const name = "corrupt-alias";
-    const aliasRoot = join(f.root, "store", "aliases");
-    await mkdir(aliasRoot, { recursive: true });
-    await writeFile(join(aliasRoot, `${createHash("sha256").update(name).digest("hex")}.json`), "{ corrupt");
-    expect(await f.resolver.resolve(name)).toEqual({ ok: false, error: { code: "WORKFLOW_PACKAGE_INVALID" } });
-    expect(source.calls).toHaveLength(0);
-  });
 });

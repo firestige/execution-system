@@ -31,7 +31,7 @@ The DSH plugin is the first product entry; every admitted Workflow Action runs i
 |---|---|---|
 | Execution is a black box | What the model did, and with which workflow definition, cannot be audited afterwards | Every Delivery binds one exact version + SHA-256 into an immutable Manifest |
 | Interruptions lose state | After a crash or restart there is nowhere to look | Manifest/current-slot persist; `/wsr recover` resumes from the last durable boundary |
-| Version drift | The same request can execute different definitions at different times | Exact/latest selectors with a local READY store that stays authoritative |
+| Version drift | The same request can execute different definitions at different times | Exact `name@version` selectors, immutable GitHub assets, and a validated exact-content READY cache |
 | Observation couples to execution | A telemetry outage can take the run down with it | One-way, best-effort OTLP; Execution continues when Evidence or telemetry is unavailable |
 
 ## How it works
@@ -85,7 +85,7 @@ Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. Core and Intake versions are l
 
 ```text
 /wsr list                         # privacy-safe Delivery and worktree state
-/wsr create <name|name@latest|name@version>
+/wsr create <name@version>
 /wsr recover [delivery-id]
 /wsr status [delivery-id]
 /wsr action finish

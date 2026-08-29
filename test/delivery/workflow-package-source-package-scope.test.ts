@@ -22,7 +22,7 @@ function scopedRelease(name: string, version: string, descriptorUrl: string, arc
 }
 
 describe("package-scoped GitHub Workflow Source", () => {
-  it("enumerates package records and ignores an unrelated repository-wide latest release", async () => {
+  it("enumerates exact package records and ignores unrelated repository-wide releases", async () => {
     const archive = bytes("demo-2.0.0");
     const descriptorUrl = "https://github.com/example/workflows/releases/download/workflow-package%2Fdemo%2Fv2.0.0/workflow-package-demo-2.0.0.json";
     const archiveUrl = "https://github.com/example/workflows/releases/download/workflow-package%2Fdemo%2Fv2.0.0/workflow-package-demo-2.0.0.tar.gz";
@@ -53,14 +53,14 @@ describe("package-scoped GitHub Workflow Source", () => {
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     }, network);
 
-    expect(await source.fetch({ name: "demo", version: { kind: "LATEST" } })).toMatchObject({
+    expect(await source.fetch({ name: "demo", version: { kind: "EXACT", value: "2.0.0" } })).toMatchObject({
       kind: "FOUND", candidate: { name: "demo", exactVersion: "2.0.0", archiveDigest: sha256(archive) },
     });
     expect(calls[0]).toBe("https://api.github.com/repos/example/workflows/releases?per_page=100&page=1");
     expect(calls).not.toContain("https://api.github.com/repos/example/workflows/releases/latest");
   });
 
-  it("uses the same enumerated locator for exact prerelease while latest excludes prereleases", async () => {
+  it("uses the same enumerated locator for exact prerelease while latest is unsupported", async () => {
     const archive = bytes("release-candidate");
     const archiveUrl = "https://example.test/demo-2rc.tar.gz";
     const descriptorUrl = "https://example.test/demo-2rc.json";
@@ -85,7 +85,7 @@ describe("package-scoped GitHub Workflow Source", () => {
       releasesBaseUrl: "https://api.github.com/repos/example/workflows/releases",
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     }, network);
-    await expect(source.fetch({ name: "demo", version: { kind: "LATEST" } })).resolves.toEqual({ kind: "NOT_FOUND" });
+    await expect(source.fetch({ name: "demo", version: { kind: "LATEST" } })).resolves.toEqual({ kind: "INVALID" });
     await expect(source.fetch({ name: "demo", version: { kind: "EXACT", value: "2.0.0-rc.2" } })).resolves.toMatchObject({
       kind: "FOUND", candidate: { exactVersion: "2.0.0-rc.2" },
     });
@@ -191,7 +191,7 @@ describe("package-scoped GitHub Workflow Source", () => {
     await expect(run({
       [descriptorUrl]: { status: 200, body: descriptorBody },
       [checksumUrl]: { status: 200, body: bytes("wrong checksum\n") },
-    })).resolves.toEqual({ kind: "INVALID" });
+    })).resolves.toEqual({ kind: "DIGEST_MISMATCH" });
     await expect(run({
       [descriptorUrl]: { status: 200, body: descriptorBody },
       [checksumUrl]: { status: 503, body: bytes("outage") },
@@ -200,7 +200,7 @@ describe("package-scoped GitHub Workflow Source", () => {
       [descriptorUrl]: { status: 200, body: descriptorBody },
       [checksumUrl]: { status: 200, body: bytes(`${sha256(archive).slice(7)}  workflow-package-demo-1.0.0.tar.gz\n`) },
       [archiveUrl]: { status: 200, body: bytes("tampered") },
-    })).resolves.toEqual({ kind: "INVALID" });
+    })).resolves.toEqual({ kind: "DIGEST_MISMATCH" });
   });
 
   it("rejects malformed release assets and a release collection beyond its bounded pagination", async () => {
@@ -209,7 +209,7 @@ describe("package-scoped GitHub Workflow Source", () => {
       releasesBaseUrl: "https://api.github.com/repos/example/workflows/releases",
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     } as const;
-    const request = { name: "demo", version: { kind: "LATEST" } } as const;
+    const request = { name: "demo", version: { kind: "EXACT", value: "1.0.0" } } as const;
     const malformed = new GitHubWorkflowPackageSource(configuration, Object.freeze({
       request: async () => ({ status: 200, body: bytes([{ tag_name: "workflow-package/demo/v1.0.0", draft: false, prerelease: false, assets: [{ name: "x", browser_download_url: "http://unsafe.test/x" }] }]) }),
     }));

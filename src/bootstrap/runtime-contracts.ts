@@ -114,6 +114,7 @@ export type WorkflowPackageSourceResult =
   | Readonly<{ kind: "FOUND"; candidate: WorkflowPackageCandidate }>
   | Readonly<{ kind: "NOT_FOUND" }>
   | Readonly<{ kind: "UNAVAILABLE" }>
+  | Readonly<{ kind: "DIGEST_MISMATCH" }>
   | Readonly<{ kind: "INVALID" }>;
 export interface WorkflowPackageSource { fetch(request: WorkflowPackageSourceRequest): Promise<WorkflowPackageSourceResult> }
 export interface WorkflowPackageSourceFactory { create(): Promise<WorkflowPackageSource> }
