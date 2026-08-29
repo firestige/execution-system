@@ -58,7 +58,7 @@ describe("Iteration 4 release automation", () => {
     expect(() => assertReleaseConfiguration(config)).not.toThrow();
     expect(config).toMatchObject({
       schemaVersion: "wsr.release-component@1.0.0",
-      repository: "firestige/execution-system",
+      repository: "firestige/wsr-execution",
       releaseBranch: "main",
       triggerBranch: "release/next",
       assetMode: "npm-pair",
@@ -74,11 +74,11 @@ describe("Iteration 4 release automation", () => {
 
     expect(() => assertCapabilityMatrix(matrix)).not.toThrow();
     expect(matrix.components).toEqual(expect.arrayContaining([
-      expect.objectContaining({ repository: "firestige/evidence-system", assetMode: "python-wheel-sdist+oci" }),
-      expect.objectContaining({ repository: "firestige/evolution-system", releaseMode: "parameter-only" }),
+      expect.objectContaining({ repository: "firestige/wsr-evidence", assetMode: "python-wheel-sdist+oci" }),
+      expect.objectContaining({ repository: "firestige/wsr-evolution", releaseMode: "parameter-only" }),
       expect.objectContaining({ repository: "firestige/bi", releaseMode: "excluded" }),
     ]));
-    expect(matrix.components.find((item: { repository: string }) => item.repository === "firestige/evidence-system").publisherAdapter)
+    expect(matrix.components.find((item: { repository: string }) => item.repository === "firestige/wsr-evidence").publisherAdapter)
       .not.toContain("npm");
   });
 
@@ -89,11 +89,16 @@ describe("Iteration 4 release automation", () => {
       path.join(repository, "../.github/workflows/iter3-execution-ci.yml"),
       "utf8",
     );
-    const lifecycleStep = authorityWorkflow
-      .split("- name: Qualify DSH package lifecycle without install hooks", 2)[1]
+    const dshAuthorityStep = authorityWorkflow
+      .split("- name: Qualify exact WSR DSH source bundles", 2)[1]
       ?.split("- name:", 1)[0];
-    expect(lifecycleStep).toContain("wsr-dsh-intake-$VERSION.tgz");
-    expect(lifecycleStep).toContain("wsr-execution-$VERSION.tgz");
+    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run build");
+    expect(dshAuthorityStep).toContain("execution-system/node_modules/.bin");
+    expect(dshAuthorityStep).toContain('test "$(dsh --version)" = 0.1.1-rc.2');
+    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run pack:verify");
+    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run qualify:clean-profile");
+    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run provenance:verify");
+    expect(dshAuthorityStep).not.toContain("wsr-dsh-intake");
     expect(authorityWorkflow).not.toContain('git -C system-contracts rev-parse HEAD)" = 9e6ba782');
     for (const protectedContract of [
       "delivery-admission",
@@ -203,7 +208,7 @@ describe("Iteration 4 release automation", () => {
     expect(candidate).toContain('test "$GITHUB_REF_NAME" = "release/next"');
     expect(candidate).toContain("WSR_RELEASE_APP_ID");
     expect(candidate).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
-    expect(candidate).toContain("repositories: execution-system");
+    expect(candidate).toContain("repositories: wsr-execution");
     expect(candidate).toContain("permission-contents: write");
     expect(candidate).toContain("permission-workflows: write");
     expect(candidate.indexOf("actions/create-github-app-token@"))
@@ -222,7 +227,7 @@ describe("Iteration 4 release automation", () => {
     expect(promote).toContain("actions/create-github-app-token@");
     expect(promote).toContain("WSR_RELEASE_APP_ID");
     expect(promote).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
-    expect(promote).toContain("repositories: execution-system");
+    expect(promote).toContain("repositories: wsr-execution");
     expect(promote).toContain("permission-contents: write");
     expect(promote).toContain("permission-workflows: write");
     expect(promote.indexOf("actions/create-github-app-token@"))

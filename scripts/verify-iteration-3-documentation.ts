@@ -50,12 +50,12 @@ const COMMANDS = Object.freeze([
 ]);
 const IDENTITIES = Object.freeze([
   "wsr-execution",
-  "wsr-dsh-intake",
+  "dsh-wsr-execution",
   "workflow-execution",
   "workflow_execution_intake",
   "/workflow-execution",
   "execution.config@1.0.0",
-  "firestige/workflow-package",
+  "firestige/wsr-workflow-package",
 ]);
 
 async function required(file: string): Promise<string> {
@@ -118,14 +118,14 @@ export async function verifyIteration3Documentation(options: DocumentationVerifi
     }
   }
   for (const guide of guideValues.slice(0, 2)) {
-    includesAll(guide.value, ["gh release download", "firestige/execution-system", "execution-config init", "execution-config validate", "execution-config dump-effective"], guide.relative);
+    includesAll(guide.value, ["gh release download", "firestige/wsr-execution", "execution-config init", "execution-config validate", "execution-config dump-effective"], guide.relative);
     if (guide.value.includes("quickstart:prepare") || guide.value.includes("release:artifacts")) {
       throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
     }
   }
   for (const guide of guideValues.slice(2, 4)) {
     includesAll(guide.value, ["quickstart:prepare", "tmp/local-e2e/release", "wsr-local/execution.json", "corepack install --global pnpm@11.23.0", "prebuild-install@7.1.3", "no dsh.bundle", "fresh profile", "existing profile", "cordis.patch.yml", "remove Intake", "remove Core"], guide.relative);
-    if (guide.value.includes("gh release download") || guide.value.includes("github.com/firestige/execution-system/releases/download/")) {
+    if (guide.value.includes("gh release download") || guide.value.includes("github.com/firestige/wsr-execution/releases/download/")) {
       throw new DocumentationVerificationError("DOCUMENTATION_INSTALL_SOURCE_INVALID", guide.relative);
     }
     if (/^(?:Edit|编辑)\s+[^\n]*\$DSH_HOME\/profiles\/web\/cordis\.patch\.yml/imu.test(guide.value)) {

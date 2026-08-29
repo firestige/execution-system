@@ -102,7 +102,7 @@ jobs:
           app-id: ${{ vars.WSR_RELEASE_APP_ID }}
           private-key: ${{ secrets.WSR_RELEASE_APP_PRIVATE_KEY }}
           owner: firestige
-          repositories: execution-system
+          repositories: wsr-execution
           permission-contents: write
           permission-workflows: write
 

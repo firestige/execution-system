@@ -165,7 +165,7 @@ function scopedDescriptor(record: PackageRecord, body: Uint8Array): ScopedMetada
     || provenanceValue.name !== record.provenance?.name
     || typeof provenanceValue.sha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(provenanceValue.sha256)
     || !exactKeys(contractValue, ["repository", "revision", "minVersion", "maxVersion"])
-    || contractValue.repository !== "firestige/system-contracts"
+    || contractValue.repository !== "firestige/wsr-contracts"
     || typeof contractValue.revision !== "string" || !/^[a-f0-9]{40}$/u.test(contractValue.revision)
     || typeof contractValue.minVersion !== "string" || semver(contractValue.minVersion) === undefined
     || typeof contractValue.maxVersion !== "string" || semver(contractValue.maxVersion) === undefined) return undefined;
@@ -197,7 +197,7 @@ function validProvenance(record: PackageRecord, metadata: ScopedMetadata, body: 
     && source.repository === repository
     && typeof source.revision === "string" && /^[a-f0-9]{40}$/u.test(source.revision)
     && typeof contract === "object" && !Array.isArray(contract) && exactKeys(contract, ["repository", "revision"])
-    && contract.repository === "firestige/system-contracts" && contract.revision === metadata.provenance.contractRevision
+    && contract.repository === "firestige/wsr-contracts" && contract.revision === metadata.provenance.contractRevision
     && typeof builder === "object" && !Array.isArray(builder) && exactKeys(builder, ["workflow"])
     && builder.workflow === ".github/workflows/release-candidate.yml";
 }

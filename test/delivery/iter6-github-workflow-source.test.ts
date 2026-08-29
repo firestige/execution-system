@@ -34,8 +34,8 @@ function fixture(overrides: Readonly<{
   const provenance = body({
     schemaVersion: overrides.provenanceSchemaVersion ?? "workflow-package.provenance@1.0.0",
     subject: { name: archiveName, sha256: digest(archive) },
-    source: { repository: overrides.provenanceRepository ?? "firestige/workflow-package", revision: "a".repeat(40) },
-    contract: { repository: "firestige/system-contracts", revision: "b".repeat(40) },
+    source: { repository: overrides.provenanceRepository ?? "firestige/wsr-workflow-package", revision: "a".repeat(40) },
+    contract: { repository: "firestige/wsr-contracts", revision: "b".repeat(40) },
     builder: { workflow: ".github/workflows/release-candidate.yml" },
   });
   const descriptor = body({
@@ -46,7 +46,7 @@ function fixture(overrides: Readonly<{
     checksum: overrides.descriptorChecksumObject === false ? null : { name: overrides.descriptorChecksumName ?? checksumName },
     provenance: { name: provenanceName, sha256: overrides.provenanceDigest ?? digest(provenance) },
     contract: {
-      repository: "firestige/system-contracts", revision: "b".repeat(40),
+      repository: "firestige/wsr-contracts", revision: "b".repeat(40),
       minVersion: "1.1.0", maxVersion: overrides.contractMaxVersion ?? "1.1.0",
     },
   });
@@ -68,8 +68,8 @@ function fixture(overrides: Readonly<{
     return { status: 404, body: body("missing") };
   } });
   return new GitHubWorkflowPackageSource({
-    kind: "github", repository: "firestige/workflow-package",
-    releasesBaseUrl: "https://api.github.com/repos/firestige/workflow-package/releases",
+    kind: "github", repository: "firestige/wsr-workflow-package",
+    releasesBaseUrl: "https://api.github.com/repos/firestige/wsr-workflow-package/releases",
     assetPattern: "workflow-package-{name}-{version}.tar.gz",
   }, network);
 }
@@ -119,8 +119,8 @@ describe("Iter6 official GitHub Workflow Package source", () => {
 
   it("distinguishes an absent repository coordinate from GitHub unavailability", async () => {
     const configuration = {
-      kind: "github", repository: "firestige/workflow-package",
-      releasesBaseUrl: "https://api.github.com/repos/firestige/workflow-package/releases",
+      kind: "github", repository: "firestige/wsr-workflow-package",
+      releasesBaseUrl: "https://api.github.com/repos/firestige/wsr-workflow-package/releases",
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     } as const;
     const request = { name: "demo", version: { kind: "EXACT", value: "1.2.3" } } as const;

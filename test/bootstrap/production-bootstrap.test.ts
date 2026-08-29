@@ -80,8 +80,8 @@ async function fixture(options: Readonly<{
     },
     workflowSource: {
       kind: "github",
-      repository: "firestige/workflow-package",
-      releasesBaseUrl: "https://api.github.example.test/repos/firestige/workflow-package/releases",
+      repository: "firestige/wsr-workflow-package",
+      releasesBaseUrl: "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases",
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     },
     runner: {
@@ -279,7 +279,7 @@ describe("Wave 6 production bootstrap", () => {
       worktree, selector: "missing@1.0.0", prompt: { text: "run", attachments: [] },
     })).resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
     expect(requested).toEqual([
-      "https://api.github.example.test/repos/firestige/workflow-package/releases?per_page=100&page=1",
+      "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases?per_page=100&page=1",
     ]);
 
     await application.close();
