@@ -23,6 +23,11 @@ export type NativeTurnEvent =
       code: ManagedInvocationFailure["code"];
       detail: unknown;
     }>
+  | Readonly<{
+      kind: "provider-uncertain";
+      phase: "startup" | "result";
+      detail: unknown;
+    }>
   | Readonly<{ kind: "turn-ended" | "process-exited" | "session-disposed" }>;
 
 export interface CredentialMaterial {

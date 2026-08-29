@@ -8,6 +8,7 @@ export * from "./execution/runtime-adapter.js";
 export * from "./intake/index.js";
 export * from "./providers/provider.js";
 export * from "./providers/copilot/index.js";
+export * from "./providers/codex/index.js";
 export {
   RunnerFactory,
   RunnerFactoryConfigurationError,
