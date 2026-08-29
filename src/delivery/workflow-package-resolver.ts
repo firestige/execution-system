@@ -34,9 +34,7 @@ export class WorkflowPackageResolver {
     try { request = parseWorkflowSelector(selector); }
     catch (cause) { return failure(cause instanceof WorkflowSelectorError ? cause.code : "INVALID_WORKFLOW_SELECTOR"); }
     try {
-      const local = request.version.kind === "EXACT"
-        ? await this.store.lookupExact(request.name, request.version.value)
-        : await this.store.lookupLatest(request.name);
+      const local = await this.store.lookupExact(request.name, request.version.value);
       if (local !== undefined && !refresh) return Object.freeze({ ok: true, value: local });
     } catch (cause) {
       return failure(cause instanceof WorkflowPackageStoreError ? cause.code : "WORKFLOW_PACKAGE_INVALID");
@@ -46,16 +44,17 @@ export class WorkflowPackageResolver {
     catch { return failure("WORKFLOW_FETCH_FAILED"); }
     if (sourced.kind === "NOT_FOUND") return failure("WORKFLOW_NOT_FOUND");
     if (sourced.kind === "UNAVAILABLE") return failure("WORKFLOW_FETCH_FAILED");
+    if (sourced.kind === "DIGEST_MISMATCH") return failure("WORKFLOW_DIGEST_MISMATCH");
     if (sourced.kind === "INVALID") return failure("WORKFLOW_PACKAGE_INVALID");
     if (sourced.candidate.name !== request.name
-      || (request.version.kind === "EXACT" && sourced.candidate.exactVersion !== request.version.value)) {
+      || sourced.candidate.exactVersion !== request.version.value) {
       return failure("WORKFLOW_VERSION_MISMATCH");
     }
     let staging: WorkflowPackageStaging | undefined;
     try {
       staging = await this.store.stage(sourced.candidate);
       const validated = await this.validator.validate(staging);
-      const resolved = await this.store.publish(staging, validated, request.version.kind === "LATEST");
+      const resolved = await this.store.publish(staging, validated);
       return Object.freeze({ ok: true, value: resolved });
     } catch (cause) {
       if (staging !== undefined) await this.store.discard(staging);

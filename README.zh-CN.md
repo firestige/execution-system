@@ -31,7 +31,7 @@ DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runn
 |---|---|---|
 | 执行是黑盒 | 模型做了什么、用了哪个版本的工作流定义，事后无法核对 | 每次交付绑定一个确定版本 + SHA-256，写入不可变 Manifest |
 | 中断即丢失 | 进程退出/重启后，长任务状态无处可寻 | Manifest/当前槽位持久化，`/wsr recover` 从最后持久化边界恢复 |
-| 版本漂移 | 同一请求在不同时刻可能执行不同定义 | Exact/latest selector，本地 READY store 保持权威 |
+| 版本漂移 | 同一请求在不同时刻可能执行不同定义 | 确定的 `name@version` selector、不可变 GitHub 资产与已校验的 exact-content READY cache |
 | 观测与执行耦合 | 遥测故障可能拖垮执行 | 单向、best-effort OTLP；Evidence 或遥测不可用时 Execution 继续运行 |
 
 ## 工作原理
@@ -85,7 +85,7 @@ dsh plugin --profile web add wsr-dsh-intake
 
 ```text
 /wsr list                         # 隐私安全的 Delivery 与工作区状态
-/wsr create <name|name@latest|name@version>
+/wsr create <name@version>
 /wsr recover [delivery-id]
 /wsr status [delivery-id]
 /wsr action finish
