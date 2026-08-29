@@ -18,9 +18,10 @@ import {
   type NativeProviderSessionFactory,
   type NativeTurnEvent,
 } from "../../src/invocation/index.js";
-import { createCodexProviderShell } from "../../src/providers/codex/index.js";
+import { providerNotImplemented } from "../../src/providers/provider.js";
 
 const temporaryDirectories: string[] = [];
+const fixtureSecret = "secret-do-not-journal";
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -151,7 +152,7 @@ function dispatch(): InvocationDispatch {
 
 class LeaseBroker implements CredentialLeaseBroker {
   readonly released: string[] = [];
-  readonly secret = "secret-do-not-journal";
+  readonly secret = fixtureSecret;
 
   async acquire(): Promise<CredentialLease> {
     return {
@@ -359,6 +360,19 @@ describe("managed Invocation", () => {
     fixture.provider.session.persist = async () => { throw new Error("flush interrupted"); };
 
     expect(await fixture.manager.host.start(dispatch(), sink().value)).toMatchObject({ ok: true, value: { kind: "unknown", uncertainty: { owner: "invocation", reason: "CALL_INTERRUPTED" } } });
+  });
+
+  it.each(["startup", "result"] as const)("persists Provider %s uncertainty as unknown without accepting a result", async (phase) => {
+    const fixture = await harness([[
+      { kind: "provider-uncertain", phase, detail: `unobserved ${fixtureSecret}` },
+    ]]);
+
+    const result = await fixture.manager.host.start(dispatch(), sink().value);
+
+    expect(result).toMatchObject({ ok: true, value: { kind: "unknown", uncertainty: { owner: "invocation", reason: "CALL_INTERRUPTED" } } });
+    const durable = await fixture.journal.load("invocation-1");
+    expect(durable?.status).toBe("unknown");
+    expect(JSON.stringify(durable)).not.toContain(fixtureSecret);
   });
 
   it("validates executor, affinity, correlation, workspace, and capability before effects", async () => {
@@ -569,8 +583,12 @@ describe("managed Invocation", () => {
     const codex = structuredClone(input) as InvocationDispatch;
     (codex.executor.session.driver as { providerIdentity: string }).providerIdentity = "codex-cli";
     bindDispatch(codex);
+    const unavailableProvider: NativeProviderSessionFactory = Object.freeze({
+      async open() { throw providerNotImplemented(); },
+      async restore() { throw providerNotImplemented(); },
+    });
     const manager = createManagedInvocation({
-      providers: { "codex-cli": createCodexProviderShell() },
+      providers: { "codex-cli": unavailableProvider },
       credentials: new LeaseBroker(),
       journal: new FileInvocationJournalStore(directory),
       resultValidator: { validate: () => true },

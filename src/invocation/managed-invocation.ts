@@ -167,6 +167,7 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
     let pending: ActionInputRequest | undefined;
     const completions: FrozenJsonValue[] = [];
     let providerFailure: Extract<NativeTurnEvent, { kind: "provider-failed" }> | undefined;
+    let providerUncertainty: Extract<NativeTurnEvent, { kind: "provider-uncertain" }> | undefined;
     const redactedEvents = [...journal.redactedEvents];
     let events: readonly NativeTurnEvent[];
     try {
@@ -202,6 +203,8 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
         }
       } else if (event.kind === "provider-failed") {
         providerFailure = event;
+      } else if (event.kind === "provider-uncertain") {
+        providerUncertainty = event;
       } else if (event.kind === "process-exited") {
         providerFailure = { kind: "provider-failed", code: "PROVIDER_EXITED", detail: "provider process exited without a structured disposition" };
       }
@@ -209,6 +212,17 @@ export function createManagedInvocation(options: ManagedInvocationOptions): Mana
 
     await session.persist();
     const base = { ...journal, nextOutputSequence: nextSequence, redactedEvents };
+    if (providerUncertainty !== undefined) {
+      const saved = { ...base, status: "unknown" as const, pendingInput: undefined };
+      if (!await commitUnlessCancelled(saved)) return cancelledDisposition(journal);
+      return {
+        kind: "unknown",
+        episode: journal.reference.episode,
+        uncertainty: { state: "unknown", owner: "invocation", reason: "CALL_INTERRUPTED" },
+        session: { state: "known", value: journal.session },
+        journal: { state: "known", value: journal.reference },
+      };
+    }
     if (providerFailure !== undefined) {
       const saved = { ...base, status: "failed" as const, pendingInput: undefined };
       if (!await commitUnlessCancelled(saved)) return cancelledDisposition(journal);
