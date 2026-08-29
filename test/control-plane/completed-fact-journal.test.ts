@@ -1,4 +1,5 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,5 +40,12 @@ describe("Delivery completed-fact journal", () => {
     const root = await mkdtemp(join(tmpdir(), "delivery-completed-corrupt-"));
     await writeFile(join(root, "unexpected.json"), "{ corrupt");
     await expect(new DeliveryCompletedFactJournal(root).enumerateCompleted()).rejects.toBeInstanceOf(DeliveryProjectionJournalError);
+  });
+
+  it("cleans its candidate and preserves the write failure when atomic publication is blocked", async () => {
+    const root = await mkdtemp(join(tmpdir(), "delivery-completed-write-failure-"));
+    const destination = `${createHash("sha256").update(fact().manifest.deliveryId, "utf8").digest("hex")}.json`;
+    await mkdir(join(root, destination));
+    await expect(new DeliveryCompletedFactJournal(root).persist(fact())).rejects.toBeDefined();
   });
 });

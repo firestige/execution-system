@@ -173,6 +173,20 @@ describe("Execution Delivery control-plane projection", () => {
     expect(snapshots).toHaveLength(1);
   });
 
+  it("maps unavailable owner sources and removes a subscriber whose initial replay fails", async () => {
+    const invalidations = Object.freeze({ subscribe() { return () => undefined; } });
+    const projection = new DeliveryControlPlaneProjection({
+      slots: Object.freeze({ async enumerate(): Promise<readonly OccupiedCurrentSlot[]> { throw new Error("offline"); } }),
+      manifests: Object.freeze({ async loadProjection() { throw new Error("not reached"); } }),
+      bindings: Object.freeze({ enumerateBindings: () => [] }),
+      runtime: Object.freeze({ enumerateRuntime: () => [] }),
+      invalidations,
+      now: () => 1,
+    });
+    await expect(projection.snapshot()).rejects.toMatchObject({ code: "DELIVERY_PROJECTION_UNAVAILABLE" });
+    await expect(projection.subscribe(() => undefined, () => undefined)).rejects.toMatchObject({ code: "DELIVERY_PROJECTION_UNAVAILABLE" });
+  });
+
   it.each([
     ["stale Manifest binding", manifest({ deliveryBindingIdentity: sha("f") }), binding(), runtime()],
     ["stale Session binding", manifest(), binding({ deliveryBindingIdentity: sha("f") }), runtime()],
