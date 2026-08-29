@@ -22,7 +22,10 @@ import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { isChangelogMetaCommit } from "../release/cli/changelog-policy.js";
+import {
+  isChangelogMetaCommit,
+  isChangelogReleaseTag,
+} from "../release/cli/changelog-policy.js";
 
 const repository = path.resolve(import.meta.dirname, "..");
 const checkOnly = process.argv.includes("--check");
@@ -52,7 +55,7 @@ function gitLog(range: string): string[] {
 function gitTags(): string[] {
   try {
     const out = execFileSync("git", ["tag"], { cwd: repository, encoding: "utf8" });
-    return out.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
+    return out.split("\n").map((line) => line.trim()).filter(isChangelogReleaseTag)
       .sort((left, right) => compareSemver(right, left));
   } catch {
     return [];

@@ -20,7 +20,10 @@ import {
 import { assertReleaseNotes, renderReleaseNotes } from "../../release/cli/verify-release-notes.js";
 import { simulateReleaseLifecycle } from "../../release/cli/simulate-release-lifecycle.js";
 import { assertCapabilityMatrix } from "../../release/cli/verify-release-matrix.js";
-import { isChangelogMetaCommit } from "../../release/cli/changelog-policy.js";
+import {
+  isChangelogMetaCommit,
+  isChangelogReleaseTag,
+} from "../../release/cli/changelog-policy.js";
 import { materializeUnifiedCandidate } from "../../scripts/materialize-unified-release-candidate.js";
 
 const repository = path.resolve(import.meta.dirname, "../..");
@@ -37,6 +40,14 @@ describe("Iteration 4 release automation", () => {
       "src/index.ts",
     ])).toBe(false);
     expect(isChangelogMetaCommit([])).toBe(false);
+  });
+
+  it("uses only semantic-version release tags as changelog boundaries", () => {
+    expect(isChangelogReleaseTag("0.1.3")).toBe(true);
+    expect(isChangelogReleaseTag("0.1.3-rc.1")).toBe(true);
+    expect(isChangelogReleaseTag("backup/iter5-feature-before-500-line-rewrite-20260829")).toBe(false);
+    expect(isChangelogReleaseTag("latest")).toBe(false);
+    expect(isChangelogReleaseTag("0.1")).toBe(false);
   });
 
   it("validates the language-neutral lifecycle configuration and Execution capabilities", async () => {
