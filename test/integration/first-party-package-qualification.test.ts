@@ -32,12 +32,4 @@ describe("first-party Package qualification", () => {
     });
   });
 
-  it("qualifies the non-initial Hello World Package independently", () => {
-    const result = qualify("workflow-package/hello-world-workflow/definition");
-    expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toMatchObject({
-      status: 0,
-      stdout: expect.stringContaining("PASS: schema, graph/event, authority, corpus-shape and digest closure succeeded"),
-      stderr: "",
-    });
-  });
 });

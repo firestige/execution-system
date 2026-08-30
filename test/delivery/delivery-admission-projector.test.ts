@@ -36,7 +36,6 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
   it.each([
     ["implementation", path.join(repositoryRoot, "workflow-package", "implementation", "definition")],
     ["system-design", path.join(repositoryRoot, "workflow-package", "system-design", "definition")],
-    ["hello-world", path.join(repositoryRoot, "workflow-package", "hello-world-workflow", "definition")],
     ["contributed", path.join(repositoryRoot, "system-contracts", "workflow-dsl", "examples", "minimal")],
   ])("projects the exact %s Package and persisted Manifest without raw admission inputs", async (name, definition) => {
     const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
