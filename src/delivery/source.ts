@@ -251,12 +251,17 @@ export class GitHubWorkflowPackageSource implements WorkflowPackageSource {
       records.push(...legacy.filter((entry) => entry.name === request.name));
     }
 
-    const versions = new Set<string>();
+    const versions = new Map<string, PackageRecord>();
     for (const record of records) {
-      if (versions.has(record.version)) return Object.freeze({ kind: "INVALID" });
-      versions.add(record.version);
+      const existing = versions.get(record.version);
+      if (existing === undefined || (existing.descriptor === undefined && record.descriptor !== undefined)) {
+        versions.set(record.version, record);
+        continue;
+      }
+      if (existing.descriptor !== undefined && record.descriptor === undefined) continue;
+      return Object.freeze({ kind: "INVALID" });
     }
-    const selected = records.find((record) => record.version === exactVersion);
+    const selected = versions.get(exactVersion);
     if (selected === undefined) return Object.freeze({ kind: "NOT_FOUND" });
 
     let expectedDigest = selected.expectedDigest;
