@@ -6,7 +6,7 @@ English | [中文](README.zh-CN.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
-[![npm](https://img.shields.io/npm/v/wsr-dsh-intake)](https://www.npmjs.com/package/wsr-dsh-intake)
+[![DSH bundle](https://img.shields.io/npm/v/dsh-wsr-execution)](https://www.npmjs.com/package/dsh-wsr-execution)
 [![CI](https://github.com/firestige/wsr-execution/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/wsr-execution/actions)
 
 **Turn every agent conversation into an auditable, recoverable, version-bound delivery.**
@@ -20,7 +20,7 @@ The Execution System is a host-neutral product, not a plugin. DSH is one entry p
 | Form | Package | Audience |
 |---|---|---|
 | **Embedded library** | `wsr-execution` | Host-neutral embedding — import `ExecutionApplicationFactory` and bootstrap with `create(configFile, dependencies)` |
-| **DSH plugin entry** | `wsr-dsh-intake` | DeepSeek Harness users — run workflows from chat and sidebar tabs |
+| **DSH plugin entry** | `dsh-wsr-execution` | DeepSeek Harness users — run workflows from chat and sidebar tabs |
 | **CLI** | `execution-config` (in `wsr-execution`) | Configuration init / copy / validate / dump-effective |
 
 The DSH plugin is the first product entry; every admitted Workflow Action runs in a Runner-owned, isolated DSH execution context (`DSH-E`), never in the Intake context (`DSH-I`).
@@ -52,11 +52,11 @@ The default Source is the configured `firestige/wsr-workflow-package` GitHub Rel
 ```sh
 # 1. Approve the better-sqlite3 native build once (pnpm 11)
 dsh plugin --profile web config set --location=project --json allowBuilds '{"better-sqlite3":true}'
-# 2. Install the Intake entry — the engine (wsr-execution) comes as its dependency
-dsh plugin --profile web add wsr-dsh-intake
+# 2. Install the Execution bundle from the DSH release authority
+dsh plugin --profile web add dsh-wsr-execution@0.1.0
 ```
 
-Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. Core and Intake versions are locked together (`wsr-dsh-intake@0.1.3` depends on `wsr-execution@0.1.3`), so a single `add` installs both and a single `update` moves both.
+Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. The independently versioned DSH bundle is published by [firestige/wsr-dsh](https://github.com/firestige/wsr-dsh) and pins its compatible `wsr-execution` version.
 
 ## Quick start
 
@@ -113,7 +113,7 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 
 ## For maintainers
 
-- **Release qualification** — see [the release process](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md). `pnpm quickstart:prepare` builds and verifies both artifacts and initializes local E2E configuration in one operation.
+- **Release qualification** — see [the release process](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md). This repository qualifies the host-neutral core; DSH bundle and clean-profile qualification are owned by [firestige/wsr-dsh](https://github.com/firestige/wsr-dsh).
 - **Changelog** — generated from git history by `pnpm changelog:generate`; `pnpm changelog:check` (CI-gated) rejects hand-edited drift.
 - **Local pre-release E2E** — [guide](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.md); final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md); [configuration reference](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md); [DSH Intake package reference](packages/dsh-intake/README.md).
 

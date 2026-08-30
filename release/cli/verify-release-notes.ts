@@ -54,7 +54,7 @@ export function renderReleaseNotes(version: string, compatibility: Compatibility
     "",
     "## Upgrade guide",
     "",
-    `Install \`wsr-execution@${version}\` and \`wsr-dsh-intake@${version}\` as one lockstep upgrade.`,
+    `Install \`wsr-execution@${version}\` for host-neutral embedding. For DSH, install the independently versioned \`dsh-wsr-execution\` bundle from \`firestige/wsr-dsh\`.`,
     "",
   ].join("\n");
   return Object.freeze({ notes, changelogSectionSha256: sha256(section) });

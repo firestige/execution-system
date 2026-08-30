@@ -82,15 +82,7 @@ jobs:
             exit 1
           fi
 
-      - name: Re-run remote artifact-install E2E before final tag
-        run: |
-          VERSION="$(node -p 'require("./package.json").version')"
-          pnpm qualify:dsh-interactive \
-            "$RUNNER_TEMP/qualified-release/wsr-execution-$VERSION.tgz" \
-            "$RUNNER_TEMP/qualified-release/wsr-dsh-intake-$VERSION.tgz" \
-            "$GITHUB_WORKSPACE"
-
-      - name: Publish exact qualified npm pair before stable
+      - name: Publish exact qualified npm package before stable
         run: |
           node -e 'const [major,minor]=process.argv[1].split(".").map(Number); if(major<11||(major===11&&minor<5)) process.exit(1)' "$(npm --version)"
           pnpm release:publish-npm "$RUNNER_TEMP/qualified-release" --execute

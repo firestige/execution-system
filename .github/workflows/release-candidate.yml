@@ -10,10 +10,6 @@ on:
         description: RC tag matching the stable package version, for example 0.1.1-rc.1
         required: true
         type: string
-      local_manual_e2e_evidence:
-        description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
-        required: true
-        type: string
       authority_ref:
         description: Superproject release/next ref pinned to this exact component candidate
         required: true
@@ -26,10 +22,6 @@ on:
     inputs:
       candidate_tag:
         description: RC tag matching the stable package version, for example 0.1.1-rc.1
-        required: true
-        type: string
-      local_manual_e2e_evidence:
-        description: GitHub issue/comment URL recording the credentialed local DSH Web E2E
         required: true
         type: string
       authority_ref:
@@ -61,7 +53,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_CANDIDATE_TAG: ${{ inputs.candidate_tag }}
-          DISPATCH_LOCAL_E2E: ${{ inputs.local_manual_e2e_evidence }}
           DISPATCH_AUTHORITY_REF: ${{ inputs.authority_ref }}
           DISPATCH_AUTHORITY_MANIFEST: ${{ inputs.authority_manifest }}
         run: |
@@ -69,18 +60,15 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/contents/release/request.json?ref=$GITHUB_SHA" \
               --jq .content | base64 --decode > "$RUNNER_TEMP/release-request.json"
             CANDIDATE_TAG="$(jq -er .candidate_tag "$RUNNER_TEMP/release-request.json")"
-            LOCAL_E2E="$(jq -er .local_manual_e2e_evidence "$RUNNER_TEMP/release-request.json")"
             AUTHORITY_REF="$(jq -er .authority_ref "$RUNNER_TEMP/release-request.json")"
             AUTHORITY_MANIFEST="$(jq -er .authority_manifest "$RUNNER_TEMP/release-request.json")"
           else
             CANDIDATE_TAG="$DISPATCH_CANDIDATE_TAG"
-            LOCAL_E2E="$DISPATCH_LOCAL_E2E"
             AUTHORITY_REF="$DISPATCH_AUTHORITY_REF"
             AUTHORITY_MANIFEST="$DISPATCH_AUTHORITY_MANIFEST"
           fi
-          test -n "$CANDIDATE_TAG" && test -n "$LOCAL_E2E" && test -n "$AUTHORITY_REF" && test -n "$AUTHORITY_MANIFEST"
+          test -n "$CANDIDATE_TAG" && test -n "$AUTHORITY_REF" && test -n "$AUTHORITY_MANIFEST"
           echo "candidate_tag=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
-          echo "local_e2e=$LOCAL_E2E" >> "$GITHUB_OUTPUT"
           echo "authority_ref=$AUTHORITY_REF" >> "$GITHUB_OUTPUT"
           echo "authority_manifest=$AUTHORITY_MANIFEST" >> "$GITHUB_OUTPUT"
 
@@ -137,15 +125,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
-          LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
           RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
         run: |
           PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
           pnpm release:policy candidate "$CANDIDATE_TAG" "$PACKAGE_VERSION"
-          case "$LOCAL_E2E" in
-            https://github.com/firestige/*/issues/*) ;;
-            *) echo "local_manual_e2e_evidence must be a firestige GitHub issue/comment URL" >&2; exit 1 ;;
-          esac
           if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             test "$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = true
             test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$CANDIDATE_TAG" --jq .object.sha)" = "$RELEASE_TARGET"
@@ -167,7 +150,6 @@ jobs:
           pnpm check:generated
           pnpm harness static
           pnpm harness feasibility
-          pnpm verify:dsh-intake
 
       - name: Materialize and verify exact unified-candidate artifacts
         working-directory: execution-system
@@ -182,15 +164,6 @@ jobs:
           node --import tsx "$GITHUB_WORKSPACE/release-publisher/scripts/materialize-unified-release-candidate.ts" \
             "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/$AUTHORITY_MANIFEST" "$RUNNER_TEMP/local-release"
           pnpm release:verify "$RUNNER_TEMP/local-release"
-
-      - name: Run local artifact-install DSH Web E2E
-        working-directory: execution-system
-        run: |
-          VERSION="$(node -p 'require("./package.json").version')"
-          pnpm qualify:dsh-interactive \
-            "$RUNNER_TEMP/local-release/wsr-execution-$VERSION.tgz" \
-             "$RUNNER_TEMP/local-release/wsr-dsh-intake-$VERSION.tgz" \
-             "$GITHUB_WORKSPACE/execution-system"
 
       - name: Mint short-lived release App token after candidate qualification
         id: release-app-token
@@ -238,27 +211,17 @@ jobs:
           pnpm release:verify "$RUNNER_TEMP/remote-release"
           cmp "$RUNNER_TEMP/local-release/release-metadata.json" "$RUNNER_TEMP/remote-release/release-metadata.json"
 
-      - name: Run clean remote-prerelease install DSH Web E2E
-        working-directory: execution-system
-        run: |
-          VERSION="$(node -p 'require("./package.json").version')"
-          pnpm qualify:dsh-interactive \
-            "$RUNNER_TEMP/remote-release/wsr-execution-$VERSION.tgz" \
-            "$RUNNER_TEMP/remote-release/wsr-dsh-intake-$VERSION.tgz" \
-            "$GITHUB_WORKSPACE/execution-system"
-
       - name: Publish immutable qualification evidence to the prerelease
         working-directory: execution-system
         env:
           GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           CANDIDATE_TAG: ${{ steps.request.outputs.candidate_tag }}
-          LOCAL_E2E: ${{ steps.request.outputs.local_e2e }}
           RELEASE_TARGET: ${{ steps.authority.outputs.archive_commit }}
         run: |
           VERSION="$(node -p 'require("./package.json").version')"
           METADATA_SHA="sha256:$(sha256sum "$RUNNER_TEMP/remote-release/release-metadata.json" | cut -d' ' -f1)"
           export VERSION METADATA_SHA
-          node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({schemaVersion:"execution.release-qualification@1.0.0",packageVersion:process.env.VERSION,candidateTag:process.env.CANDIDATE_TAG,commit:process.env.RELEASE_TARGET,publisherRevision:process.env.GITHUB_SHA,artifactMetadataSha256:process.env.METADATA_SHA,localE2E:{status:"PASS",manualEvidence:process.env.LOCAL_E2E},remotePrereleaseE2E:{status:"PASS"}},null,2)+"\n")' \
+          node -e 'const fs=require("node:fs"); fs.writeFileSync(process.argv[1], JSON.stringify({schemaVersion:"execution.release-qualification@1.0.0",packageVersion:process.env.VERSION,candidateTag:process.env.CANDIDATE_TAG,commit:process.env.RELEASE_TARGET,publisherRevision:process.env.GITHUB_SHA,artifactMetadataSha256:process.env.METADATA_SHA,componentGates:{status:"PASS"},remoteArtifactVerification:{status:"PASS"}},null,2)+"\n")' \
             "$RUNNER_TEMP/release-qualification.json"
           if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq release-qualification.json; then
             mkdir "$RUNNER_TEMP/existing-qualification"

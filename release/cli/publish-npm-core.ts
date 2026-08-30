@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { verifyExecutionReleaseArtifacts } from "../../scripts/verify-release-artifacts.js";
 
 export type NpmArtifact = Readonly<{
-  package: string;
+  package: "wsr-execution";
   version: string;
   file: string;
   sha256: string;
@@ -20,65 +20,55 @@ export type RegistryVersion = Readonly<{
 }>;
 export type PublicationAction = Readonly<{
   action: "publish" | "skip-exact";
-  package: string;
+  package: "wsr-execution";
   file: string;
 }>;
 export type RegistryLookup = (name: string, version: string) => Promise<RegistryVersion | null>;
 
-const ORDER = ["wsr-execution", "wsr-dsh-intake"] as const;
-
-export async function planNpmPairPublication(
-  artifacts: readonly NpmArtifact[], lookup: RegistryLookup,
-): Promise<readonly PublicationAction[]> {
-  if (artifacts.length !== 2 || artifacts.map((item) => item.package).join(",") !== ORDER.join(",")
-    || artifacts[0]?.version !== artifacts[1]?.version) {
-    throw new Error("NPM_PAIR_PUBLICATION_SET_INVALID");
+function assertCoreArtifact(artifact: NpmArtifact): void {
+  if (artifact.package !== "wsr-execution" || artifact.file !== `wsr-execution-${artifact.version}.tgz`) {
+    throw new Error("NPM_CORE_PUBLICATION_SET_INVALID");
   }
-  const plan: PublicationAction[] = [];
-  for (const artifact of artifacts) {
-    const existing = await lookup(artifact.package, artifact.version);
-    if (existing !== null && existing.sha256 !== artifact.sha256) {
-      throw new Error("NPM_VERSION_DIGEST_COLLISION");
-    }
-    plan.push({
-      action: existing === null ? "publish" : "skip-exact",
-      package: artifact.package,
-      file: artifact.file,
-    });
-  }
-  return Object.freeze(plan);
 }
 
-export async function verifyPublishedNpmPair(
-  artifacts: readonly NpmArtifact[], lookup: RegistryLookup,
-): Promise<Readonly<{ version: string; packages: readonly string[] }>> {
-  if (artifacts.length !== 2 || artifacts.map((item) => item.package).join(",") !== ORDER.join(",")
-    || artifacts[0]?.version !== artifacts[1]?.version) {
-    throw new Error("NPM_PAIR_PUBLICATION_SET_INVALID");
+export async function planNpmCorePublication(
+  artifact: NpmArtifact, lookup: RegistryLookup,
+): Promise<PublicationAction> {
+  assertCoreArtifact(artifact);
+  const existing = await lookup(artifact.package, artifact.version);
+  if (existing !== null && existing.sha256 !== artifact.sha256) {
+    throw new Error("NPM_VERSION_DIGEST_COLLISION");
   }
-  const version = artifacts[0]?.version;
-  if (version === undefined) throw new Error("NPM_PAIR_PUBLICATION_SET_INVALID");
-  for (const artifact of artifacts) {
-    const published = await lookup(artifact.package, version);
-    if (published === null) throw new Error("NPM_POSTPUBLISH_VERSION_MISSING");
-    if (published.sha256 !== artifact.sha256) throw new Error("NPM_VERSION_DIGEST_COLLISION");
-    if (published.description.length === 0) throw new Error("NPM_POSTPUBLISH_DESCRIPTION_MISSING");
-    if (published.latest !== version) throw new Error("NPM_POSTPUBLISH_LATEST_MISMATCH");
-    if (!published.versions?.includes(version)) throw new Error("NPM_POSTPUBLISH_VERSIONS_MISMATCH");
-  }
-  return Object.freeze({ version, packages: Object.freeze([...ORDER]) });
+  return Object.freeze({
+    action: existing === null ? "publish" : "skip-exact",
+    package: artifact.package,
+    file: artifact.file,
+  });
 }
 
-export async function waitForPublishedNpmPair(
-  artifacts: readonly NpmArtifact[],
+export async function verifyPublishedNpmCore(
+  artifact: NpmArtifact, lookup: RegistryLookup,
+): Promise<Readonly<{ version: string; package: "wsr-execution" }>> {
+  assertCoreArtifact(artifact);
+  const published = await lookup(artifact.package, artifact.version);
+  if (published === null) throw new Error("NPM_POSTPUBLISH_VERSION_MISSING");
+  if (published.sha256 !== artifact.sha256) throw new Error("NPM_VERSION_DIGEST_COLLISION");
+  if (published.description.length === 0) throw new Error("NPM_POSTPUBLISH_DESCRIPTION_MISSING");
+  if (published.latest !== artifact.version) throw new Error("NPM_POSTPUBLISH_LATEST_MISMATCH");
+  if (!published.versions?.includes(artifact.version)) throw new Error("NPM_POSTPUBLISH_VERSIONS_MISMATCH");
+  return Object.freeze({ version: artifact.version, package: artifact.package });
+}
+
+export async function waitForPublishedNpmCore(
+  artifact: NpmArtifact,
   lookup: RegistryLookup,
   delay: () => Promise<void> = () => new Promise((resolve) => setTimeout(resolve, 5_000)),
   attempts = 12,
-): Promise<Readonly<{ version: string; packages: readonly string[] }>> {
+): Promise<Readonly<{ version: string; package: "wsr-execution" }>> {
   let failure: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await verifyPublishedNpmPair(artifacts, lookup);
+      return await verifyPublishedNpmCore(artifact, lookup);
     } catch (error) {
       if (error instanceof Error && error.message === "NPM_VERSION_DIGEST_COLLISION") throw error;
       failure = error;
@@ -121,29 +111,25 @@ async function run(): Promise<void> {
   const directory = path.resolve(process.argv[2] ?? "");
   const execute = process.argv[3] === "--execute";
   if (!directory || (process.argv[3] !== undefined && !execute)) {
-    throw new Error("NPM_PAIR_PUBLICATION_USAGE_INVALID");
+    throw new Error("NPM_CORE_PUBLICATION_USAGE_INVALID");
   }
   const verified = await verifyExecutionReleaseArtifacts(directory);
   const metadata = JSON.parse(
     await readFile(path.join(directory, "release-metadata.json"), "utf8"),
   ) as { artifacts: readonly { name: string; sha256: string }[] };
-  const artifacts = ORDER.map((packageName) => {
-    const file = `${packageName}-${verified.version}.tgz`;
-    const artifact = metadata.artifacts.find((candidate) => candidate.name === file);
-    if (artifact === undefined) throw new Error("NPM_PAIR_PUBLICATION_SET_INVALID");
-    return { package: packageName, version: verified.version, file, sha256: artifact.sha256 };
-  });
-  const plan = await planNpmPairPublication(artifacts, registryLookup);
-  if (execute) {
-    for (const item of plan) {
-      if (item.action === "publish") {
-        execFileSync("npm", ["publish", path.join(directory, item.file), "--provenance", "--access", "public"], {
-          stdio: "inherit",
-        });
-      }
-    }
-    await waitForPublishedNpmPair(artifacts, registryLookup);
+  const file = `wsr-execution-${verified.version}.tgz`;
+  const bound = metadata.artifacts.find((candidate) => candidate.name === file);
+  if (bound === undefined) throw new Error("NPM_CORE_PUBLICATION_SET_INVALID");
+  const artifact: NpmArtifact = {
+    package: "wsr-execution", version: verified.version, file, sha256: bound.sha256,
+  };
+  const plan = await planNpmCorePublication(artifact, registryLookup);
+  if (execute && plan.action === "publish") {
+    execFileSync("npm", ["publish", path.join(directory, plan.file), "--provenance", "--access", "public"], {
+      stdio: "inherit",
+    });
   }
+  if (execute) await waitForPublishedNpmCore(artifact, registryLookup);
   process.stdout.write(`${JSON.stringify({ version: verified.version, plan })}\n`);
 }
 

@@ -3,8 +3,8 @@
   "components": [
     {
       "repository": "firestige/wsr-execution",
-      "assetMode": "npm-pair",
-      "publisherAdapter": "npm-pair+dsh+github-release",
+      "assetMode": "npm-package",
+      "publisherAdapter": "npm-package+github-release",
       "releaseMode": "active"
     },
     {

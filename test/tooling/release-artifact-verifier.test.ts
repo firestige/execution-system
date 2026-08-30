@@ -9,7 +9,6 @@ import { verifyExecutionReleaseArtifacts } from "../../scripts/verify-release-ar
 
 const names = {
   core: "wsr-execution-0.1.0.tgz",
-  plugin: "wsr-dsh-intake-0.1.0.tgz",
 } as const;
 
 function digest(value: string): string {
@@ -19,7 +18,6 @@ function digest(value: string): string {
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "execution-release-verifier-"));
   await writeFile(path.join(root, names.core), "core");
-  await writeFile(path.join(root, names.plugin), "plugin");
   const notes = "# WSR Execution 0.1.0\n\n## What's new\n\n- fixture\n\n## Compatibility\n\n- `node`: `>=24.12.0 <25`\n- `dsh`: `0.1.1-rc.2`\n- `workflowContract`: `agentops.workflow-dsl@1.1.0`\n- `observationContract`: `agentops.observation@1.0.0`\n\n## Upgrade guide\n\nInstall both packages at `0.1.0`.\n";
   await writeFile(path.join(root, "release-notes.md"), notes);
   const metadata = {
@@ -33,7 +31,6 @@ async function fixture() {
       file: "release-notes.md", sha256: digest(notes), changelogSectionSha256: digest("fixture changelog"),
     },
     artifacts: [
-      { name: names.plugin, bytes: 6, sha256: digest("plugin"), inventory: ["package/package.json", "package/skills/workflow-execution/SKILL.md"] },
       { name: names.core, bytes: 4, sha256: digest("core"), inventory: ["package/package.json", "package/dist/index.js"] },
     ],
   };
@@ -41,9 +38,7 @@ async function fixture() {
   for (const artifact of metadata.artifacts) {
     await writeFile(path.join(root, `${artifact.name}.publication.json`), `${JSON.stringify({
       schemaVersion: "execution.artifact-publication@1.0.0",
-      package: artifact.name === names.core
-        ? { name: "wsr-execution", version: "0.1.0" }
-        : { name: "wsr-dsh-intake", version: "0.1.0" },
+      package: { name: "wsr-execution", version: "0.1.0" },
       compatibility: metadata.compatibility,
       artifact,
     })}\n`);
@@ -62,12 +57,12 @@ describe("Iteration 3 release artifact verifier", () => {
 
   it("accepts only the exact compatibility tuple, artifact set, digests, and ownership inventory", async () => {
     const { root } = await fixture();
-    await expect(verifyExecutionReleaseArtifacts(root)).resolves.toMatchObject({ version: "0.1.0", artifactCount: 2 });
+    await expect(verifyExecutionReleaseArtifacts(root)).resolves.toMatchObject({ version: "0.1.0", artifactCount: 1 });
   });
 
   it("fails closed for digest, tuple, artifact-set, and embedded Workflow Package drift", async () => {
     const changed = await fixture();
-    await writeFile(path.join(changed.root, names.plugin), "changed");
+    await writeFile(path.join(changed.root, names.core), "changed");
     await expect(verifyExecutionReleaseArtifacts(changed.root)).rejects.toMatchObject({ code: "RELEASE_ARTIFACT_DIGEST_MISMATCH" });
 
     const incompatible = await fixture();
@@ -90,9 +85,9 @@ describe("Iteration 3 release artifact verifier", () => {
     await expect(verifyExecutionReleaseArtifacts(notes.root)).rejects.toMatchObject({ code: "RELEASE_NOTES_MISMATCH" });
   });
 
-  it("requires one exact publication record for each independently distributed package", async () => {
+  it("requires one exact publication record for the distributed package", async () => {
     const missing = await fixture();
-    await writeFile(path.join(missing.root, `${names.plugin}.publication.json`), "{}\n");
+    await writeFile(path.join(missing.root, `${names.core}.publication.json`), "{}\n");
     await expect(verifyExecutionReleaseArtifacts(missing.root)).rejects.toMatchObject({ code: "RELEASE_PUBLICATION_RECORD_INVALID" });
 
     const drifted = await fixture();
@@ -101,7 +96,7 @@ describe("Iteration 3 release artifact verifier", () => {
       schemaVersion: "execution.artifact-publication@1.0.0",
       package: { name: "wsr-execution", version: "0.1.0" },
       compatibility: drifted.metadata.compatibility,
-      artifact: { ...drifted.metadata.artifacts[1], sha256: digest("other") },
+      artifact: { ...drifted.metadata.artifacts[0], sha256: digest("other") },
     })}\n`);
     await expect(verifyExecutionReleaseArtifacts(drifted.root)).rejects.toMatchObject({ code: "RELEASE_PUBLICATION_RECORD_MISMATCH" });
   });

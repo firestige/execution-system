@@ -12,11 +12,11 @@ import {
   type ReleaseConfiguration,
 } from "../../release/cli/verify-release-config.js";
 import {
-  planNpmPairPublication,
-  verifyPublishedNpmPair,
-  waitForPublishedNpmPair,
+  planNpmCorePublication,
+  verifyPublishedNpmCore,
+  waitForPublishedNpmCore,
   type RegistryVersion,
-} from "../../release/cli/publish-npm-pair.js";
+} from "../../release/cli/publish-npm-core.js";
 import { assertReleaseNotes, renderReleaseNotes } from "../../release/cli/verify-release-notes.js";
 import { simulateReleaseLifecycle } from "../../release/cli/simulate-release-lifecycle.js";
 import { assertCapabilityMatrix } from "../../release/cli/verify-release-matrix.js";
@@ -61,8 +61,8 @@ describe("Iteration 4 release automation", () => {
       repository: "firestige/wsr-execution",
       releaseBranch: "main",
       triggerBranch: "release/next",
-      assetMode: "npm-pair",
-      publisherAdapter: "npm-pair+dsh+github-release",
+      assetMode: "npm-package",
+      publisherAdapter: "npm-package+github-release",
       stablePolicy: "qualified-candidate-exact-assets",
     });
   });
@@ -82,46 +82,16 @@ describe("Iteration 4 release automation", () => {
       .not.toContain("npm");
   });
 
-  it("checks every lockstep coordinate and rejects a dependency or workflow filename drift", async () => {
+  it("checks the core coordinate and rejects a workflow filename drift", async () => {
     await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.1.4");
 
-    const authorityWorkflow = await readFile(
-      path.join(repository, "../.github/workflows/iter3-execution-ci.yml"),
-      "utf8",
-    );
-    const dshAuthorityStep = authorityWorkflow
-      .split("- name: Qualify exact WSR DSH source bundles", 2)[1]
-      ?.split("- name:", 1)[0];
-    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run build");
-    expect(dshAuthorityStep).toContain("execution-system/node_modules/.bin");
-    expect(dshAuthorityStep).toContain('test "$(dsh --version)" = 0.1.1-rc.2');
-    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run pack:verify");
-    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run qualify:clean-profile");
-    expect(dshAuthorityStep).toContain("npm --prefix wsr-dsh run provenance:verify");
-    expect(dshAuthorityStep).not.toContain("wsr-dsh-intake");
-    expect(authorityWorkflow).not.toContain('git -C system-contracts rev-parse HEAD)" = 9e6ba782');
-    for (const protectedContract of [
-      "delivery-admission",
-      "evaluation",
-      "observation",
-      "workflow-dsl",
-    ]) {
-      expect(authorityWorkflow).toContain(`HEAD^{tree}:${protectedContract}`);
-      expect(authorityWorkflow).toContain(`9e6ba782b742f49f3d2392c9af37ebd4ff328bc8^{tree}:${protectedContract}`);
-    }
-
     const core = { name: "wsr-execution", version: "0.1.3" };
-    const intake = {
-      name: "wsr-dsh-intake",
-      version: "0.1.3",
-      dependencies: { "wsr-execution": "0.1.1" },
-      dsh: { compatibility: { executionSystem: "0.1.3" } },
-    };
-    expect(() => assertExecutionReleaseCoordinates({ core, intake, workflow: "VERSION=dynamic" }))
+    expect(() => assertExecutionReleaseCoordinates({
+      core: { ...core, name: "unexpected" }, workflow: "VERSION=dynamic",
+    }))
       .toThrowError("RELEASE_PACKAGE_VERSION_MISMATCH");
     expect(() => assertExecutionReleaseCoordinates({
       core,
-      intake: { ...intake, dependencies: { "wsr-execution": "0.1.3" } },
       workflow: "wsr-execution-0.1.3.tgz",
     })).toThrowError("RELEASE_WORKFLOW_VERSION_HARDCODED");
   });
@@ -145,52 +115,48 @@ describe("Iteration 4 release automation", () => {
     })).toBe(true);
   });
 
-  it("publishes core before intake and resumes only an exact already-published coordinate", async () => {
-    const artifacts = [
-      { package: "wsr-execution", version: "0.1.3", file: "wsr-execution-0.1.3.tgz", sha256: "sha256:" + "a".repeat(64) },
-      { package: "wsr-dsh-intake", version: "0.1.3", file: "wsr-dsh-intake-0.1.3.tgz", sha256: "sha256:" + "b".repeat(64) },
-    ] as const;
+  it("publishes only core and resumes only an exact already-published coordinate", async () => {
+    const artifact = {
+      package: "wsr-execution", version: "0.1.3", file: "wsr-execution-0.1.3.tgz", sha256: "sha256:" + "a".repeat(64),
+    } as const;
     const absent = async (): Promise<RegistryVersion | null> => null;
 
-    await expect(planNpmPairPublication(artifacts, absent)).resolves.toEqual([
+    await expect(planNpmCorePublication(artifact, absent)).resolves.toEqual(
       { action: "publish", package: "wsr-execution", file: "wsr-execution-0.1.3.tgz" },
-      { action: "publish", package: "wsr-dsh-intake", file: "wsr-dsh-intake-0.1.3.tgz" },
-    ]);
-
-    const coreAlreadyPublished = async (name: string): Promise<RegistryVersion | null> => (
-      name === "wsr-execution" ? { sha256: artifacts[0].sha256, description: "core" } : null
     );
-    await expect(planNpmPairPublication(artifacts, coreAlreadyPublished)).resolves.toEqual([
+
+    const coreAlreadyPublished = async (): Promise<RegistryVersion> => (
+      { sha256: artifact.sha256, description: "core" }
+    );
+    await expect(planNpmCorePublication(artifact, coreAlreadyPublished)).resolves.toEqual(
       { action: "skip-exact", package: "wsr-execution", file: "wsr-execution-0.1.3.tgz" },
-      { action: "publish", package: "wsr-dsh-intake", file: "wsr-dsh-intake-0.1.3.tgz" },
-    ]);
+    );
 
     const collision = async (): Promise<RegistryVersion> => ({
       sha256: "sha256:" + "c".repeat(64), description: "collision",
     });
-    await expect(planNpmPairPublication(artifacts, collision))
+    await expect(planNpmCorePublication(artifact, collision))
       .rejects.toThrowError("NPM_VERSION_DIGEST_COLLISION");
 
-    const exact = async (name: string): Promise<RegistryVersion> => ({
-      sha256: artifacts.find((item) => item.package === name)!.sha256,
-      description: `${name} description`,
+    const exact = async (): Promise<RegistryVersion> => ({
+      sha256: artifact.sha256,
+      description: "core description",
       latest: "0.1.3",
       versions: ["0.1.1", "0.1.2", "0.1.3"],
     });
-    await expect(verifyPublishedNpmPair(artifacts, exact)).resolves.toEqual({
-      version: "0.1.3", packages: ["wsr-execution", "wsr-dsh-intake"],
+    await expect(verifyPublishedNpmCore(artifact, exact)).resolves.toEqual({
+      version: "0.1.3", package: "wsr-execution",
     });
     let attempts = 0;
-    await expect(waitForPublishedNpmPair(artifacts, async (name) => {
+    await expect(waitForPublishedNpmCore(artifact, async () => {
       attempts += 1;
-      return attempts === 1 ? null : exact(name);
+      return attempts === 1 ? null : exact();
     }, async () => undefined, 2)).resolves.toMatchObject({ version: "0.1.3" });
   });
 
   it("models recovery without allowing failed candidates to become stable", () => {
     expect(simulateReleaseLifecycle("happy")).toBe("STABLE");
     expect(simulateReleaseLifecycle("candidate-main-divergence")).toBe("STABLE");
-    expect(simulateReleaseLifecycle("npm-core-published-intake-failed")).toBe("RECOVERABLE_PARTIAL");
     for (const scenario of [
       "digest-mismatch", "tag-collision", "permission-denied", "builtin-token-final-publish",
     ] as const) {
@@ -212,7 +178,7 @@ describe("Iteration 4 release automation", () => {
     expect(candidate).toContain("permission-contents: write");
     expect(candidate).toContain("permission-workflows: write");
     expect(candidate.indexOf("actions/create-github-app-token@"))
-      .toBeGreaterThan(candidate.indexOf("Run local artifact-install DSH Web E2E"));
+      .toBeGreaterThan(candidate.indexOf("Materialize and verify exact unified-candidate artifacts"));
     expect(candidate.indexOf("actions/create-github-app-token@"))
       .toBeLessThan(candidate.indexOf("Create or resume RC with exact local assets"));
     expect(candidate).toContain("GH_TOKEN: ${{ steps.release-app-token.outputs.token }}");
@@ -231,7 +197,7 @@ describe("Iteration 4 release automation", () => {
     expect(promote).toContain("permission-contents: write");
     expect(promote).toContain("permission-workflows: write");
     expect(promote.indexOf("actions/create-github-app-token@"))
-      .toBeGreaterThan(promote.indexOf("Re-run remote artifact-install E2E"));
+      .toBeGreaterThan(promote.indexOf("Publish exact qualified npm package before stable"));
     expect(promote).toContain("GH_TOKEN: ${{ steps.release-app-token.outputs.token }}");
   });
 
@@ -243,7 +209,6 @@ describe("Iteration 4 release automation", () => {
     await writeFile(path.join(candidate, "release-metadata.json"), "metadata\n");
     await writeFile(path.join(candidate, "release-notes.md"), "notes\n");
     await writeFile(path.join(candidate, "wsr-execution-0.1.3.tgz"), "core");
-    await writeFile(path.join(candidate, "wsr-dsh-intake-0.1.3.tgz"), "intake");
     await writeFile(path.join(candidate, "publication.json"), "publication\n");
     const digest = (value: string): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;
     const manifest = {
@@ -254,7 +219,6 @@ describe("Iteration 4 release automation", () => {
         release_notes: { path: "execution-system/release/candidates/wave11/release-notes.md", sha256: digest("notes\n") },
         artifacts: [
           { package: "wsr-execution", version: "0.1.3", path: "execution-system/release/candidates/wave11/wsr-execution-0.1.3.tgz", sha256: digest("core") },
-          { package: "wsr-dsh-intake", version: "0.1.3", path: "execution-system/release/candidates/wave11/wsr-dsh-intake-0.1.3.tgz", sha256: digest("intake") },
         ],
       },
     };
@@ -265,7 +229,7 @@ describe("Iteration 4 release automation", () => {
     await expect(materializeUnifiedCandidate(superproject, manifestPath, destination)).resolves.toEqual({
       candidateDirectory: candidate,
       version: "0.1.3",
-      artifactCount: 2,
+      artifactCount: 1,
     });
     await expect(readFile(path.join(destination, "wsr-execution-0.1.3.tgz"), "utf8")).resolves.toBe("core");
     await writeFile(path.join(candidate, "wsr-execution-0.1.3.tgz"), "tampered");
