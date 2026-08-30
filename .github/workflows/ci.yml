@@ -59,6 +59,7 @@ jobs:
           repository: firestige/wsr-workflow-package
           ref: 4f77fcc25c26d85cba170ba6aa859d05eee3b298
           path: workflow-package
+          fetch-depth: 0
 
       - name: Verify exact pull request candidate checkout
         if: ${{ github.event_name == 'pull_request' }}
