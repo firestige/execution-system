@@ -9,6 +9,7 @@ import { coordinateIdentity } from "../../src/configuration/index.js";
 import {
   createDeliveryManifestProjection,
   createDeliveryManifestV2,
+  DeliveryManifestRepositoryV2,
   resolveRoleModelBindings,
   type CreateDeliveryManifestV2Input,
   type DeliveryConfigProjectionV2,
@@ -209,5 +210,18 @@ describe("Delivery Manifest 2.0", () => {
 
     expect(manifest.repositoryModelBindings).toEqual({ documentState: "ABSENT", resolvedMapDigest: resolvedRoleBindings.resolvedMapDigest });
     expect(createDeliveryManifestProjection(manifest).projection.repository_model_bindings).not.toHaveProperty("document_digest");
+  });
+
+  it("persists and reloads the exact v2 Manifest identity for recovery", async () => {
+    const input = await fixture();
+    const manifest = createDeliveryManifestV2(input);
+    const root = await mkdtemp(join(tmpdir(), "delivery-manifest-v2-repository-"));
+    const repository = new DeliveryManifestRepositoryV2(root);
+
+    const persisted = await repository.persist(manifest);
+    const reloaded = await repository.load(persisted.path);
+
+    expect(reloaded).toEqual(manifest);
+    expect(reloaded.deliveryBindingIdentity).toBe(manifest.deliveryBindingIdentity);
   });
 });

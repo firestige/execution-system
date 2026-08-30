@@ -2,7 +2,7 @@ import type { WorkflowPackageSource } from "../bootstrap/index.js";
 import { parseWorkflowSelector, WorkflowSelectorError } from "./selector.js";
 import type { ResolvedWorkflowPackage, WorkflowPackageStaging } from "./workflow-package-store.js";
 import { WorkflowPackageStore, WorkflowPackageStoreError } from "./workflow-package-store.js";
-import { FrozenWorkflowPackageValidator } from "./workflow-package-validation.js";
+import type { ValidatedWorkflowPackage } from "./workflow-package-store.js";
 
 export type WorkflowPackageResolutionErrorCode =
   | "INVALID_WORKFLOW_SELECTOR"
@@ -26,7 +26,7 @@ export class WorkflowPackageResolver {
   constructor(
     readonly store: WorkflowPackageStore,
     readonly source: WorkflowPackageSource,
-    readonly validator: FrozenWorkflowPackageValidator,
+    readonly validator: Readonly<{ validate(staging: WorkflowPackageStaging): Promise<ValidatedWorkflowPackage> }>,
   ) {}
 
   async resolve(selector: string, refresh = false): Promise<WorkflowPackageResolutionResult> {

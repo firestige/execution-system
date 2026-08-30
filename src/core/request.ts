@@ -5,14 +5,22 @@ import type {
   TaskPromptAttachment,
   TaskSelection,
 } from "../application/execution-application.js";
-import { createDeliveryConfigProjection, deepFreeze, type DeliveryConfigProjection, type ExecutionInstallationConfig } from "../configuration/index.js";
+import {
+  createDeliveryConfigProjection,
+  createDeliveryConfigProjectionV2,
+  deepFreeze,
+  type DeliveryConfigProjection,
+  type DeliveryConfigProjectionV2,
+  type ExecutionInstallationConfig,
+  type ExecutionInstallationConfigV2,
+} from "../configuration/index.js";
 
 export interface ExecutionEnvironment {
   readonly schemaVersion: "execution.environment@1.0.0";
   readonly allowedWorktreeRoots: readonly string[];
   readonly allowExplicitRefresh: boolean;
   readonly maxCorrelationBytes: number;
-  readonly deliveryConfigProjection: DeliveryConfigProjection;
+  readonly deliveryConfigProjection: DeliveryConfigProjection | DeliveryConfigProjectionV2;
 }
 
 export interface ExecutionPrebindingCommand {
@@ -24,7 +32,7 @@ export interface ExecutionPrebindingCommand {
   readonly taskSelection: TaskSelection;
   readonly refresh: boolean;
   readonly intakeCorrelation?: string;
-  readonly deliveryConfigProjection: DeliveryConfigProjection["value"];
+  readonly deliveryConfigProjection: DeliveryConfigProjection["value"] | DeliveryConfigProjectionV2["value"];
   readonly deliveryConfigProjectionIdentity: string;
 }
 
@@ -140,10 +148,12 @@ function taskSelection(value: unknown): TaskSelection {
 }
 
 export function createExecutionEnvironment(
-  config: ExecutionInstallationConfig,
+  config: ExecutionInstallationConfig | ExecutionInstallationConfigV2,
 ): ExecutionEnvironment {
   if (!Object.isFrozen(config)) throw new TypeError("ExecutionEnvironment input must be an immutable canonical configuration value");
-  const deliveryConfigProjection = createDeliveryConfigProjection(config);
+  const deliveryConfigProjection = config.schemaVersion === "execution.config@2.0.0"
+    ? createDeliveryConfigProjectionV2(config)
+    : createDeliveryConfigProjection(config);
   return deepFreeze({
     schemaVersion: "execution.environment@1.0.0",
     allowedWorktreeRoots: [...config.paths.allowedWorktreeRoots],

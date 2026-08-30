@@ -1,4 +1,4 @@
-import { cp, readFile, mkdtemp, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, mkdtemp, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,15 +6,19 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import type { DeliveryConfigProjection } from "../../src/configuration/index.js";
+import { coordinateIdentity, type DeliveryConfigProjection, type DeliveryConfigProjectionV2 } from "../../src/configuration/index.js";
 import { compileRunnerActivation } from "../../src/interpreter/compile-runner-activation.js";
 import {
   captureTaskPromptSnapshot,
   createDeliveryManifest,
+  createDeliveryManifestV2,
   DeliveryAdmissionProjector,
+  resolveRoleModelBindings,
 } from "../../src/delivery/index.js";
+import { AgentProviderFactoryRegistry, type AgentProviderRealmFactory } from "../../src/providers/provider.js";
 
 const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
+const executionRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/u, "");
 
 function projection(baseUrl = "https://api.example.test"): DeliveryConfigProjection {
   return Object.freeze({
@@ -160,6 +164,103 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
         }],
       },
     });
+    expect(compileRunnerActivation(activation).ok).toBe(true);
+  });
+});
+
+describe("frozen Delivery Admission 2.0.0 production projection", () => {
+  it("projects two Snapshot Roles to their exact Copilot and Codex driver/model bindings", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-v2-"));
+    const definition = path.join(root, "definition");
+    await mkdir(path.join(definition, "prompts"), { recursive: true });
+    await writeFile(path.join(definition, "prompts", "copilot.md"), "Copilot Role instructions.\n");
+    await writeFile(path.join(definition, "prompts", "codex.md"), "Codex Role instructions.\n");
+    const sha = (character: string) => `sha256:${character.repeat(64)}`;
+    const pkg = {
+      schemaVersion: "agentops.workflow-dsl@2.0.0",
+      package: { name: "dual-role", version: "1.0.0", digest: sha("1"), definition: { contentIdentity: sha("2") } },
+      documents: { workflow: "workflow.json", actions: "actions.json", routes: "routes.json" },
+      resources: { owned: [
+        { id: "role.prompt.copilot", kind: "role-prompt", owner: "owned", path: "prompts/copilot.md", contentIdentity: sha("3") },
+        { id: "role.prompt.codex", kind: "role-prompt", owner: "owned", path: "prompts/codex.md", contentIdentity: sha("4") },
+      ], referenced: [] },
+      authority: { order: ["workflow_action", "role_prompt", "action_prompt", "skill", "artifact_user"], conflictMode: "fail-closed" },
+    };
+    const workflow = {
+      schemaVersion: "agentops.workflow-dsl@2.0.0",
+      workflow: { id: "workflow.dual-role", version: "1.0.0" },
+      state: { fields: [{ name: "request", type: "string", required: true }] },
+      graph: {
+        start: "node.copilot",
+        nodes: [
+          { id: "node.copilot", kind: "action", action: "action.copilot" },
+          { id: "node.codex", kind: "action", action: "action.codex" },
+        ],
+        edges: [
+          { id: "edge.codex", from: "node.copilot", to: "node.codex" },
+          { id: "edge.success", from: "node.codex", to: "terminal:SUCCESS" },
+        ],
+        eventEdges: [], terminals: [{ id: "SUCCESS", kind: "success", meaning: "done" }],
+      },
+      dataflow: { edges: [{ source: { kind: "site-result", site: { kind: "node", nodeIdentity: "node.copilot" }, slot: { kind: "whole" } }, target: { kind: "site-input", site: { kind: "node", nodeIdentity: "node.codex" }, slot: { kind: "whole" } } }] },
+      hostOperations: [],
+    };
+    const actions = { schemaVersion: "agentops.workflow-dsl@2.0.0", actions: [
+      { id: "action.copilot", purpose: "first", inputSchema: { type: "object", properties: { request: { type: "string" } }, required: ["request"] }, resultSchema: { type: "object" }, responsibleAuthority: { kind: "role", role: "role.copilot" }, allowedRoutes: ["route.copilot"], gate: { freeTextBypass: "prohibited" } },
+      { id: "action.codex", purpose: "second", inputSchema: { type: "object" }, resultSchema: { type: "object" }, responsibleAuthority: { kind: "role", role: "role.codex" }, allowedRoutes: ["route.codex"], gate: { freeTextBypass: "prohibited" } },
+    ] };
+    const routes = { schemaVersion: "agentops.workflow-dsl@2.0.0", routes: [
+      { id: "route.copilot", role: "role.copilot", resources: { rolePrompt: { id: "role.prompt.copilot" }, actionPrompts: [], tools: [], capabilities: ["structured-completion"], sessionPolicy: { scope: { kind: "episode" }, isolation: "isolated" } }, access: [{ target: "workspace", mode: "read" }] },
+      { id: "route.codex", role: "role.codex", resources: { rolePrompt: { id: "role.prompt.codex" }, actionPrompts: [], tools: [], capabilities: ["structured-completion"], sessionPolicy: { scope: { kind: "episode" }, isolation: "isolated" } }, access: [{ target: "workspace", mode: "read" }] },
+    ] };
+    const snapshotDocument = { schemaVersion: "agentops.workflow-dsl@2.0.0", snapshot: { id: "snapshot.dual-role.1", digest: sha("5"), package: { name: "dual-role", version: "1.0.0", digest: sha("1") }, definition: { id: "workflow.dual-role", version: "1.0.0", contentIdentity: sha("2") }, authority: { mergeProof: sha("6") } } };
+    await Promise.all([
+      writeFile(path.join(definition, "package.json"), JSON.stringify(pkg)),
+      writeFile(path.join(definition, "workflow.json"), JSON.stringify(workflow)),
+      writeFile(path.join(definition, "actions.json"), JSON.stringify(actions)),
+      writeFile(path.join(definition, "routes.json"), JSON.stringify(routes)),
+      writeFile(path.join(definition, "artifacts.json"), JSON.stringify({ schemaVersion: "agentops.workflow-dsl@2.0.0", artifacts: [] })),
+      writeFile(path.join(definition, "snapshot.json"), JSON.stringify(snapshotDocument)),
+    ]);
+    const factory = (identity: "provider.copilot" | "provider.codex", version: string, adapterKey: "copilot-sdk" | "codex-cli"): AgentProviderRealmFactory => Object.freeze({
+      descriptor: Object.freeze({ schemaVersion: "execution.agent-provider-factory@1.0.0", identity, version, adapterKey, capabilities: Object.freeze(["structured-completion"]) }),
+      async acquire() { throw new Error("projection does not acquire realms"); },
+    });
+    const registry = new AgentProviderFactoryRegistry([
+      factory("provider.copilot", "1.0.78", "copilot-sdk"),
+      factory("provider.codex", "0.144.5", "codex-cli"),
+    ]);
+    const repositoryBindings = Object.freeze({ schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0" as const, documentState: "PRESENT" as const, documentDigest: sha("7"), bindings: Object.freeze({
+      "role.copilot": Object.freeze({ agentProvider: Object.freeze({ identity: "provider.copilot", version: "1.0.78" }), model: Object.freeze({ provider: "github-copilot", model: "gpt-5.3-codex" }) }),
+      "role.codex": Object.freeze({ agentProvider: Object.freeze({ identity: "provider.codex", version: "0.144.5" }), model: Object.freeze({ provider: "openai", model: "gpt-5.6-sol" }) }),
+    }) });
+    const agentActionRoles = Object.freeze([
+      Object.freeze({ roleId: "role.copilot", rolePromptIdentity: "role.prompt.copilot", rolePromptDigest: sha("3"), requiredCapabilities: Object.freeze(["structured-completion"]) }),
+      Object.freeze({ roleId: "role.codex", rolePromptIdentity: "role.prompt.codex", rolePromptDigest: sha("4"), requiredCapabilities: Object.freeze(["structured-completion"]) }),
+    ]);
+    const resolvedRoleBindings = resolveRoleModelBindings({ registry, repository: repositoryBindings, agentActionRoles });
+    const projectionValue = Object.freeze({
+      schemaVersion: "execution.delivery-config@2.0.0" as const,
+      paths: Object.freeze({ repositoryRoot: executionRoot, workspaceRoot: executionRoot, allowedWorktreeRoots: Object.freeze([executionRoot]), runnerResources: Object.freeze({ journal: "runner/journal" as const, checkpoints: "runner/checkpoints" as const, sessions: "runner/sessions" as const, custody: "runner/custody" as const }) }),
+      runner: Object.freeze({ implementationKey: "runner.v2" as const, host: Object.freeze({ engine: "langgraph" as const }), maxParallelToolCalls: 2 }),
+      controls: Object.freeze({ executionTimeoutMs: 60_000, maxConcurrentDeliveries: 1, allowExplicitRefresh: false }),
+    });
+    const deliveryConfigProjection: DeliveryConfigProjectionV2 = Object.freeze({ value: projectionValue, identity: coordinateIdentity("execution.delivery-config@2.0.0", projectionValue as never) });
+    const promptSnapshot = await captureTaskPromptSnapshot({ root: path.join(root, "snapshots"), deliveryId: "delivery-dual-role", prompt: Object.freeze({ text: "run both roles", attachments: Object.freeze([]) }), attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }) });
+    const manifest = createDeliveryManifestV2({
+      deliveryId: "delivery-dual-role", taskId: "task-dual-role", createdAt: 1, canonicalWorktree: executionRoot,
+      workflowPackage: { name: "dual-role", exactVersion: "1.0.0", packageDigest: sha("1"), localMaterializationPath: definition },
+      workflowSnapshot: { workflowId: "workflow.dual-role", workflowVersion: "1.0.0", snapshotId: "snapshot.dual-role.1", snapshotDigest: sha("5") },
+      agentActionRoles, repositoryModelBindings: repositoryBindings, resolvedRoleBindings, promptSnapshot, deliveryConfigProjection,
+    });
+
+    const activation = await new DeliveryAdmissionProjector().project(manifest);
+
+    expect(activation.admission).toMatchObject({ contractRevision: "agentops.workflow-dsl@2.0.0", deliveryAdmissionContractIdentity: "agentops.delivery-admission@2.0.0" });
+    expect(Object.values(activation.program.execution.agents).map((agent) => ({ role: agent.session.roleIdentity, driver: agent.session.driver.providerIdentity, model: agent.session.model.providerModelIdentity }))).toEqual([
+      { role: "role.copilot", driver: "copilot-sdk", model: "gpt-5.3-codex" },
+      { role: "role.codex", driver: "codex-cli", model: "gpt-5.6-sol" },
+    ]);
     expect(compileRunnerActivation(activation).ok).toBe(true);
   });
 });

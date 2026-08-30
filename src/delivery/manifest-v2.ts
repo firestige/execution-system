@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 
 import {
   canonicalJsonBytes,
@@ -112,6 +113,11 @@ export interface CreatedDeliveryManifestProjection {
   readonly projection: DeliveryManifestPortableProjection;
   readonly canonicalJson: string;
   readonly projectionDigest: string;
+}
+
+export interface PersistedDeliveryManifestV2 {
+  readonly manifest: DeliveryManifestV2;
+  readonly path: string;
 }
 
 function digest(value: JsonValue): string {
@@ -256,4 +262,93 @@ export function createDeliveryManifestProjection(manifest: DeliveryManifestV2): 
     canonicalJson: Buffer.from(bytes).toString("utf8"),
     projectionDigest: createHash("sha256").update(bytes).digest("hex"),
   });
+}
+
+function safeSegment(value: string): string {
+  if (!PORTABLE_ID.test(value)) throw new DeliveryBindingError("DELIVERY_BINDING_INVALID");
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** Closed v2 Manifest store used by recovery. It re-derives the binding identity on every load. */
+export class DeliveryManifestRepositoryV2 {
+  readonly #root: string;
+
+  constructor(root: string) {
+    if (!isAbsolute(root)) throw new TypeError("Delivery Manifest root must be absolute");
+    this.#root = resolve(root);
+  }
+
+  async persist(manifest: DeliveryManifestV2): Promise<PersistedDeliveryManifestV2> {
+    const path = join(this.#root, `${safeSegment(manifest.deliveryId)}.json`);
+    try {
+      await mkdir(this.#root, { recursive: true, mode: 0o700 });
+      await writeFile(path, `${JSON.stringify(manifest)}\n`, { flag: "wx", mode: 0o600 });
+      return deepFreeze({ manifest, path });
+    } catch {
+      throw new DeliveryBindingError("DELIVERY_MANIFEST_PERSIST_FAILED");
+    }
+  }
+
+  async load(path: string): Promise<DeliveryManifestV2> {
+    try {
+      const absolute = resolve(path);
+      if (!isAbsolute(path) || resolve(absolute, "..") !== this.#root || !(await stat(absolute)).isFile()) throw new Error("invalid path");
+      const candidate = JSON.parse(await readFile(absolute, "utf8")) as DeliveryManifestV2;
+      const expectedKeys = ["canonicalWorktree", "createdAt", "deliveryBindingIdentity", "deliveryConfigProjection", "deliveryId", "prompt", "repositoryModelBindings", "resolvedRoles", "schemaVersion", "taskId", "workflowPackage", "workflowSnapshot", ...(candidate.taskDisplayName === undefined ? [] : ["taskDisplayName"])].sort();
+      if (candidate.schemaVersion !== "execution.delivery-manifest@2.0.0" || Object.keys(candidate).sort().join(",") !== expectedKeys.join(",")) throw new Error("invalid shape");
+      const agentActionRoles = candidate.resolvedRoles.map((role) => ({
+        roleId: role.roleId,
+        rolePromptIdentity: role.rolePromptIdentity,
+        rolePromptDigest: role.rolePromptDigest,
+        requiredCapabilities: role.requiredCapabilities,
+      }));
+      const repositoryModelBindings: RepositoryModelBindingsSnapshot = candidate.repositoryModelBindings.documentState === "ABSENT"
+        ? { schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0", documentState: "ABSENT" }
+        : {
+          schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0",
+          documentState: "PRESENT",
+          documentDigest: candidate.repositoryModelBindings.documentDigest,
+          bindings: Object.fromEntries(candidate.resolvedRoles.map((role) => [role.roleId, {
+            agentProvider: { identity: role.agentProviderId, version: role.agentProviderVersion },
+            model: { provider: role.modelProviderId, model: role.modelId },
+          }])),
+        };
+      const reconstructed = createDeliveryManifestV2({
+        deliveryId: candidate.deliveryId,
+        taskId: candidate.taskId,
+        ...(candidate.taskDisplayName === undefined ? {} : { taskDisplayName: candidate.taskDisplayName }),
+        createdAt: candidate.createdAt,
+        canonicalWorktree: candidate.canonicalWorktree,
+        workflowPackage: candidate.workflowPackage,
+        workflowSnapshot: candidate.workflowSnapshot,
+        agentActionRoles,
+        repositoryModelBindings,
+        resolvedRoleBindings: {
+          schemaVersion: "execution.resolved-role-provider-bindings@2.0.0",
+          resolvedRoles: candidate.resolvedRoles,
+          resolvedMapDigest: candidate.repositoryModelBindings.resolvedMapDigest,
+        },
+        promptSnapshot: {
+          schemaVersion: "execution.task-prompt-snapshot@1.0.0",
+          identity: candidate.prompt.snapshotIdentity,
+          digest: candidate.prompt.snapshotDigest,
+          path: candidate.prompt.snapshotPath,
+          textPath: join(candidate.prompt.snapshotPath, "prompt.txt"),
+          attachments: [],
+        },
+        deliveryConfigProjection: candidate.deliveryConfigProjection,
+      });
+      if (candidate.prompt.taskPromptIdentity !== candidate.prompt.snapshotIdentity
+        || reconstructed.deliveryBindingIdentity !== candidate.deliveryBindingIdentity) throw new Error("invalid identity");
+      return reconstructed;
+    } catch {
+      throw new DeliveryBindingError("DELIVERY_MANIFEST_INVALID");
+    }
+  }
+
+  async discard(path: string): Promise<void> {
+    const absolute = resolve(path);
+    if (!isAbsolute(path) || resolve(absolute, "..") !== this.#root) throw new DeliveryBindingError("DELIVERY_MANIFEST_INVALID");
+    await rm(absolute, { force: true });
+  }
 }
