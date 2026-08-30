@@ -29,8 +29,8 @@ export type ReleaseQualificationEvidence = Readonly<{
   candidateTag: string;
   commit: string;
   artifactMetadataSha256: string;
-  localE2E: Readonly<{ status: string }>;
-  remotePrereleaseE2E: Readonly<{ status: string }>;
+  componentGates: Readonly<{ status: string }>;
+  remoteArtifactVerification: Readonly<{ status: string }>;
 }>;
 
 export function assertFinalPromotionEligible(
@@ -52,11 +52,11 @@ export function assertFinalPromotionEligible(
   if (evidence.commit !== currentCommit) {
     throw new ReleasePromotionPolicyError("QUALIFICATION_COMMIT_MISMATCH");
   }
-  if (evidence.localE2E.status !== "PASS") {
-    throw new ReleasePromotionPolicyError("LOCAL_E2E_REQUIRED");
+  if (evidence.componentGates?.status !== "PASS") {
+    throw new ReleasePromotionPolicyError("COMPONENT_GATES_REQUIRED");
   }
-  if (evidence.remotePrereleaseE2E.status !== "PASS") {
-    throw new ReleasePromotionPolicyError("REMOTE_PRERELEASE_E2E_REQUIRED");
+  if (evidence.remoteArtifactVerification?.status !== "PASS") {
+    throw new ReleasePromotionPolicyError("REMOTE_ARTIFACT_VERIFICATION_REQUIRED");
   }
   if (actualArtifactMetadataSha256 !== undefined
     && evidence.artifactMetadataSha256 !== actualArtifactMetadataSha256) {
