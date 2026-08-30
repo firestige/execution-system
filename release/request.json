@@ -1,6 +1,5 @@
 {
-  "candidate_tag": "0.1.4-rc.1",
-  "local_manual_e2e_evidence": "https://github.com/firestige/workflow-self-recursive/issues/105#issuecomment-5463303839",
-  "authority_ref": "a64bc3e420323e5dd5169b47e88bfc770192c598",
-  "authority_manifest": "release/candidates/iter6-wave8.json"
+  "candidate_tag": "0.1.4-rc.2",
+  "authority_ref": "e4f5c8264051d0e3c3be73fde6ed8b2fe8ec9cf3",
+  "authority_manifest": "release/candidates/iter6-wave14-execution-core.json"
 }
