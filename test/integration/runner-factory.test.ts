@@ -159,6 +159,67 @@ describe("RunnerFactory", () => {
 });
 
 describe("AgentProviderRunnerFactory", () => {
+  it("rejects empty, unknown, accessor-backed, and mutable Provider dependencies before realm acquisition", async () => {
+    const historical = await fixtureConfig();
+    const config: AgentProviderRunnerFactoryConfig = Object.freeze({
+      schemaVersion: "runner.factory@2.0.0",
+      stateDirectory: historical.stateDirectory,
+      custody: historical.custody,
+      invocation: historical.invocation,
+      host: historical.host,
+      implementationIdentity: "implementation.runner.langgraph-agent-providers",
+    });
+    let acquisitions = 0;
+    const provider: AgentProviderSessionFactory = Object.freeze({
+      async open() { acquisitions += 1; throw new Error("must not acquire"); },
+      async restore() { acquisitions += 1; throw new Error("must not restore"); },
+    });
+    const owner = Object.freeze({ async dispose() {} });
+    const accessorCatalog = Object.freeze(Object.defineProperty({}, "codex-cli", {
+      enumerable: true,
+      get() { acquisitions += 1; return provider; },
+    }));
+    const cases = [
+      Object.freeze({ ...dependencies, providerSessions: Object.freeze({}), providerOwner: owner }),
+      Object.freeze({ ...dependencies, providerSessions: Object.freeze({ unknown: provider }), providerOwner: owner }),
+      Object.freeze({ ...dependencies, providerSessions: accessorCatalog, providerOwner: owner }),
+      Object.freeze({ ...dependencies, providerSessions: Object.freeze({ "codex-cli": provider }), providerOwner: { async dispose() {} } }),
+    ];
+
+    for (const candidate of cases) {
+      await expect(new AgentProviderRunnerFactory().create(config, candidate as never)).rejects.toMatchObject({
+        code: "RUNNER_FACTORY_CONFIGURATION_INVALID",
+      });
+    }
+    expect(acquisitions).toBe(0);
+  });
+
+  it("releases the shared Provider owner when v2 host startup fails before publishing an adapter", async () => {
+    const historical = await fixtureConfig();
+    const checkpointBlocker = path.join(path.dirname(historical.host.checkpointDirectory), "checkpoint-blocker");
+    await writeFile(checkpointBlocker, "not a directory", "utf8");
+    const config: AgentProviderRunnerFactoryConfig = Object.freeze({
+      schemaVersion: "runner.factory@2.0.0",
+      stateDirectory: historical.stateDirectory,
+      custody: historical.custody,
+      invocation: historical.invocation,
+      host: Object.freeze({ engine: "langgraph", checkpointDirectory: path.join(checkpointBlocker, "checkpoints") }),
+      implementationIdentity: "implementation.runner.langgraph-agent-providers",
+    });
+    const provider: AgentProviderSessionFactory = Object.freeze({
+      async open() { throw new Error("not reached"); },
+      async restore() { throw new Error("not reached"); },
+    });
+    let ownerDisposals = 0;
+
+    await expect(new AgentProviderRunnerFactory().create(config, Object.freeze({
+      ...dependencies,
+      providerSessions: Object.freeze({ "codex-cli": provider }),
+      providerOwner: Object.freeze({ async dispose() { ownerDisposals += 1; } }),
+    }))).rejects.toMatchObject({ code: "RUNNER_FACTORY_STARTUP_FAILED" });
+    expect(ownerDisposals).toBe(1);
+  });
+
   it("runs one Delivery through two exact Role-owned Provider realms and releases their shared owner", async () => {
     const historical = await fixtureConfig();
     const config: AgentProviderRunnerFactoryConfig = Object.freeze({

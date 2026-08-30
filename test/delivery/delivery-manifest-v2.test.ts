@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -223,5 +223,22 @@ describe("Delivery Manifest 2.0", () => {
 
     expect(reloaded).toEqual(manifest);
     expect(reloaded.deliveryBindingIdentity).toBe(manifest.deliveryBindingIdentity);
+  });
+
+  it("fails closed on duplicate persistence, tampered recovery, and paths outside the Manifest store", async () => {
+    const input = await fixture();
+    const manifest = createDeliveryManifestV2(input);
+    const root = await mkdtemp(join(tmpdir(), "delivery-manifest-v2-repository-failure-"));
+    const repository = new DeliveryManifestRepositoryV2(root);
+    const persisted = await repository.persist(manifest);
+
+    await expect(repository.persist(manifest)).rejects.toMatchObject({ code: "DELIVERY_MANIFEST_PERSIST_FAILED" });
+    const tampered = JSON.parse(await readFile(persisted.path, "utf8")) as Record<string, unknown>;
+    tampered.deliveryBindingIdentity = sha("f");
+    await writeFile(persisted.path, `${JSON.stringify(tampered)}\n`, "utf8");
+    await expect(repository.load(persisted.path)).rejects.toMatchObject({ code: "DELIVERY_MANIFEST_INVALID" });
+    await expect(repository.discard(join(root, "..", "outside.json"))).rejects.toMatchObject({ code: "DELIVERY_MANIFEST_INVALID" });
+    await repository.discard(persisted.path);
+    await expect(repository.load(persisted.path)).rejects.toMatchObject({ code: "DELIVERY_MANIFEST_INVALID" });
   });
 });
