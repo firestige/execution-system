@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -41,5 +41,15 @@ describe("legacy DSH publisher retirement", () => {
     expect(marker).toContain("Historical compatibility source");
     expect(marker).toContain("dsh-wsr-execution");
     expect(marker).toContain("must not be published");
+  });
+
+  it("retires the cross-repository DSH documentation verifier", async () => {
+    const manifest = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")) as {
+      readonly scripts?: Readonly<Record<string, string>>;
+    };
+    expect(manifest.scripts).not.toHaveProperty("verify:iteration3-docs");
+
+    await expect(access(path.join(repository, "scripts/verify-iteration-3-documentation.ts"))).rejects.toThrow();
+    await expect(access(path.join(repository, "test/tooling/iteration-3-documentation-verifier.test.ts"))).rejects.toThrow();
   });
 });
