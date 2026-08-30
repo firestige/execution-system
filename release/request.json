@@ -1,5 +1,5 @@
 {
-  "candidate_tag": "0.1.4-rc.2",
-  "authority_ref": "e4f5c8264051d0e3c3be73fde6ed8b2fe8ec9cf3",
+  "candidate_tag": "0.1.4-rc.3",
+  "authority_ref": "bb915080485e74f1cfcba441a50a5bd8cf27c9f5",
   "authority_manifest": "release/candidates/iter6-wave14-execution-core.json"
 }
