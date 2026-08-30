@@ -19,26 +19,26 @@ describe("Execution release promotion policy", () => {
     expect(() => assertPrereleaseCandidate("0.1.1-rc.1", "next")).toThrowError("STABLE_PACKAGE_VERSION_REQUIRED");
   });
 
-  it("refuses a final tag until local and remote-prerelease E2E passed for the exact commit and artifacts", () => {
+  it("accepts the qualification evidence emitted by the candidate workflow", () => {
     const evidence = {
       schemaVersion: "execution.release-qualification@1.0.0",
       packageVersion: "0.1.1",
       candidateTag: "0.1.1-rc.1",
       commit: "0123456789abcdef0123456789abcdef01234567",
       artifactMetadataSha256: "sha256:" + "a".repeat(64),
-      localE2E: { status: "PASS" },
-      remotePrereleaseE2E: { status: "PASS" },
+      componentGates: { status: "PASS" },
+      remoteArtifactVerification: { status: "PASS" },
     } as const;
 
     expect(() => assertFinalPromotionEligible("0.1.1", evidence, evidence.commit, evidence.artifactMetadataSha256, evidence.candidateTag)).not.toThrow();
     expect(() => assertFinalPromotionEligible("0.1.1", {
       ...evidence,
-      remotePrereleaseE2E: { status: "FAIL" },
-    }, evidence.commit, evidence.artifactMetadataSha256)).toThrowError("REMOTE_PRERELEASE_E2E_REQUIRED");
+      remoteArtifactVerification: { status: "FAIL" },
+    }, evidence.commit, evidence.artifactMetadataSha256)).toThrowError("REMOTE_ARTIFACT_VERIFICATION_REQUIRED");
     expect(() => assertFinalPromotionEligible("0.1.1", {
       ...evidence,
-      localE2E: { status: "FAIL" },
-    }, evidence.commit, evidence.artifactMetadataSha256)).toThrowError("LOCAL_E2E_REQUIRED");
+      componentGates: { status: "FAIL" },
+    }, evidence.commit, evidence.artifactMetadataSha256)).toThrowError("COMPONENT_GATES_REQUIRED");
     expect(() => assertFinalPromotionEligible("0.1.1", {
       ...evidence,
       schemaVersion: "unknown",
@@ -65,8 +65,8 @@ describe("Execution release promotion policy", () => {
       candidateTag: "0.1.1-rc.1",
       commit,
       artifactMetadataSha256: metadataSha,
-      localE2E: { status: "PASS" },
-      remotePrereleaseE2E: { status: "PASS" },
+      componentGates: { status: "PASS" },
+      remoteArtifactVerification: { status: "PASS" },
     }));
 
     await expect(runReleasePromotionPolicy(["candidate", "0.1.1-rc.1", "0.1.1"])).resolves.toBeUndefined();
