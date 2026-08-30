@@ -10,10 +10,13 @@ export * from "./providers/provider.js";
 export * from "./providers/copilot/index.js";
 export * from "./providers/codex/index.js";
 export {
+  AgentProviderRunnerFactory,
   RunnerFactory,
   RunnerFactoryConfigurationError,
   RunnerFactorySelectionError,
   RunnerFactoryStartupError,
+  type AgentProviderRunnerFactoryConfig,
+  type AgentProviderRunnerFactoryDependencies,
   type RunnerFactoryConfig,
   type RunnerFactoryDependencies,
 } from "./composition/runner-factory.js";

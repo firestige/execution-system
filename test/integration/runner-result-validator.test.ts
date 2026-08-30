@@ -35,4 +35,33 @@ describe("Runner-fixed Invocation result validator", () => {
     expect(validates({ type: "string", minLength: 2 }, "x")).toBe(false);
     expect(validates({ oneOf: [{ type: "number" }, { minimum: 0 }] }, 1)).toBe(false);
   });
+
+  it("fails closed for every malformed recursive schema family and remaining bounded-value constraint", () => {
+    const malformedSchemas = [
+      { description: 1 },
+      { type: ["string", "string"] },
+      { type: "unsupported" },
+      { enum: [] },
+      { maxItems: -1 },
+      { maximum: Number.POSITIVE_INFINITY },
+      { pattern: 1 },
+      { required: ["duplicate", "duplicate"] },
+      { properties: [] },
+      { items: { unknownKeyword: true } },
+      { additionalProperties: { unknownKeyword: true } },
+      { allOf: [{ unknownKeyword: true }] },
+      { not: { unknownKeyword: true } },
+    ];
+    for (const schema of malformedSchemas) expect(validates(schema, {})).toBe(false);
+
+    expect(validates({ type: "string", maxLength: 1 }, "too long")).toBe(false);
+    expect(validates({ type: "string", pattern: "^ok$" }, "wrong")).toBe(false);
+    expect(validates({ type: "number", maximum: 1 }, 2)).toBe(false);
+    expect(validates({ type: "array", minItems: 2 }, [1])).toBe(false);
+    expect(validates({ type: "array", maxItems: 1 }, [1, 2])).toBe(false);
+    expect(validates({ type: "object", additionalProperties: { type: "integer" } }, { extra: "wrong" })).toBe(false);
+
+    const hostileSchema = new Proxy({}, { ownKeys() { throw new Error("hostile schema"); } });
+    expect(validates(hostileSchema, {})).toBe(false);
+  });
 });

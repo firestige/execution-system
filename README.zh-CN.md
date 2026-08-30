@@ -100,13 +100,13 @@ dsh plugin --profile web add dsh-wsr-execution@0.1.0
 |---|---|
 | Node.js | `>=24.12.0 <25` |
 | DeepSeek Harness | `0.1.1-rc.2`（`@deepseek-ai/dsh`）|
-| Workflow Package 契约 | `agentops.workflow-dsl@1.1.0` |
+| Workflow Package 契约 | `agentops.workflow-dsl@1.1.0`（历史 runner）与 `agentops.workflow-dsl@2.0.0`（多 Provider runner） |
 | 观测契约 | `agentops.observation@1.0.0` |
 | 检查点存储 | `better-sqlite3`（原生构建，经 `allowBuilds` 批准）|
 
 ## 已知限制与待办
 
-- **开发者预览** —— `0.1.x` 是面向个人与小团队可信本地使用的 MVP candidate；可能存在破坏兼容性的变更。
+- **开发者预览** —— `0.2.x` 面向个人与小团队的可信本地环境；后续仍可能发生破坏兼容性的变化。
 - **Session/Delivery 排他绑定** —— DSH Intake 只传递 private、typed、invocation-only 的精确注册会话工作区证明；Execution 推导并持久化 canonical Git worktree，Manifest/current-slot 继续作为 Delivery/worktree 的持久权威。Session、Delivery 与被占用 worktree 均不得隐式切换、共享、抢占或超时释放。
 - **观测默认关闭** —— 将 `observation.enabled` 设为 `true` 并提供 loopback OTLP base `endpoint` 即可启用 non-controlling exporter。
 - **仅 DSH 交互面** —— 发行版以自带 `web` profile 为交互组装；自定义 profile 只含 `dsh-base`，不是交互式 Intake 面。
@@ -121,11 +121,11 @@ dsh plugin --profile web add dsh-wsr-execution@0.1.0
 
 宿主无关嵌入从 package root 导入 `ExecutionApplicationFactory`、`DefaultExecutionApplicationFactory`、`ExecutionRequest`、`TaskPrompt` 与 configuration types。调用 default factory 的 `create(configFile, dependencies)` 是唯一 production bootstrap path。Exact DSH runtime 是 optional peer：package-root import/type consumer 无需安装它；执行当前 `dsh` Provider 时，embedding profile 必须提供 `@deepseek-ai/dsh@0.1.1-rc.2`。Release 包含 `config/schema/execution.config.schema.json`、versioned defaults/examples、compiled TypeScript declarations，以及 `execution-config init|copy|validate|dump-effective`。
 
-## 多 Provider 2.0 候选
+## 多 Provider 2.0
 
-`execution.config@2.0.0` 不含 installation-wide Provider 或 model default。Embedding product 通过唯一 `AgentProviderFactoryRegistry` 注册任意多个 exact、immutable Agent Provider factory；duplicate identity fail closed。每个 Agent-action Role 必须在 `<canonical-worktree>/.wsr/role-provider-bindings.json` 中显式绑定 exact Provider identity/version 与 Provider-owned model coordinate。Admission 校验 Workflow required capabilities，把 factory descriptor digest 冻结进 `execution.delivery-manifest@2.0.0`，且从不做 priority selection 或 fallback。Recovery 只接受同一 descriptor，并且只为 persisted Delivery 实际使用的 Provider 启动 realm。Machine schema 见 `config/schema/execution.config.v2.schema.json`。
+`execution.config@2.0.0` 是正式的多 Provider production path，不含 installation-wide Provider 或 model default。除非 embedding 显式传入 registry，`DefaultExecutionApplicationFactory` 会注册精确锁定的 Copilot SDK 与 Codex CLI Provider factory。每个 Agent-action Role 必须在 `<canonical-worktree>/.wsr/role-provider-bindings.json` 中显式绑定 exact Provider identity/version 与 Provider-owned model coordinate。Admission 校验 Workflow required capabilities，把 factory descriptor digest 冻结进 `execution.delivery-manifest@2.0.0`，且从不做 priority selection 或 fallback。Recovery 只接受同一 descriptor，并且只为 persisted Delivery 实际使用的 Provider 启动 realm。Machine schema 见 `config/schema/execution.config.v2.schema.json`。
 
-Package root 导出的 `createCopilotAgentProviderFactory()` 注册 `provider.copilot@1.0.78`。它从 exact `@github/copilot@1.0.78` platform payload 导入 bundled SDK，通过 SDK 复用本机已登录用户，且不向 embedding host 请求 token material。每个 Delivery realm 只接纳已为 Role 冻结的 `github-copilot` model coordinate，在 canonical worktree 内以 Action allowlist tools 运行 session；runtime、登录、model、恢复或 binding 发生漂移时一律 fail closed。
+默认 Copilot factory 注册 `provider.copilot@1.0.78`，通过精确锁定的 SDK 复用本机登录；默认 Codex factory 注册 `provider.codex@0.144.5`，复用 Codex CLI 的本机登录状态。两条路径都不会向 embedding host 索取 token material。每个 Delivery realm 只接纳已为 Role 冻结的 model coordinate；runtime、登录、model、恢复或 binding 发生漂移时一律 fail closed。
 
 ## 获取源码
 

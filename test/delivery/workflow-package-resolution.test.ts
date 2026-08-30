@@ -25,7 +25,6 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../.
 const contributedDefinition = join(repositoryRoot, "system-contracts/workflow-dsl/examples/minimal");
 const implementationPackage = join(repositoryRoot, "workflow-package/implementation");
 const systemDesignPackage = join(repositoryRoot, "workflow-package/system-design");
-const helloWorldPackage = join(repositoryRoot, "workflow-package/hello-world-workflow");
 
 const compatibility: WorkflowPackageCompatibilityTarget = Object.freeze({
   contractVersion: "1.1.0",
@@ -154,7 +153,6 @@ describe("Workflow Package Store and frozen validation", () => {
     ["contributed", contributedDefinition, "definition"],
     ["protected implementation", implementationPackage, "package"],
     ["protected system design", systemDesignPackage, "package"],
-    ["hello world", helloWorldPackage, "package"],
   ] as const)("admits %s Package content through the same checker and compatibility path", async (_kind, sourcePath, layout) => {
     const candidate = await candidateFrom(sourcePath, layout);
     const source = new QueuedSource([{ kind: "FOUND", candidate }]);

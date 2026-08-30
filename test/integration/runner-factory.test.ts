@@ -5,7 +5,16 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RunnerFactory, type RunnerFactoryConfig } from "../../src/index.js";
+import {
+  AgentProviderRunnerFactory,
+  canonicalDigest,
+  RunnerFactory,
+  type AgentProviderRunnerFactoryConfig,
+  type AgentProviderSessionOpenRequest,
+  type AgentProviderSessionFactory,
+  type RunnerFactoryConfig,
+} from "../../src/index.js";
+import { mutatedRunnerActivation } from "../support/runner-activation-fixtures.js";
 
 const roots: string[] = [];
 
@@ -146,5 +155,150 @@ describe("RunnerFactory", () => {
     await expect(factory.create(config, dependencies)).rejects.toMatchObject({
       code: "RUNNER_FACTORY_STARTUP_FAILED",
     });
+  });
+});
+
+describe("AgentProviderRunnerFactory", () => {
+  it("rejects empty, unknown, accessor-backed, and mutable Provider dependencies before realm acquisition", async () => {
+    const historical = await fixtureConfig();
+    const config: AgentProviderRunnerFactoryConfig = Object.freeze({
+      schemaVersion: "runner.factory@2.0.0",
+      stateDirectory: historical.stateDirectory,
+      custody: historical.custody,
+      invocation: historical.invocation,
+      host: historical.host,
+      implementationIdentity: "implementation.runner.langgraph-agent-providers",
+    });
+    let acquisitions = 0;
+    const provider: AgentProviderSessionFactory = Object.freeze({
+      async open() { acquisitions += 1; throw new Error("must not acquire"); },
+      async restore() { acquisitions += 1; throw new Error("must not restore"); },
+    });
+    const owner = Object.freeze({ async dispose() {} });
+    const accessorCatalog = Object.freeze(Object.defineProperty({}, "codex-cli", {
+      enumerable: true,
+      get() { acquisitions += 1; return provider; },
+    }));
+    const cases = [
+      Object.freeze({ ...dependencies, providerSessions: Object.freeze({}), providerOwner: owner }),
+      Object.freeze({ ...dependencies, providerSessions: Object.freeze({ unknown: provider }), providerOwner: owner }),
+      Object.freeze({ ...dependencies, providerSessions: accessorCatalog, providerOwner: owner }),
+      Object.freeze({ ...dependencies, providerSessions: Object.freeze({ "codex-cli": provider }), providerOwner: { async dispose() {} } }),
+    ];
+
+    for (const candidate of cases) {
+      await expect(new AgentProviderRunnerFactory().create(config, candidate as never)).rejects.toMatchObject({
+        code: "RUNNER_FACTORY_CONFIGURATION_INVALID",
+      });
+    }
+    expect(acquisitions).toBe(0);
+  });
+
+  it("releases the shared Provider owner when v2 host startup fails before publishing an adapter", async () => {
+    const historical = await fixtureConfig();
+    const checkpointBlocker = path.join(path.dirname(historical.host.checkpointDirectory), "checkpoint-blocker");
+    await writeFile(checkpointBlocker, "not a directory", "utf8");
+    const config: AgentProviderRunnerFactoryConfig = Object.freeze({
+      schemaVersion: "runner.factory@2.0.0",
+      stateDirectory: historical.stateDirectory,
+      custody: historical.custody,
+      invocation: historical.invocation,
+      host: Object.freeze({ engine: "langgraph", checkpointDirectory: path.join(checkpointBlocker, "checkpoints") }),
+      implementationIdentity: "implementation.runner.langgraph-agent-providers",
+    });
+    const provider: AgentProviderSessionFactory = Object.freeze({
+      async open() { throw new Error("not reached"); },
+      async restore() { throw new Error("not reached"); },
+    });
+    let ownerDisposals = 0;
+
+    await expect(new AgentProviderRunnerFactory().create(config, Object.freeze({
+      ...dependencies,
+      providerSessions: Object.freeze({ "codex-cli": provider }),
+      providerOwner: Object.freeze({ async dispose() { ownerDisposals += 1; } }),
+    }))).rejects.toMatchObject({ code: "RUNNER_FACTORY_STARTUP_FAILED" });
+    expect(ownerDisposals).toBe(1);
+  });
+
+  it("runs one Delivery through two exact Role-owned Provider realms and releases their shared owner", async () => {
+    const historical = await fixtureConfig();
+    const config: AgentProviderRunnerFactoryConfig = Object.freeze({
+      schemaVersion: "runner.factory@2.0.0",
+      stateDirectory: historical.stateDirectory,
+      custody: historical.custody,
+      invocation: historical.invocation,
+      host: historical.host,
+      implementationIdentity: "implementation.runner.langgraph-agent-providers",
+    });
+    const openedRoles: string[] = [];
+    const provider = (identity: "copilot-sdk" | "codex-cli"): AgentProviderSessionFactory => Object.freeze({
+      async open({ dispatch }: AgentProviderSessionOpenRequest) {
+        openedRoles.push(`${identity}:${dispatch.executor.session.roleIdentity}`);
+        return Object.freeze({
+          opaqueIdentity: `${identity}:${dispatch.executor.session.roleIdentity}`,
+          async run() { return Object.freeze([{ kind: "structured-completion" as const, result: Object.freeze({}) }]); },
+          async persist() {},
+          async cancel() {},
+          async dispose() {},
+        });
+      },
+      async restore() { throw new Error("not used"); },
+    });
+    let ownerDisposals = 0;
+    const factory = new AgentProviderRunnerFactory();
+    const activation = mutatedRunnerActivation((draft) => {
+      const first = structuredClone(draft.program.execution.agents["executor.fixture"]);
+      first.identity = "executor.copilot";
+      first.session.roleIdentity = "role.copilot";
+      first.session.driver.providerIdentity = "copilot-sdk";
+      first.turn.access = [{ mode: "read", path: "README.md" }];
+      first.sessionCompatibilityIdentity = canonicalDigest(first.session);
+      first.bindingIdentity = canonicalDigest({ session: first.session, turn: first.turn });
+      const second = structuredClone(first);
+      second.identity = "executor.codex";
+      second.session.roleIdentity = "role.codex";
+      second.session.driver.providerIdentity = "codex-cli";
+      second.sessionCompatibilityIdentity = canonicalDigest(second.session);
+      second.bindingIdentity = canonicalDigest({ session: second.session, turn: second.turn });
+      draft.program.control.nodes = [
+        { id: "node.copilot", kind: "action", action: "action.copilot" },
+        { id: "node.codex", kind: "action", action: "action.codex" },
+      ];
+      draft.program.control.entryNode = "node.copilot";
+      draft.program.control.ordinarySuccessor = [
+        { id: "edge.codex", from: "node.copilot", to: "node.codex" },
+        { id: "edge.done", from: "node.codex", to: "terminal.success" },
+      ];
+      draft.program.execution.actions = {
+        "action.copilot": { identity: "action.copilot", purpose: "copilot", inputSchema: { kind: "ABSENT" }, resultSchema: {}, gate: { freeTextBypass: "prohibited" } },
+        "action.codex": { identity: "action.codex", purpose: "codex", inputSchema: { kind: "ABSENT" }, resultSchema: {}, gate: { freeTextBypass: "prohibited" } },
+      };
+      draft.program.execution.sites = [
+        { site: { kind: "node", nodeIdentity: "node.copilot" }, actionIdentity: "action.copilot", executor: { kind: "agent", identity: "executor.copilot", requiredCapabilities: ["structured-completion"] } },
+        { site: { kind: "node", nodeIdentity: "node.codex" }, actionIdentity: "action.codex", executor: { kind: "agent", identity: "executor.codex", requiredCapabilities: ["structured-completion"] } },
+      ];
+      draft.program.execution.agents = { "executor.copilot": first, "executor.codex": second };
+      draft.initial.state.values = { input: {} };
+      draft.initial.state.identity = canonicalDigest({ manifest: draft.correlation.manifestBindingIdentity, state: draft.initial.state.values });
+      draft.program.dataflow.edges = [
+        { source: { kind: "state", field: "input" }, target: { kind: "site-input", site: { kind: "node", nodeIdentity: "node.copilot" }, slot: { kind: "whole" } } },
+        { source: { kind: "site-result", site: { kind: "node", nodeIdentity: "node.copilot" }, slot: { kind: "whole" } }, target: { kind: "site-input", site: { kind: "node", nodeIdentity: "node.codex" }, slot: { kind: "whole" } } },
+      ];
+      draft.initial.workspace.canonicalWorktreePath = historical.custody.publication.repositoryPath;
+      draft.initial.workspace.admittedGitTree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: historical.custody.publication.repositoryPath, encoding: "utf8" }).trim();
+    });
+
+    const adapter = await factory.create(config, Object.freeze({
+      ...dependencies,
+      providerSessions: Object.freeze({ "copilot-sdk": provider("copilot-sdk"), "codex-cli": provider("codex-cli") }),
+      providerOwner: Object.freeze({ async dispose() { ownerDisposals += 1; } }),
+    }));
+    const result = await adapter.execute({ interfaceVersion: "execution.runtime-adapter@1.0.0", activation });
+
+    expect(result, JSON.stringify({ result, openedRoles })).toMatchObject({ ok: true, value: { kind: "terminal", outcome: "COMPLETED" } });
+    expect(openedRoles).toEqual(["copilot-sdk:role.copilot", "codex-cli:role.codex"]);
+    await factory.dispose(adapter);
+    await factory.dispose(adapter);
+    expect(ownerDisposals).toBe(1);
   });
 });

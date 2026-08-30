@@ -58,7 +58,7 @@ export interface AdmittedArtifactVersionRef { readonly artifactIdentity: Artifac
 export interface AdmittedArtifactManifest { readonly identity: Sha256; readonly versions: Readonly<Record<ArtifactId, AdmittedArtifactVersionRef | Absent>> }
 export interface AdmittedWorkspace { readonly identity: WorkspaceId; readonly canonicalWorktreePath: AbsolutePath; readonly admittedGitTree: GitTreeId }
 export interface AdmittedInitialData { readonly state: FrozenWorkflowState; readonly artifacts: AdmittedArtifactManifest; readonly workspace: AdmittedWorkspace }
-export interface AdmissionBinding { readonly contractRevision: ContractRevision; readonly authorityMergeIdentity: Sha256; readonly deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0" }
+export interface AdmissionBinding { readonly contractRevision: ContractRevision; readonly authorityMergeIdentity: Sha256; readonly deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0" | "agentops.delivery-admission@2.0.0" }
 
 export interface AdmittedControlGraph {
   readonly entryNode: import("./primitives.js").NodeId;

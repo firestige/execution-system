@@ -19,7 +19,12 @@ import type { HostOperationHandler } from "../host/workflow-host-adapter-factory
 import { FileInvocationJournalStore } from "../invocation/journal.js";
 import { createManagedInvocation, type InvocationResultValidator } from "../invocation/managed-invocation.js";
 import { DshProviderAdapterFactory, type DshProviderAdapterConfiguration } from "../providers/dsh/index.js";
-import type { ProviderAdapter } from "../providers/provider.js";
+import type {
+  AgentProviderSessionFactory,
+  CredentialLeaseBroker,
+  ProviderAdapter,
+  ProviderAdapterKey,
+} from "../providers/provider.js";
 import type { RunnerObservationPort, RunnerStartCorrelationPort } from "../coordinator/runner-coordinator.js";
 import { createExecutionRuntimeAdapter } from "./create-execution-runtime-adapter.js";
 
@@ -43,6 +48,15 @@ export interface RunnerFactoryConfig {
   readonly implementationIdentity: string;
 }
 
+export interface AgentProviderRunnerFactoryConfig {
+  readonly schemaVersion: "runner.factory@2.0.0";
+  readonly stateDirectory: string;
+  readonly custody: RunnerFactoryConfig["custody"];
+  readonly invocation: RunnerFactoryConfig["invocation"];
+  readonly host: RunnerFactoryConfig["host"];
+  readonly implementationIdentity: string;
+}
+
 export interface RunnerFactoryDependencies {
   readonly interaction: ActionInteractionBridge;
   readonly workflow: WorkflowControlBridge;
@@ -52,6 +66,11 @@ export interface RunnerFactoryDependencies {
   readonly activity?: Readonly<{
     track(request: Readonly<{ deliveryId: string; actionIdentity?: string; site?: import("../contracts/index.js").ExecutionSiteRef }>): () => void;
   }>;
+}
+
+export interface AgentProviderRunnerFactoryDependencies extends RunnerFactoryDependencies {
+  readonly providerSessions: Readonly<Partial<Record<ProviderAdapterKey, AgentProviderSessionFactory>>>;
+  readonly providerOwner: Readonly<{ dispose(): Promise<void> }>;
 }
 
 export class RunnerFactorySelectionError extends Error {
@@ -160,6 +179,27 @@ function admitConfiguration(candidate: RunnerFactoryConfig): RunnerFactoryConfig
     || !absolute(providerConfiguration.workspaceDirectory) || !absolute(providerConfiguration.sessionStorageDirectory)
     || !absolute(credentialStore.path) || credentialStore.watch !== false
     || !Number.isSafeInteger(providerConfiguration.maxParallelToolCalls) || (providerConfiguration.maxParallelToolCalls as number) < 1
+    || !absolute(invocation.journalDirectory) || host.engine !== "langgraph" || !absolute(host.checkpointDirectory)
+    || typeof root.implementationIdentity !== "string" || root.implementationIdentity.length === 0) {
+    throw new RunnerFactoryConfigurationError();
+  }
+  return candidate;
+}
+
+function admitAgentProviderConfiguration(candidate: AgentProviderRunnerFactoryConfig): AgentProviderRunnerFactoryConfig {
+  if (!Object.isFrozen(candidate)) throw new RunnerFactoryConfigurationError();
+  const root = exactData(candidate, ["schemaVersion", "stateDirectory", "custody", "invocation", "host", "implementationIdentity"]);
+  const custody = exactData(root?.custody, ["recordsDirectory", "publication"]);
+  const publication = exactData(custody?.publication, ["targetIdentity", "repositoryPath", "ref"]);
+  const invocation = exactData(root?.invocation, ["journalDirectory"]);
+  const host = exactData(root?.host, ["engine", "checkpointDirectory"]);
+  const nested = [root?.custody, custody?.publication, root?.invocation, root?.host];
+  if (root === undefined || custody === undefined || publication === undefined || invocation === undefined || host === undefined
+    || nested.some((value) => value === undefined || !Object.isFrozen(value))
+    || root.schemaVersion !== "runner.factory@2.0.0"
+    || !absolute(root.stateDirectory) || !absolute(custody.recordsDirectory)
+    || typeof publication.targetIdentity !== "string" || publication.targetIdentity.length === 0
+    || !absolute(publication.repositoryPath) || typeof publication.ref !== "string" || !publication.ref.startsWith("refs/")
     || !absolute(invocation.journalDirectory) || host.engine !== "langgraph" || !absolute(host.checkpointDirectory)
     || typeof root.implementationIdentity !== "string" || root.implementationIdentity.length === 0) {
     throw new RunnerFactoryConfigurationError();
@@ -322,6 +362,49 @@ function custodyFacade(custody: HostCustody): HostCustody {
   });
 }
 
+const EMPTY_CREDENTIALS: CredentialLeaseBroker = Object.freeze({
+  async acquire() {
+    return Object.freeze({ material: Object.freeze({}), async release() {} });
+  },
+});
+
+function admitAgentProviderDependencies(candidate: AgentProviderRunnerFactoryDependencies): Readonly<{
+  runner: RunnerFactoryDependencies;
+  providerSessions: Readonly<Partial<Record<ProviderAdapterKey, AgentProviderSessionFactory>>>;
+  providerOwner: Readonly<{ dispose(): Promise<void> }>;
+}> {
+  if (!Object.isFrozen(candidate)) throw new RunnerFactoryConfigurationError("Runner factory dependencies are not exact and immutable");
+  const { providerSessions, providerOwner, ...runnerCandidate } = candidate;
+  const runner = admitDependencies(Object.freeze(runnerCandidate) as RunnerFactoryDependencies);
+  if (!Object.isFrozen(providerSessions) || providerSessions === null || typeof providerSessions !== "object" || Array.isArray(providerSessions)) {
+    throw new RunnerFactoryConfigurationError("Agent Provider session catalog is not exact and immutable");
+  }
+  const allowed = new Set<ProviderAdapterKey>(["dsh-headless", "copilot-sdk", "codex-cli"]);
+  const captured: Partial<Record<ProviderAdapterKey, AgentProviderSessionFactory>> = {};
+  for (const key of Reflect.ownKeys(providerSessions)) {
+    if (typeof key !== "string" || !allowed.has(key as ProviderAdapterKey)) {
+      throw new RunnerFactoryConfigurationError("Agent Provider session catalog is not exact and immutable");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(providerSessions, key);
+    const methods = descriptor !== undefined && "value" in descriptor ? exactMethods(descriptor.value, ["open", "restore"]) : undefined;
+    if (methods === undefined) throw new RunnerFactoryConfigurationError("Agent Provider session catalog is not exact and immutable");
+    captured[key as ProviderAdapterKey] = Object.freeze({
+      open: methods.open as AgentProviderSessionFactory["open"],
+      restore: methods.restore as AgentProviderSessionFactory["restore"],
+    });
+  }
+  if (Object.keys(captured).length === 0) throw new RunnerFactoryConfigurationError("Agent Provider session catalog is empty");
+  const owner = exactMethods(providerOwner, ["dispose"]);
+  if (owner === undefined || !Object.isFrozen(providerOwner)) {
+    throw new RunnerFactoryConfigurationError("Agent Provider owner is not exact and immutable");
+  }
+  return Object.freeze({
+    runner,
+    providerSessions: Object.freeze(captured),
+    providerOwner: Object.freeze({ dispose: owner.dispose as () => Promise<void> }),
+  });
+}
+
 export class RunnerFactory {
   readonly #historicalDshProvider = new DshProviderAdapterFactory();
   readonly #resources = new WeakMap<ExecutionRuntimeAdapter, { provider: ProviderAdapter; disposed: boolean }>();
@@ -383,6 +466,68 @@ export class RunnerFactory {
     if (resources === undefined || resources.disposed) return;
     resources.disposed = true;
     await resources.provider.dispose();
+    this.#resources.delete(adapter);
+  }
+}
+
+/** Runner assembly for Delivery-scoped Provider realms. Provider authentication remains realm-owned. */
+export class AgentProviderRunnerFactory {
+  readonly #resources = new WeakMap<ExecutionRuntimeAdapter, { owner: Readonly<{ dispose(): Promise<void> }>; disposed: boolean }>();
+
+  async create(candidate: AgentProviderRunnerFactoryConfig, dependencies: AgentProviderRunnerFactoryDependencies): Promise<ExecutionRuntimeAdapter> {
+    const config = admitAgentProviderConfiguration(candidate);
+    const admitted = admitAgentProviderDependencies(dependencies);
+    try {
+      const journal = new FileInvocationJournalStore(config.invocation.journalDirectory);
+      const invocation = createManagedInvocation({
+        providers: admitted.providerSessions as Readonly<Record<string, AgentProviderSessionFactory>>,
+        credentials: EMPTY_CREDENTIALS,
+        journal,
+        resultValidator: RUNNER_INVOCATION_RESULT_VALIDATOR,
+      });
+      const publicationTarget = Object.freeze({ identity: config.custody.publication.targetIdentity }) as PublicationTargetRef;
+      const custody = createGitCustody({
+        recordsDirectory: config.custody.recordsDirectory as AbsolutePath,
+        publicationTargets: Object.freeze([Object.freeze({
+          target: publicationTarget,
+          repositoryPath: config.custody.publication.repositoryPath as AbsolutePath,
+          ref: config.custody.publication.ref,
+        })]),
+      });
+      const host = await new LangGraphWorkflowHostAdapterFactory().create(
+        config.host,
+        Object.freeze({
+          invocation: invocationFacade(invocation.host, admitted.runner.activity),
+          custody: custodyFacade(custody),
+          hostOperations: admitted.runner.hostOperations,
+        }),
+      );
+      const adapter = createExecutionRuntimeAdapter({
+        stateDirectory: config.stateDirectory,
+        host,
+        invocation: invocation.control,
+        custody,
+        interaction: admitted.runner.interaction,
+        workflow: admitted.runner.workflow,
+        observation: admitted.runner.observation,
+        startCorrelation: admitted.runner.startCorrelation,
+        publicationTarget,
+        implementationIdentity: config.implementationIdentity as ImplementationId,
+      });
+      this.#resources.set(adapter, { owner: admitted.providerOwner, disposed: false });
+      return adapter;
+    } catch (cause) {
+      await admitted.providerOwner.dispose().catch(() => undefined);
+      if (cause instanceof RunnerFactoryConfigurationError) throw cause;
+      throw new RunnerFactoryStartupError(cause);
+    }
+  }
+
+  async dispose(adapter: ExecutionRuntimeAdapter): Promise<void> {
+    const resources = this.#resources.get(adapter);
+    if (resources === undefined || resources.disposed) return;
+    resources.disposed = true;
+    await resources.owner.dispose();
     this.#resources.delete(adapter);
   }
 }

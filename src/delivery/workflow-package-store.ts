@@ -153,7 +153,10 @@ export class WorkflowPackageStore {
     const localPath = join(destination, "material", relativePackagePath);
     const ready: ReadyRecord = Object.freeze({
       schemaVersion: "execution.workflow-package-ready@1.0.0",
-      ...validated,
+      name: validated.name,
+      exactVersion: validated.exactVersion,
+      packageDigest: validated.packageDigest,
+      workflowId: validated.workflowId,
       localPath,
       relativePackagePath,
     });

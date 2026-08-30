@@ -1,6 +1,8 @@
 import type { ExecutionFailure, ExecutionResult } from "../application/execution-application.js";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { join } from "node:path";
 import type { AttachmentContentPort, ClockPort, DisabledObservationSink, IdPort, OwnerFact, OwnerFactIngress } from "../bootstrap/contracts.js";
-import { deepFreeze, type DeliveryConfigProjection } from "../configuration/index.js";
+import { deepFreeze, type DeliveryConfigProjection, type DeliveryConfigProjectionV2 } from "../configuration/index.js";
 import type { RunnerActivationContext } from "../contracts/index.js";
 import type { RunnerStartCorrelationFact, RunnerStartCorrelationPort } from "../coordinator/runner-coordinator.js";
 import type { ExecutionPrebindingReady } from "../core/execution-core.js";
@@ -14,21 +16,27 @@ import {
   type DeliveryManifestRepository,
   discardTaskPromptSnapshot,
 } from "./manifest.js";
+import { createDeliveryManifestV2, type DeliveryManifestRepositoryV2, type DeliveryManifestV2 } from "./manifest-v2.js";
+import { loadRepositoryModelBindings } from "./repository-model-bindings.js";
+import { resolveRoleModelBindings, type AgentProviderAdmissionRegistry } from "./resolved-role-model-bindings.js";
+import { extractWorkflowV2RoleSnapshot } from "./workflow-v2-role-snapshot.js";
 import type { WorkflowPackageResolver, WorkflowPackageResolutionResult } from "./workflow-package-resolver.js";
 
+export type ProductionDeliveryManifest = DeliveryManifest | DeliveryManifestV2;
+
 export interface DeliveryActivationProjector {
-  project(manifest: DeliveryManifest): Promise<RunnerActivationContext>;
+  project(manifest: ProductionDeliveryManifest): Promise<RunnerActivationContext>;
 }
 
 export interface DeliveryRuntimeFactoryInput {
-  readonly manifest: DeliveryManifest;
+  readonly manifest: ProductionDeliveryManifest;
   readonly activation: RunnerActivationContext;
   readonly ownerFacts: OwnerFactIngress;
   readonly startCorrelation: RunnerStartCorrelationPort;
 }
 
 export interface DeliveryRuntimeFactory {
-  ownerFacts?(manifest: DeliveryManifest, activation: RunnerActivationContext): OwnerFactIngress;
+  ownerFacts?(manifest: ProductionDeliveryManifest, activation: RunnerActivationContext): OwnerFactIngress;
   create(input: DeliveryRuntimeFactoryInput): Promise<ExecutionRuntimeAdapter>;
 }
 
@@ -45,8 +53,14 @@ export interface DeliveryLifecycleOptions {
   readonly ids: IdPort;
   readonly invalidations?: Readonly<{ publish(): void }>;
   readonly completed?: Readonly<{
-    publish(manifest: DeliveryManifest, terminal: Readonly<{ outcome: "SUCCEEDED" | "FAILED" | "CANCELLED"; finishedAt: number }>, error: Readonly<{ code: string }> | null): Promise<void>;
+    publish(manifest: ProductionDeliveryManifest, terminal: Readonly<{ outcome: "SUCCEEDED" | "FAILED" | "CANCELLED"; finishedAt: number }>, error: Readonly<{ code: string }> | null): Promise<void>;
   }>;
+}
+
+export interface DeliveryLifecycleOptionsV2 extends Omit<DeliveryLifecycleOptions, "manifests"> {
+  readonly manifestVersion: "2.0.0";
+  readonly manifests: DeliveryManifestRepositoryV2;
+  readonly agentProviders: AgentProviderAdmissionRegistry;
 }
 
 export const DISABLED_DELIVERY_OBSERVATION_SINK: DisabledObservationSink = Object.freeze({
@@ -67,6 +81,30 @@ function projectionFrom(ready: ExecutionPrebindingReady): DeliveryConfigProjecti
     value: ready.command.deliveryConfigProjection,
     identity: ready.command.deliveryConfigProjectionIdentity,
   }) as DeliveryConfigProjection;
+}
+
+function projectionFromV2(ready: ExecutionPrebindingReady): DeliveryConfigProjectionV2 {
+  return deepFreeze({ value: ready.command.deliveryConfigProjection, identity: ready.command.deliveryConfigProjectionIdentity }) as DeliveryConfigProjectionV2;
+}
+
+function packageBinding(manifest: ProductionDeliveryManifest): Readonly<{ name: string; exactVersion: string; packageDigest: string; localPath: string; workflowId: string }> {
+  return manifest.schemaVersion === "execution.delivery-manifest@2.0.0"
+    ? { name: manifest.workflowPackage.name, exactVersion: manifest.workflowPackage.exactVersion, packageDigest: manifest.workflowPackage.packageDigest, localPath: manifest.workflowPackage.localMaterializationPath, workflowId: manifest.workflowSnapshot.workflowId }
+    : manifest.resolvedPackage;
+}
+
+async function workflowV2Snapshot(localPath: string) {
+  const material = await realpath(localPath);
+  const definition = await stat(join(material, "package.json")).then((value) => value.isFile() ? material : join(material, "definition")).catch(() => join(material, "definition"));
+  const json = async (name: string) => JSON.parse(await readFile(join(definition, name), "utf8")) as unknown;
+  const pkg = await json("package.json") as Record<string, any>;
+  return extractWorkflowV2RoleSnapshot({
+    packageDocument: pkg,
+    snapshotDocument: await json("snapshot.json"),
+    actionsDocument: await json(String(pkg.documents.actions)),
+    rolesDocument: await json(String(pkg.documents.roles)),
+    routesDocument: await json(String(pkg.documents.routes)),
+  });
 }
 
 function exactDelivery(activation: RunnerActivationContext) {
@@ -147,9 +185,9 @@ function resultCarriesExactDelivery(value: unknown, activation: RunnerActivation
 }
 
 export class DeliveryLifecycleService {
-  readonly #options: DeliveryLifecycleOptions;
+  readonly #options: DeliveryLifecycleOptions | DeliveryLifecycleOptionsV2;
   readonly #ownerFacts: OwnerFactIngress;
-  constructor(options: DeliveryLifecycleOptions) {
+  constructor(options: DeliveryLifecycleOptions | DeliveryLifecycleOptionsV2) {
     this.#options = options;
     this.#ownerFacts = Object.freeze({ emit: (fact: OwnerFact) => safeEmit(options.ownerFacts, fact) });
   }
@@ -158,7 +196,7 @@ export class DeliveryLifecycleService {
     try { this.#options.invalidations?.publish(); } catch { /* Read models are non-controlling. */ }
   }
 
-  async #publishCompleted(manifest: DeliveryManifest, outcome: "SUCCEEDED" | "FAILED" | "CANCELLED", finishedAt: number, error: Readonly<{ code: string }> | null): Promise<void> {
+  async #publishCompleted(manifest: ProductionDeliveryManifest, outcome: "SUCCEEDED" | "FAILED" | "CANCELLED", finishedAt: number, error: Readonly<{ code: string }> | null): Promise<void> {
     await this.#options.completed?.publish(manifest, Object.freeze({ outcome, finishedAt }), error).catch(() => undefined);
     this.#publishChange();
   }
@@ -193,18 +231,30 @@ export class DeliveryLifecycleService {
       return failure("DELIVERY_BINDING_FAILED");
     }
 
-    let manifest: DeliveryManifest;
+    let manifest: ProductionDeliveryManifest;
     try {
-      manifest = createDeliveryManifest({
-        deliveryId,
-        taskId,
-        ...(taskDisplayName === undefined ? {} : { taskDisplayName }),
-        createdAt: this.#options.clock.now(),
-        canonicalWorktree: ready.command.canonicalWorktree,
-        resolvedPackage: resolved.value,
-        promptSnapshot: snapshot,
-        deliveryConfigProjection: projectionFrom(ready),
-      });
+      if ("manifestVersion" in this.#options) {
+        const extracted = await workflowV2Snapshot(resolved.value.localPath);
+        const repositoryModelBindings = await loadRepositoryModelBindings(ready.command.canonicalWorktree);
+        const resolvedRoleBindings = resolveRoleModelBindings({ registry: this.#options.agentProviders, repository: repositoryModelBindings, agentActionRoles: extracted.agentActionRoles });
+        manifest = createDeliveryManifestV2({
+          deliveryId, taskId, ...(taskDisplayName === undefined ? {} : { taskDisplayName }), createdAt: this.#options.clock.now(),
+          canonicalWorktree: ready.command.canonicalWorktree,
+          workflowPackage: { name: resolved.value.name, exactVersion: resolved.value.exactVersion, packageDigest: resolved.value.packageDigest, localMaterializationPath: resolved.value.localPath },
+          workflowSnapshot: extracted.workflowSnapshot,
+          agentActionRoles: extracted.agentActionRoles,
+          repositoryModelBindings,
+          resolvedRoleBindings,
+          promptSnapshot: snapshot,
+          deliveryConfigProjection: projectionFromV2(ready),
+        });
+      } else {
+        manifest = createDeliveryManifest({
+          deliveryId, taskId, ...(taskDisplayName === undefined ? {} : { taskDisplayName }), createdAt: this.#options.clock.now(),
+          canonicalWorktree: ready.command.canonicalWorktree, resolvedPackage: resolved.value, promptSnapshot: snapshot,
+          deliveryConfigProjection: projectionFrom(ready),
+        });
+      }
     } catch {
       await ready.holder.release();
       return failure("DELIVERY_BINDING_FAILED");
@@ -212,7 +262,11 @@ export class DeliveryLifecycleService {
 
     let persisted;
     try {
-      persisted = await this.#options.manifests.persist(manifest);
+      const manifests = this.#options.manifests as unknown as Readonly<{
+        persist(value: ProductionDeliveryManifest): Promise<Readonly<{ path: string }>>;
+        discard(path: string): Promise<void>;
+      }>;
+      persisted = await manifests.persist(manifest);
       await ready.holder.persistBinding({
         deliveryId,
         manifestPath: persisted.path,
@@ -231,10 +285,10 @@ export class DeliveryLifecycleService {
           ? {}
           : { taskDisplayName: manifest.taskDisplayName }),
         deliveryBindingIdentity: manifest.deliveryBindingIdentity,
-        workflowIdentity: manifest.resolvedPackage.workflowId,
+        workflowIdentity: packageBinding(manifest).workflowId,
       });
     } catch {
-      if (persisted !== undefined) await this.#options.manifests.discard(persisted.path).catch(() => undefined);
+      if (persisted !== undefined) await (this.#options.manifests as unknown as Readonly<{ discard(path: string): Promise<void> }>).discard(persisted.path).catch(() => undefined);
       await ready.holder.release().catch(() => undefined);
       return failure("DELIVERY_CREATE_FAILED");
     }
@@ -242,7 +296,7 @@ export class DeliveryLifecycleService {
   }
 
   async recover(slot: OccupiedCurrentSlot): Promise<ExecutionResult> {
-    let manifest: DeliveryManifest;
+    let manifest: ProductionDeliveryManifest;
     try {
       manifest = await this.#options.manifests.load(slot.manifestPath);
       if (manifest.deliveryId !== slot.deliveryId || manifest.canonicalWorktree !== slot.worktree
@@ -260,7 +314,7 @@ export class DeliveryLifecycleService {
         ? {}
         : { taskDisplayName: manifest.taskDisplayName }),
       deliveryBindingIdentity: manifest.deliveryBindingIdentity,
-      workflowIdentity: manifest.resolvedPackage.workflowId,
+      workflowIdentity: packageBinding(manifest).workflowId,
     });
     if (slot.state === "START_FAILED") {
       const finishedAt = this.#options.clock.now();
@@ -292,13 +346,13 @@ export class DeliveryLifecycleService {
     }
   }
 
-  async #start(manifest: DeliveryManifest, initialState: OccupiedCurrentSlot["state"]): Promise<ExecutionResult> {
+  async #start(manifest: ProductionDeliveryManifest, initialState: OccupiedCurrentSlot["state"]): Promise<ExecutionResult> {
     let activation: RunnerActivationContext;
     try { activation = await this.#options.projector.project(manifest); }
     catch { return failure("DELIVERY_BINDING_FAILED"); }
     if (!Object.isFrozen(activation) || activation.correlation.manifestBindingIdentity !== manifest.deliveryBindingIdentity
       || activation.correlation.deliveryIdentity !== manifest.deliveryId
-      || activation.correlation.packageDigest !== manifest.resolvedPackage.packageDigest) return failure("DELIVERY_BINDING_FAILED");
+      || activation.correlation.packageDigest !== packageBinding(manifest).packageDigest) return failure("DELIVERY_BINDING_FAILED");
     let state = initialState;
     const ownerFacts = this.#options.runtime.ownerFacts?.(manifest, activation) ?? this.#ownerFacts;
     const startCorrelation: RunnerStartCorrelationPort = Object.freeze({
@@ -340,7 +394,7 @@ export class DeliveryLifecycleService {
   }
 
   async #handleRuntimeResult(
-    manifest: DeliveryManifest,
+    manifest: ProductionDeliveryManifest,
     activation: RunnerActivationContext,
     state: OccupiedCurrentSlot["state"],
     result: ExecutionRuntimeResult,

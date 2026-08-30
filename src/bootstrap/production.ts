@@ -1,8 +1,16 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { ExecutionApplication, ExecutionFailure, ExecutionRequest, ExecutionResult, TaskPrompt } from "../application/execution-application.js";
-import { RunnerFactory, type RunnerFactoryConfig } from "../composition/runner-factory.js";
+import { AgentProviderRunnerFactory, RunnerFactory, type AgentProviderRunnerFactoryConfig, type RunnerFactoryConfig } from "../composition/runner-factory.js";
+import {
+  AgentProviderFactoryRegistry,
+  DeliveryAgentProviderRealmBroker,
+  createDefaultProductionAgentProviderFactories,
+  type AgentProviderRealmFactory,
+  type ProviderAdapterKey,
+} from "../composition/agent-provider-production.js";
 import { canonicalDigest, type FrozenJsonValue, type RunnerActivationContext } from "../contracts/index.js";
 import { createExecutionEnvironment, type ConversationWorkspaceAuthorization } from "../core/request.js";
 import { ExecutionCoreAdmission } from "../core/execution-core.js";
@@ -12,14 +20,18 @@ import {
   DeliveryAdmissionService,
   DeliveryLifecycleService,
   DeliveryManifestRepository,
+  DeliveryManifestRepositoryV2,
   DeliveryRecoveryService,
   FrozenWorkflowPackageValidator,
+  FrozenWorkflowPackageValidatorV2,
   WorkflowPackageResolver,
   WorkflowPackageSourceRegistry,
   WorkflowPackageStore,
   createConfiguredWorkflowPackageSource,
   type AlternateWorkflowPackageSourceFactory,
   type DeliveryManifest,
+  type DeliveryManifestV2,
+  type ProductionDeliveryManifest,
   DeliveryControlPlaneProjection,
   type DeliveryControlPlaneReadModel,
   type DeliveryProjectionManifest,
@@ -28,7 +40,7 @@ import {
   type WorkflowPackageCompatibilityTarget,
 } from "../delivery/index.js";
 import { DeliveryCompletedFactJournal } from "../delivery/control-plane-journal.js";
-import { loadExecutionInstallationConfig } from "../configuration/index.js";
+import { loadExecutionInstallationConfig, loadExecutionInstallationConfigV2, parseExecutionConfigurationDocument, type ExecutionInstallationConfigV2 } from "../configuration/index.js";
 import { createDeliveryObservationEmitter, createObservationOwnerFact, createRunnerOwnerFactPort, type DeliveryObservationEmitter, type ObservationFamilySchema, type ObservationProfileOwnerFact, type RunnerSettlementOwnerFact } from "../observation/index.js";
 import type { HostOperationHandler } from "../host/workflow-host-adapter-factory.js";
 import type { ExecutionRuntimeAdapter } from "../execution/runtime-adapter.js";
@@ -41,7 +53,14 @@ function failure(code: ExecutionFailure["code"]): ExecutionFailure {
   return Object.freeze({ kind: "ERROR", code, message: code });
 }
 
-function controlPlaneManifest(manifest: DeliveryManifest): DeliveryProjectionManifest {
+function manifestPackage(manifest: ProductionDeliveryManifest) {
+  return manifest.schemaVersion === "execution.delivery-manifest@2.0.0"
+    ? { name: manifest.workflowPackage.name, exactVersion: manifest.workflowPackage.exactVersion, packageDigest: manifest.workflowPackage.packageDigest, workflowId: manifest.workflowSnapshot.workflowId, snapshotIdentity: manifest.workflowSnapshot.snapshotId, snapshotDigest: manifest.workflowSnapshot.snapshotDigest }
+    : { name: manifest.resolvedPackage.name, exactVersion: manifest.resolvedPackage.exactVersion, packageDigest: manifest.resolvedPackage.packageDigest, workflowId: manifest.resolvedPackage.workflowId, snapshotIdentity: manifest.prompt.snapshotIdentity, snapshotDigest: manifest.prompt.snapshotDigest };
+}
+
+function controlPlaneManifest(manifest: ProductionDeliveryManifest): DeliveryProjectionManifest {
+  const bound = manifestPackage(manifest);
   return Object.freeze({
     deliveryId: manifest.deliveryId,
     taskId: manifest.taskId,
@@ -50,12 +69,12 @@ function controlPlaneManifest(manifest: DeliveryManifest): DeliveryProjectionMan
     canonicalWorktree: manifest.canonicalWorktree,
     deliveryBindingIdentity: manifest.deliveryBindingIdentity,
     workflow: Object.freeze({
-      identity: manifest.resolvedPackage.workflowId,
-      packageName: manifest.resolvedPackage.name,
-      exactPackageVersion: manifest.resolvedPackage.exactVersion,
-      packageDigest: manifest.resolvedPackage.packageDigest,
-      snapshotIdentity: manifest.prompt.snapshotIdentity,
-      snapshotDigest: manifest.prompt.snapshotDigest,
+      identity: bound.workflowId,
+      packageName: bound.name,
+      exactPackageVersion: bound.exactVersion,
+      packageDigest: bound.packageDigest,
+      snapshotIdentity: bound.snapshotIdentity,
+      snapshotDigest: bound.snapshotDigest,
     }),
   });
 }
@@ -78,6 +97,7 @@ const COMPATIBILITY: WorkflowPackageCompatibilityTarget = Object.freeze({
 export interface DefaultExecutionApplicationFactoryOptions {
   readonly alternateSources?: Readonly<Record<string, AlternateWorkflowPackageSourceFactory>>;
   readonly hostOperationFactories?: Readonly<Record<string, ProductionHostOperationFactory>>;
+  readonly agentProviderFactories?: readonly AgentProviderRealmFactory[];
 }
 
 export interface ProductionHostOperationFactory {
@@ -133,11 +153,12 @@ export function createTaskBindingObservationFact(
 }
 
 function deliveryOwnerFactIngress(
-  manifest: DeliveryManifest,
+  manifest: ProductionDeliveryManifest,
   activation: RunnerActivationContext,
   emitter: DeliveryObservationEmitter,
 ): OwnerFactIngress {
   const family = observationFamily(activation.correlation.workflowIdentity as string);
+  const bound = manifestPackage(manifest);
   if (family === undefined || emitter.kind === "disabled") return Object.freeze({ emit(): void {} });
   const traceId = segment(`trace:${manifest.deliveryBindingIdentity}`).slice(0, 32);
   const spanId = segment(`span:${manifest.deliveryBindingIdentity}`).slice(0, 16);
@@ -165,7 +186,7 @@ function deliveryOwnerFactIngress(
             C01: manifest.deliveryId,
             C02: manifest.taskId,
             C03: activation.correlation.workflowIdentity as string,
-            C04: manifest.resolvedPackage.exactVersion,
+            C04: bound.exactVersion,
             C05: activation.correlation.packageIdentity as string,
             C06: activation.correlation.runtimeProfileIdentity as string,
             C07: manifest.deliveryBindingIdentity.replace(/^sha256:/u, ""),
@@ -251,6 +272,7 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
   }
 
   async create({ manifest, activation, startCorrelation }: Parameters<DeliveryRuntimeFactory["create"]>[0]): Promise<ExecutionRuntimeAdapter> {
+    if (manifest.schemaVersion !== "execution.delivery-manifest@1.1.0") throw new TypeError("historical Runtime manager requires a v1 Delivery Manifest");
     const deliveryRoot = segment(manifest.deliveryId);
     const runnerRoot = path.join(this.config.paths.runner.root, deliveryRoot);
     const config: RunnerFactoryConfig = Object.freeze({
@@ -324,6 +346,98 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
   }
 }
 
+class ProductionAgentProviderRuntimeManager implements DeliveryRuntimeFactory {
+  readonly #runner = new AgentProviderRunnerFactory();
+  readonly #broker: DeliveryAgentProviderRealmBroker;
+  readonly #live = new Set<ExecutionRuntimeAdapter>();
+  readonly #composed = new Set<string>();
+  readonly #compositionWaiters = new Map<string, Array<(ready: boolean) => void>>();
+
+  constructor(
+    readonly config: ExecutionInstallationConfigV2,
+    readonly dependencies: ExecutionBootstrapDependencies,
+    readonly observation: DeliveryObservationEmitter,
+    readonly interactions: ProductionInteractionBroker,
+    readonly hostOperationFactories: Readonly<Record<string, ProductionHostOperationFactory>>,
+    registry: AgentProviderFactoryRegistry,
+  ) { this.#broker = new DeliveryAgentProviderRealmBroker(registry); }
+
+  ownerFacts(manifest: ProductionDeliveryManifest, activation: RunnerActivationContext): OwnerFactIngress {
+    return deliveryOwnerFactIngress(manifest, activation, this.observation);
+  }
+
+  async create({ manifest, activation, startCorrelation }: Parameters<DeliveryRuntimeFactory["create"]>[0]): Promise<ExecutionRuntimeAdapter> {
+    if (manifest.schemaVersion !== "execution.delivery-manifest@2.0.0") throw new TypeError("Agent Provider Runtime manager requires a v2 Delivery Manifest");
+    const deliveryRoot = segment(manifest.deliveryId);
+    const runnerRoot = path.join(this.config.paths.runner.root, deliveryRoot);
+    const realms = await this.#broker.acquire(manifest, manifest.deliveryBindingIdentity);
+    const sessions: Partial<Record<ProviderAdapterKey, ReturnType<typeof realms.forRole>["sessions"]>> = {};
+    try {
+      for (const role of manifest.resolvedRoles) {
+        const adapter = realms.forRole(role.roleId);
+        const existing = sessions[adapter.key];
+        if (existing !== undefined && existing !== adapter.sessions) throw new TypeError("Provider adapter key is not unique inside the Delivery realm set");
+        sessions[adapter.key] = adapter.sessions;
+      }
+      const config: AgentProviderRunnerFactoryConfig = Object.freeze({
+        schemaVersion: "runner.factory@2.0.0",
+        stateDirectory: path.join(runnerRoot, "coordinator"),
+        custody: Object.freeze({
+          recordsDirectory: path.join(runnerRoot, "custody"),
+          publication: Object.freeze({ targetIdentity: `publication.${deliveryRoot}`, repositoryPath: manifest.canonicalWorktree, ref: `refs/heads/wsr-${deliveryRoot.slice(0, 24)}` }),
+        }),
+        invocation: Object.freeze({ journalDirectory: path.join(runnerRoot, "journal") }),
+        host: Object.freeze({ engine: "langgraph", checkpointDirectory: path.join(runnerRoot, "checkpoints") }),
+        implementationIdentity: manifest.deliveryConfigProjection.value.runner.implementationKey,
+      });
+      const actionBySite = Object.freeze(Object.fromEntries(activation.program.execution.sites.map((site) => {
+        const value = site.site;
+        const key = value.kind === "node" ? `node:${value.nodeIdentity}` : value.kind === "parallel-branch" ? `parallel-branch:${value.nodeIdentity}:${value.branchIdentity}` : `parallel-join:${value.nodeIdentity}`;
+        return [key, site.actionIdentity];
+      })));
+      const bound = manifestPackage(manifest);
+      this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${bound.name}@${bound.exactVersion}`, manifest.deliveryBindingIdentity, actionBySite);
+      const adapter = await this.#runner.create(config, Object.freeze({
+        interaction: this.interactions.bridge(manifest.deliveryId),
+        workflow: this.interactions.workflowBridge(manifest.deliveryId),
+        observation: createRunnerOwnerFactPort(Object.freeze({ emit: (fact: RunnerSettlementOwnerFact) => this.observation.emit(fact) })),
+        startCorrelation,
+        hostOperations: createProductionHostOperationHandlers(activation, this.hostOperationFactories),
+        activity: Object.freeze({ track: this.interactions.trackAction.bind(this.interactions) }),
+        providerSessions: Object.freeze(sessions),
+        providerOwner: Object.freeze({ dispose: realms.dispose.bind(realms) }),
+      }));
+      this.#live.add(adapter);
+      this.#composed.add(manifest.deliveryId);
+      for (const resolve of this.#compositionWaiters.get(manifest.deliveryId) ?? []) resolve(true);
+      this.#compositionWaiters.delete(manifest.deliveryId);
+      return adapter;
+    } catch (cause) {
+      await realms.dispose().catch(() => undefined);
+      throw cause;
+    }
+  }
+
+  async waitForComposition(deliveryId: string, timeoutMs: number): Promise<boolean> {
+    if (this.#composed.has(deliveryId)) return true;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => accept(false), timeoutMs);
+      const accept = (ready: boolean) => { clearTimeout(timer); resolve(ready); };
+      const waiting = this.#compositionWaiters.get(deliveryId) ?? [];
+      waiting.push(accept);
+      this.#compositionWaiters.set(deliveryId, waiting);
+    });
+  }
+
+  async close(): Promise<void> {
+    for (const waiting of this.#compositionWaiters.values()) for (const resolve of waiting) resolve(false);
+    this.#compositionWaiters.clear();
+    const adapters = [...this.#live];
+    this.#live.clear();
+    await Promise.all(adapters.map((adapter) => this.#runner.dispose(adapter).catch(() => undefined)));
+  }
+}
+
 export interface ExecutionApplicationControl extends WorkflowIntakeControlPort {
   executeFromConversationWorkspace(request: ExecutionRequest, authorization: ConversationWorkspaceAuthorization): Promise<ExecutionResult>;
   bindingInventory(): Promise<readonly IntakeDeliveryBindingInventoryItem[]>;
@@ -351,9 +465,11 @@ export function getExecutionControlPlaneProjection(application: ExecutionApplica
 export class DefaultExecutionApplicationFactory implements ExecutionApplicationFactory {
   readonly #alternateSources: Readonly<Record<string, AlternateWorkflowPackageSourceFactory>>;
   readonly #hostOperationFactories: Readonly<Record<string, ProductionHostOperationFactory>>;
+  readonly #agentProviderFactories: readonly AgentProviderRealmFactory[] | undefined;
 
   constructor(options: DefaultExecutionApplicationFactoryOptions = {}) {
     this.#alternateSources = Object.freeze({ ...(options.alternateSources ?? {}) });
+    this.#agentProviderFactories = options.agentProviderFactories === undefined ? undefined : Object.freeze([...options.agentProviderFactories]);
     const contributed = options.hostOperationFactories ?? {};
     for (const key of Object.keys(contributed)) {
       if (STANDARD_HOST_OPERATION_FACTORIES[key] !== undefined) throw new ProductionHostOperationRegistryError(key);
@@ -363,14 +479,23 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
 
   async create(configFile: string, candidateDependencies: ExecutionBootstrapDependencies): Promise<ExecutionApplication> {
     const dependencies = admitExecutionBootstrapDependencies(candidateDependencies);
-    const loaded = await loadExecutionInstallationConfig(configFile);
+    const parsed = parseExecutionConfigurationDocument(configFile, await readFile(configFile, "utf8"));
+    const v2 = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      && (parsed as Readonly<Record<string, unknown>>).schemaVersion === "execution.config@2.0.0";
+    const loaded = v2 ? await loadExecutionInstallationConfigV2(configFile) : await loadExecutionInstallationConfig(configFile);
     const config = loaded.config;
     const slots = new CurrentSlotRepository(config.paths.currentSlotRoot);
-    const manifests = new DeliveryManifestRepository(config.paths.manifestRoot);
+    const manifests = v2 ? new DeliveryManifestRepositoryV2(config.paths.manifestRoot) : new DeliveryManifestRepository(config.paths.manifestRoot);
+    const agentProviders = v2 ? new AgentProviderFactoryRegistry(this.#agentProviderFactories ?? createDefaultProductionAgentProviderFactories({
+      stateRoot: config.paths.stateRoot,
+      startupTimeoutMs: config.controls.startupTimeoutMs,
+      executionTimeoutMs: config.controls.executionTimeoutMs,
+      shutdownTimeoutMs: config.controls.shutdownTimeoutMs,
+    })) : undefined;
     const completed = new DeliveryCompletedFactJournal(`${config.paths.stateRoot}/control-plane/completed`);
     const recovery = new DeliveryRecoveryService(slots, Object.freeze({
       verify: async (slot: OccupiedCurrentSlot) => {
-        const manifest = await manifests.load(slot.manifestPath);
+        const manifest = await (manifests as unknown as Readonly<{ load(path: string): Promise<ProductionDeliveryManifest> }>).load(slot.manifestPath);
         return manifest.deliveryId === slot.deliveryId
           && manifest.canonicalWorktree === slot.worktree
           && manifest.deliveryBindingIdentity === slot.deliveryBindingIdentity;
@@ -389,11 +514,16 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     const resolver = new WorkflowPackageResolver(
       new WorkflowPackageStore({ readyRoot: config.paths.packageStoreRoot, stagingRoot: config.paths.stagingRoot }),
       source,
-      new FrozenWorkflowPackageValidator(COMPATIBILITY),
+      v2 ? new FrozenWorkflowPackageValidatorV2({
+        contractVersion: "2.0.0",
+        providerIdentity: "provider.registry",
+        providerCapabilities: Object.freeze([...new Set(agentProviders!.descriptors().flatMap((descriptor) => descriptor.capabilities))]) as never,
+        hostCapabilities: COMPATIBILITY.hostCapabilities,
+      }) : new FrozenWorkflowPackageValidator(COMPATIBILITY),
     );
     const observation = createDeliveryObservationEmitter({
       config: config.observation,
-      serviceVersion: "0.1.3",
+      serviceVersion: "0.2.0",
       diagnostic() {},
     });
     const projectionListeners = new Set<() => void>();
@@ -411,8 +541,10 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       },
     });
     const interactions = new ProductionInteractionBroker(dependencies.intake, invalidations.publish);
-    const runtime = new ProductionRuntimeManager(config, dependencies, observation, interactions, this.#hostOperationFactories);
-    const delivery = new DeliveryLifecycleService({
+    const runtime: ProductionRuntimeManager | ProductionAgentProviderRuntimeManager = v2
+      ? new ProductionAgentProviderRuntimeManager(config as ExecutionInstallationConfigV2, dependencies, observation, interactions, this.#hostOperationFactories, agentProviders!)
+      : new ProductionRuntimeManager(config as Awaited<ReturnType<typeof loadExecutionInstallationConfig>>["config"], dependencies, observation, interactions, this.#hostOperationFactories);
+    const lifecycleOptions = {
       resolver,
       manifests,
       snapshotRoot: `${config.paths.stateRoot}/prompt-snapshots`,
@@ -425,7 +557,11 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       ids: dependencies.ids,
       invalidations,
       completed: Object.freeze({
-        async publish(manifest, terminal, error) {
+        async publish(
+          manifest: ProductionDeliveryManifest,
+          terminal: Readonly<{ outcome: "SUCCEEDED" | "FAILED" | "CANCELLED"; finishedAt: number }>,
+          error: Readonly<{ code: string }> | null,
+        ) {
           await completed.persist(Object.freeze({
             schemaVersion: "execution.delivery-completed@1.0.0",
             manifest: controlPlaneManifest(manifest),
@@ -438,7 +574,10 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
           }));
         },
       }),
-    });
+    };
+    const delivery = new DeliveryLifecycleService(v2
+      ? { ...lifecycleOptions, manifestVersion: "2.0.0" as const, manifests: manifests as DeliveryManifestRepositoryV2, agentProviders: agentProviders! }
+      : { ...lifecycleOptions, manifests: manifests as DeliveryManifestRepository });
     const core = new ExecutionCoreAdmission(createExecutionEnvironment(config), admission);
     const lifecycle = new BootstrapLifecycle();
     let startPromise: Promise<void> | undefined;
@@ -532,12 +671,13 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     async function readBindingInventory(): Promise<readonly IntakeDeliveryBindingInventoryItem[]> {
       const items: IntakeDeliveryBindingInventoryItem[] = [];
       for (const slot of await slots.enumerate()) {
-        const manifest = await manifests.load(slot.manifestPath);
+        const manifest = await (manifests as unknown as Readonly<{ load(path: string): Promise<ProductionDeliveryManifest> }>).load(slot.manifestPath);
+        const bound = manifestPackage(manifest);
         items.push(Object.freeze({
           deliveryId: slot.deliveryId,
           worktree: slot.worktree,
           deliveryBindingIdentity: slot.deliveryBindingIdentity,
-          package: `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`,
+          package: `${bound.name}@${bound.exactVersion}`,
           lifecycle: slot.state,
           intakeBinding: interactions.isBound(slot.deliveryId) ? "BOUND" : "DETACHED",
           action: interactions.pending(slot.deliveryId) ? "AWAITING_INPUT" : "UNKNOWN",
@@ -590,7 +730,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       slots,
       manifests: Object.freeze({
         async loadProjection(manifestPath: string) {
-          const manifest = await manifests.load(manifestPath);
+          const manifest = await (manifests as unknown as Readonly<{ load(path: string): Promise<ProductionDeliveryManifest> }>).load(manifestPath);
           return controlPlaneManifest(manifest);
         },
       }),
