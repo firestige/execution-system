@@ -202,6 +202,51 @@ describe("Codex CLI Agent Provider", () => {
     await lease.dispose();
   });
 
+  it("closes admitted inline object schemas for Codex structured output without changing the admitted result contract", async () => {
+    const value = await fixture("success");
+    const dispatch = structuredClone(value.dispatch()) as any;
+    delete dispatch.action.resultSchema.additionalProperties;
+    dispatch.action.resultSchema.properties.review = {
+      type: "object",
+      properties: {
+        reviewed: { type: "boolean" },
+        findings: {
+          type: "array",
+          items: {
+            allOf: [
+              { type: "object", properties: { message: { type: "string" } } },
+              { not: { type: "object", properties: { ignored: { type: "boolean" } } } },
+            ],
+          },
+        },
+        verdict: {
+          anyOf: [
+            { type: "object", properties: { accepted: { type: "boolean" } } },
+            { oneOf: [{ type: "string" }, { type: "null" }] },
+          ],
+        },
+      },
+      required: ["reviewed"],
+    };
+    const lease = await acquire(value);
+    const session = await lease.adapter.sessions.open({ dispatch, signal: new AbortController().signal });
+
+    await session.run({ objective: "Return a typed review" });
+
+    const capture = JSON.parse(await readFile(value.capture, "utf8"));
+    expect(capture.schema.additionalProperties).toBe(false);
+    expect(capture.schema.properties.review.additionalProperties).toBe(false);
+    expect(capture.schema.properties.review.properties.findings.items.allOf[0].additionalProperties).toBe(false);
+    expect(capture.schema.properties.review.properties.findings.items.allOf[1].not.additionalProperties).toBe(false);
+    expect(capture.schema.properties.review.properties.verdict.anyOf[0].additionalProperties).toBe(false);
+    expect(capture.schema.properties.review.properties.verdict.anyOf[1].oneOf).toEqual([
+      { type: "string" },
+      { type: "null" },
+    ]);
+    expect(dispatch.action.resultSchema).not.toHaveProperty("additionalProperties");
+    await lease.dispose();
+  });
+
   it("refuses unprojectable tools and bindings without invoking a fallback Provider", async () => {
     const value = await fixture("success");
     const lease = await acquire(value);

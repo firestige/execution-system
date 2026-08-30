@@ -256,6 +256,27 @@ interface CapturedBinding {
   readonly resultSchema: FrozenJsonValue;
 }
 
+function codexOutputSchema(value: FrozenJsonValue): FrozenJsonValue {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const schema = value as Readonly<Record<string, FrozenJsonValue>>;
+  const projected: Record<string, FrozenJsonValue> = { ...schema };
+  if (schema.type === "object") {
+    const properties = schema.properties;
+    if (properties !== null && typeof properties === "object" && !Array.isArray(properties)) {
+      projected.properties = Object.fromEntries(Object.entries(properties)
+        .map(([name, child]) => [name, codexOutputSchema(child)]));
+    }
+    projected.additionalProperties = false;
+  }
+  if (schema.items !== undefined) projected.items = codexOutputSchema(schema.items);
+  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    const children = schema[keyword];
+    if (Array.isArray(children)) projected[keyword] = children.map((child) => codexOutputSchema(child));
+  }
+  if (schema.not !== undefined) projected.not = codexOutputSchema(schema.not);
+  return deepFreeze(projected);
+}
+
 async function captureBinding(
   request: AgentProviderSessionOpenRequest,
   worktree: string,
@@ -319,7 +340,7 @@ async function captureBinding(
       sessionCompatibilityIdentity: request.dispatch.session?.sessionCompatibilityIdentity ?? null,
     }),
     prompt: `${instructions}\n\n<wsr-admitted-action>${JSON.stringify(projection)}</wsr-admitted-action>`,
-    resultSchema: dispatch.action.resultSchema as FrozenJsonValue,
+    resultSchema: codexOutputSchema(dispatch.action.resultSchema as FrozenJsonValue),
   });
 }
 

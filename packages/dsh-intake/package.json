@@ -33,7 +33,7 @@
       "platform": "web"
     },
     "compatibility": {
-      "executionSystem": "0.2.0",
+      "executionSystem": "^0.2.0",
       "dsh": "0.1.1-rc.2",
       "agents": "0.1.1-rc.2",
       "commands": "0.1.1-rc.2",
@@ -47,7 +47,7 @@
   },
   "license": "Apache-2.0",
   "dependencies": {
-    "wsr-execution": "0.2.0"
+    "wsr-execution": "^0.2.0"
   },
   "scripts": {
     "prepack": "node -e \"if(process.env.WSR_RELEASE_PACK_MODE!=='verified-builder')throw new Error('DIRECT_SOURCE_PACK_PROHIBITED')\"",
