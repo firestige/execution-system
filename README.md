@@ -100,13 +100,13 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 |---|---|
 | Node.js | `>=24.12.0 <25` |
 | DeepSeek Harness | `0.1.1-rc.2` (`@deepseek-ai/dsh`) |
-| Workflow Package contract | `agentops.workflow-dsl@1.1.0` |
+| Workflow Package contract | `agentops.workflow-dsl@1.1.0` (historical runner) and `agentops.workflow-dsl@2.0.0` (multi-Provider runner) |
 | Observation contract | `agentops.observation@1.0.0` |
 | Checkpoint store | `better-sqlite3` (native build, approved via `allowBuilds`) |
 
 ## Known Limitations and Deferred Work
 
-- **Developer preview** — version `0.1.x` is an MVP candidate for trusted local use by individuals and small teams; compatibility-breaking changes are possible.
+- **Developer preview** — version `0.2.x` is intended for trusted local use by individuals and small teams; compatibility-breaking changes are possible.
 - **Exclusive Session/Delivery binding** — the DSH Intake passes a private, typed, invocation-only proof of the exact registered conversation workspace; Execution derives and persists the canonical Git worktree, while Manifest/current-slot remain the durable Delivery/worktree authority. One Session, Delivery, and occupied worktree cannot be implicitly switched, shared, stolen, or released by timeout.
 - **Observation disabled by default** — set `observation.enabled: true` with a loopback OTLP base `endpoint` to enable the non-controlling exporter.
 - **DSH-only interactive surface** — the shipped `web` profile is the reference assembly; a custom profile contains only `dsh-base` and is not an interactive Intake surface.
@@ -121,11 +121,11 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 
 For host-neutral embedding, import `ExecutionApplicationFactory`, `DefaultExecutionApplicationFactory`, `ExecutionRequest`, `TaskPrompt`, and the configuration types from the package root. Calling the default factory's `create(configFile, dependencies)` is the single production bootstrap path. The exact DSH runtime is an optional peer: package-root import/type consumers need not install it, while executing the current `dsh` Provider requires the embedding profile to provide `@deepseek-ai/dsh@0.1.1-rc.2`. The release includes `config/schema/execution.config.schema.json`, versioned defaults/examples, compiled TypeScript declarations, and `execution-config init|copy|validate|dump-effective`.
 
-## Multi-Provider 2.0 candidate
+## Multi-Provider 2.0
 
-`execution.config@2.0.0` contains no installation-wide Provider or model default. The embedding product registers any number of exact, immutable Agent Provider factories through `AgentProviderFactoryRegistry`; duplicate identities fail closed. Each Agent-action Role must be present in `<canonical-worktree>/.wsr/role-provider-bindings.json` with an exact Provider identity/version and Provider-owned model coordinate. Admission validates required Workflow capabilities, freezes the factory descriptor digest into `execution.delivery-manifest@2.0.0`, and never performs priority selection or fallback. Recovery accepts only the same descriptor and starts realms only for Providers actually used by the persisted Delivery. See `config/schema/execution.config.v2.schema.json`.
+`execution.config@2.0.0` is the production multi-Provider path and contains no installation-wide Provider or model default. `DefaultExecutionApplicationFactory` registers the exact bundled Copilot SDK and Codex CLI Provider factories unless an embedding supplies an explicit registry. Each Agent-action Role must be present in `<canonical-worktree>/.wsr/role-provider-bindings.json` with an exact Provider identity/version and Provider-owned model coordinate. Admission validates required Workflow capabilities, freezes the factory descriptor digest into `execution.delivery-manifest@2.0.0`, and never performs priority selection or fallback. Recovery accepts only the same descriptor and starts realms only for Providers actually used by the persisted Delivery. See `config/schema/execution.config.v2.schema.json`.
 
-The package-root `createCopilotAgentProviderFactory()` registers `provider.copilot@1.0.78`. It imports the SDK bundled by the exact `@github/copilot@1.0.78` platform payload, reuses the local logged-in user through the SDK, and never asks the embedding host for token material. A Delivery realm admits only `github-copilot` model coordinates frozen for its Roles, runs sessions in the canonical worktree with an allowlisted Action tool surface, and fails closed on runtime, login, model, recovery, or binding drift.
+The default Copilot factory registers `provider.copilot@1.0.78` and reuses the local logged-in user through the exact bundled SDK. The default Codex factory registers `provider.codex@0.144.5` and reuses Codex CLI's local login state. Neither path asks the embedding host for token material. Every Delivery realm admits only model coordinates frozen for its Roles and fails closed on runtime, login, model, recovery, or binding drift.
 
 ## Get the source
 

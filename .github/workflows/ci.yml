@@ -53,6 +53,14 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           path: execution-system
 
+      - name: Checkout frozen Workflow Package authority
+        uses: actions/checkout@v6
+        with:
+          repository: firestige/wsr-workflow-package
+          ref: 4f77fcc25c26d85cba170ba6aa859d05eee3b298
+          path: workflow-package
+          fetch-depth: 0
+
       - name: Verify exact pull request candidate checkout
         if: ${{ github.event_name == 'pull_request' }}
         run: test "$(git -C execution-system rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
@@ -74,6 +82,7 @@ jobs:
       - name: Install frozen contract checker dependencies
         run: |
           npm --prefix system-contracts/workflow-dsl ci
+          npm --prefix system-contracts/workflow-dsl-2-candidate ci
           npm --prefix system-contracts/observation ci
 
       - name: Run full regression

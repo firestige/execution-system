@@ -14,6 +14,10 @@ import {
   createProductionHostOperationHandlers,
   getExecutionApplicationControl,
   type ExecutionBootstrapDependencies,
+  type AgentProviderDeliveryRealmRequest,
+  type AgentProviderRealmFactory,
+  type AgentProviderSessionOpenRequest,
+  type NativeProviderSession,
 } from "../../src/index.js";
 import { ProductionInteractionBroker } from "../../src/bootstrap/interaction-broker.js";
 
@@ -126,7 +130,195 @@ async function fixture(options: Readonly<{
   return { configFile, dependencies, requested, worktree };
 }
 
+async function fixtureV2(options: Readonly<{
+  network?: (url: string) => Promise<Readonly<{ status: number; body: Uint8Array }>>;
+}> = {}) {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "execution-bootstrap-v2-")));
+  roots.push(root);
+  const repository = path.join(root, "repository");
+  const workspaceRoot = path.join(root, "workspace");
+  const worktree = path.join(workspaceRoot, "worktree");
+  const stateRoot = path.join(root, "state");
+  await Promise.all([mkdir(repository), mkdir(worktree, { recursive: true }), mkdir(stateRoot)]);
+  execFileSync("git", ["init", "-q"], { cwd: worktree });
+  const configFile = path.join(root, "execution-v2.json");
+  await writeFile(configFile, `${JSON.stringify({
+    schemaVersion: "execution.config@2.0.0",
+    paths: { repositoryRoot: repository, workspaceRoot, allowedWorktreeRoots: [workspaceRoot], stateRoot },
+    workflowSource: { kind: "github", repository: "firestige/wsr-workflow-package", releasesBaseUrl: "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases", assetPattern: "workflow-package-{name}-{version}.tar.gz" },
+    runner: { implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 2 },
+    observation: { enabled: false, timeoutMs: 100, maxBatchRecords: 512, maxBatchBytes: 4_194_304, flushIntervalMs: 1_000, shutdownFlushMs: 1_000, serviceName: "execution-v2-fixture" },
+    controls: { startupTimeoutMs: 10_000, executionTimeoutMs: 10_000, shutdownTimeoutMs: 10_000, maxConcurrentDeliveries: 2, allowExplicitRefresh: false, diagnosticMaxBytes: 512 },
+    intake: { maxCorrelationBytes: 256, maxOutputBytes: 1_024 },
+  })}\n`);
+  const dependencies: ExecutionBootstrapDependencies = Object.freeze({
+    clock: Object.freeze({ now: () => 1 }), ids: Object.freeze({ create: () => "delivery-production-v2" }),
+    filesystem: Object.freeze({ read: async () => new Uint8Array(), writeImmutable: async () => undefined, list: async () => [], inspect: async () => Object.freeze({ kind: "missing" as const }) }),
+    network: Object.freeze({ request: async (url: string) => options.network?.(url) ?? Object.freeze({ status: 200, body: Buffer.from("[]") }) }),
+    intake: Object.freeze({ publish: async () => undefined }), attachments: Object.freeze({ read: async () => { throw new Error("not requested"); } }),
+  });
+  const provider = (identity: string, version: string, adapterKey: "copilot-sdk" | "codex-cli", capabilities: readonly string[]): AgentProviderRealmFactory => Object.freeze({
+    descriptor: Object.freeze({ schemaVersion: "execution.agent-provider-factory@1.0.0", identity, version, adapterKey, capabilities: Object.freeze([...capabilities]) }),
+    async acquire() { throw new Error("missing Workflow must not acquire a Provider realm"); },
+  });
+  return { configFile, dependencies, root, worktree, providers: [
+    provider("provider.copilot", "1.0.78", "copilot-sdk", ["action-interaction", "structured-completion"]),
+    provider("provider.codex", "0.144.5", "codex-cli", ["structured-completion"]),
+  ] };
+}
+
+function scopedReleaseNetworkV2(archive: Uint8Array, packageDigest: string) {
+  const version = "0.2.0";
+  const name = "hello-world-workflow";
+  const archiveName = `workflow-package-${name}-${version}.tar.gz`;
+  const descriptorName = `workflow-package-${name}-${version}.json`;
+  const provenanceName = `workflow-package-${name}-${version}.provenance.json`;
+  const checksumName = `${archiveName}.sha256`;
+  const base = "https://github.example.test/releases/download/hello-world-0.2.0";
+  const archiveDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+  const contractRevision = "c".repeat(40);
+  const provenance = Buffer.from(`${JSON.stringify({
+    schemaVersion: "workflow-package.provenance@1.0.0",
+    subject: { name: archiveName, sha256: archiveDigest },
+    source: { repository: "firestige/wsr-workflow-package", revision: "a".repeat(40) },
+    contract: { repository: "firestige/wsr-contracts", revision: contractRevision },
+    builder: { workflow: ".github/workflows/release-candidate.yml" },
+  })}\n`);
+  const provenanceDigest = `sha256:${createHash("sha256").update(provenance).digest("hex")}`;
+  const descriptor = Buffer.from(JSON.stringify({
+    schemaVersion: "workflow-package.package-release@2.0.0",
+    tag: `workflow-package/${name}/v${version}`,
+    package: { name, version, digest: packageDigest },
+    archive: { name: archiveName, sha256: archiveDigest, bytes: archive.byteLength },
+    checksum: { name: checksumName },
+    provenance: { name: provenanceName, sha256: provenanceDigest },
+    contract: { repository: "firestige/wsr-contracts", revision: contractRevision, minVersion: "2.0.0", maxVersion: "2.0.0" },
+  }));
+  const responses = new Map<string, Uint8Array>([
+    [`${base}/${archiveName}`, archive],
+    [`${base}/${descriptorName}`, descriptor],
+    [`${base}/${checksumName}`, Buffer.from(`${archiveDigest.slice(7)}  ${archiveName}\n`)],
+    [`${base}/${provenanceName}`, provenance],
+  ]);
+  return async (url: string) => {
+    if (url.includes("/releases?per_page=100&page=1")) return Object.freeze({ status: 200, body: Buffer.from(JSON.stringify([{
+      tag_name: `workflow-package/${name}/v${version}`, draft: false, prerelease: false,
+      assets: [archiveName, descriptorName, checksumName, provenanceName].map((assetName) => ({ name: assetName, browser_download_url: `${base}/${assetName}` })),
+    }])) });
+    const body = responses.get(url);
+    return body === undefined ? Object.freeze({ status: 404, body: new Uint8Array() }) : Object.freeze({ status: 200, body });
+  };
+}
+
+function recordingProvider(
+  identity: "provider.copilot" | "provider.codex",
+  version: "1.0.78" | "0.144.5",
+  adapterKey: "copilot-sdk" | "codex-cli",
+  openedRoles: string[],
+  acquired: AgentProviderDeliveryRealmRequest[],
+): AgentProviderRealmFactory {
+  return Object.freeze({
+    descriptor: Object.freeze({
+      schemaVersion: "execution.agent-provider-factory@1.0.0" as const,
+      identity, version, adapterKey, capabilities: Object.freeze(["structured-completion"]),
+    }),
+    async acquire(request: AgentProviderDeliveryRealmRequest) {
+      acquired.push(request);
+      return Object.freeze({
+        schemaVersion: "execution.agent-provider-delivery-realm-lease@2.0.0" as const,
+        providerIdentity: identity, providerVersion: version, descriptorDigest: request.providerDescriptorDigest,
+        deliveryId: request.deliveryId, manifestBindingIdentity: request.manifestBindingIdentity,
+        adapter: Object.freeze({
+          key: adapterKey,
+          sessions: Object.freeze({
+            async open({ dispatch }: AgentProviderSessionOpenRequest) {
+              openedRoles.push(`${adapterKey}:${dispatch.executor.session.roleIdentity}`);
+              const result = identity === "provider.copilot"
+                ? Object.freeze({ success: true, greeting: "Hello from Copilot" })
+                : Object.freeze({ success: true, greeting: "Hello from Copilot", reviewed: true });
+              const session: NativeProviderSession = Object.freeze({
+                opaqueIdentity: `${identity}:${dispatch.executor.session.roleIdentity}`,
+                async run() { return Object.freeze([{ kind: "structured-completion" as const, result }]); },
+                async persist() {}, async cancel() {}, async dispose() {},
+              });
+              return session;
+            },
+            async restore() { throw new Error("not used"); },
+          }),
+          async dispose() {},
+        }),
+        async dispose() {},
+      });
+    },
+  });
+}
+
 describe("Wave 6 production bootstrap", () => {
+  it("starts v2 with the built-in exact Provider registry without acquiring a realm before Delivery admission", async () => {
+    const { configFile, dependencies, worktree } = await fixtureV2();
+    const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+
+    await application.start();
+    expect(application.status()).toEqual({ state: "READY" });
+    await expect(application.execute({ worktree, selector: "missing@1.0.0", prompt: { text: "run", attachments: [] } }))
+      .resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
+    await application.close();
+    expect(application.status()).toEqual({ state: "CLOSED" });
+  });
+
+  it("downloads the published-format DSL2 package and completes one Delivery through Copilot then Codex", async () => {
+    const workflowRoot = process.env.WSR_WORKFLOW_PACKAGE_ROOT ?? path.join(repositoryRoot, "workflow-package");
+    const hello = path.join(workflowRoot, "hello-world-workflow");
+    const packageDocument = JSON.parse(await readFile(path.join(hello, "definition/package.json"), "utf8")) as { package: { digest: string } };
+    const materialRoot = await realpath(await mkdtemp(path.join(tmpdir(), "production-v2-package-")));
+    roots.push(materialRoot);
+    await mkdir(path.join(materialRoot, "material"));
+    await cp(hello, path.join(materialRoot, "material/package"), { recursive: true });
+    const archivePath = path.join(materialRoot, "workflow-package-hello-world-workflow-0.2.0.tar.gz");
+    const packed = spawnSync("tar", ["-czf", archivePath, "-C", path.join(materialRoot, "material"), "."], { encoding: "utf8", shell: false });
+    if (packed.status !== 0) throw new Error(packed.stderr);
+    const archive = Uint8Array.from(await readFile(archivePath));
+    const { configFile, dependencies, worktree } = await fixtureV2({ network: scopedReleaseNetworkV2(archive, packageDocument.package.digest) });
+    await mkdir(path.join(worktree, ".wsr"));
+    await writeFile(path.join(worktree, ".wsr/role-provider-bindings.json"), `${JSON.stringify({
+      schemaVersion: "execution.repository-role-provider-bindings@1.0.0",
+      bindings: {
+        "role.greeter": { agentProvider: { identity: "provider.copilot", version: "1.0.78" }, model: { provider: "github-copilot", model: "gpt-5.3-codex" } },
+        "role.reviewer": { agentProvider: { identity: "provider.codex", version: "0.144.5" }, model: { provider: "openai", model: "gpt-5.6-sol" } },
+      },
+    })}\n`);
+    await writeFile(path.join(worktree, "README.md"), "v2 production delivery\n");
+    execFileSync("git", ["config", "user.email", "runner@example.invalid"], { cwd: worktree });
+    execFileSync("git", ["config", "user.name", "Runner Fixture"], { cwd: worktree });
+    execFileSync("git", ["add", "."], { cwd: worktree });
+    execFileSync("git", ["commit", "-qm", "baseline"], { cwd: worktree });
+    const openedRoles: string[] = [];
+    const acquired: AgentProviderDeliveryRealmRequest[] = [];
+    const providers = [
+      recordingProvider("provider.copilot", "1.0.78", "copilot-sdk", openedRoles, acquired),
+      recordingProvider("provider.codex", "0.144.5", "codex-cli", openedRoles, acquired),
+    ];
+    const application = await new DefaultExecutionApplicationFactory({ agentProviderFactories: providers }).create(configFile, dependencies);
+
+    await application.start();
+    const result = await application.execute({ worktree, selector: "hello-world-workflow@0.2.0", prompt: { text: "Say hello", attachments: [] } });
+    expect(result, JSON.stringify({ result, openedRoles, acquired })).toMatchObject({ kind: "TERMINAL", outcome: "SUCCEEDED" });
+    expect(openedRoles).toEqual(["copilot-sdk:role.greeter", "codex-cli:role.reviewer"]);
+    expect(acquired.map((request) => request.providerIdentity).sort()).toEqual(["provider.codex", "provider.copilot"]);
+    await application.close();
+  }, 30_000);
+
+  it("starts the real production factory from v2 installation config without entering the historical DSH-only assembly", async () => {
+    const { configFile, dependencies, worktree, providers } = await fixtureV2();
+    const application = await new DefaultExecutionApplicationFactory({ agentProviderFactories: providers }).create(configFile, dependencies);
+
+    await application.start();
+    expect(application.status()).toEqual({ state: "READY" });
+    await expect(application.execute({ worktree, selector: "missing@1.0.0", prompt: { text: "run", attachments: [] } }))
+      .resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
+    await application.close();
+    expect(application.status()).toEqual({ state: "CLOSED" });
+  });
   it("keeps later Delivery waiters registered when an earlier waiter times out", async () => {
     const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }));
     const first = broker.waitForDelivery("correlation-waiters", 1);
