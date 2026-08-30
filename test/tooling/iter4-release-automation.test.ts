@@ -83,7 +83,8 @@ describe("Iteration 4 release automation", () => {
   });
 
   it("checks the core coordinate and rejects a workflow filename drift", async () => {
-    await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe("0.2.0");
+    const packageVersion = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")).version;
+    await expect(assertExecutionReleaseCoordinates(repository)).resolves.toBe(packageVersion);
 
     const core = { name: "wsr-execution", version: "0.1.3" };
     expect(() => assertExecutionReleaseCoordinates({
