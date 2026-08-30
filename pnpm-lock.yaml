@@ -82,7 +82,7 @@ importers:
   packages/dsh-intake:
     dependencies:
       wsr-execution:
-        specifier: 0.1.4
+        specifier: 0.2.0
         version: link:../..
 
 packages:

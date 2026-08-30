@@ -523,7 +523,7 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
     );
     const observation = createDeliveryObservationEmitter({
       config: config.observation,
-      serviceVersion: "0.1.3",
+      serviceVersion: "0.2.0",
       diagnostic() {},
     });
     const projectionListeners = new Set<() => void>();
