@@ -1,6 +1,7 @@
 {
   "name": "wsr-dsh-intake",
   "version": "0.1.4",
+  "private": true,
   "type": "module",
   "main": "./src/plugin.js",
   "types": "./src/index.d.ts",

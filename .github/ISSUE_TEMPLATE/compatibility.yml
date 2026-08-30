@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         ## 版本联动 / Version lock
-        Core 与 Intake 版本联动：`wsr-dsh-intake@X` 依赖 `wsr-execution@X`，一次 `add` 装齐、一次 `update` 同升。若手动拆装，请核对两边版本一致。
+        DSH bundle 由 `firestige/wsr-dsh` 独立发布，并锁定兼容的 `wsr-execution`。请按 bundle 的 compatibility matrix 升级。
   - type: input
     id: dsh_version
     attributes:
@@ -27,8 +27,8 @@ body:
     id: package_versions
     attributes:
       label: Installed versions / 已装版本
-      description: `npm view wsr-execution version` 与 `npm view wsr-dsh-intake version`
-      placeholder: "wsr-execution: 0.1.2 / wsr-dsh-intake: 0.1.2"
+      description: `npm view wsr-execution version` 与 `npm view dsh-wsr-execution version`
+      placeholder: "wsr-execution: 0.1.4 / dsh-wsr-execution: 0.1.0"
     validations:
       required: true
   - type: textarea

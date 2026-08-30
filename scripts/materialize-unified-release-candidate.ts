@@ -54,7 +54,7 @@ export async function materializeUnifiedCandidate(
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Partial<UnifiedCandidate>;
   if (manifest.schema_version !== "wsr.iter4-unified-candidate@1.0.0"
     || manifest.status !== "IMMUTABLE_RELEASE_CANDIDATE" || manifest.execution === undefined
-    || !Array.isArray(manifest.execution.artifacts) || manifest.execution.artifacts.length !== 2) {
+    || !Array.isArray(manifest.execution.artifacts) || manifest.execution.artifacts.length !== 1) {
     throw new Error("UNIFIED_CANDIDATE_INVALID");
   }
 
@@ -68,7 +68,7 @@ export async function materializeUnifiedCandidate(
   }
   const packages = manifest.execution.artifacts.map((artifact) => artifact.package).sort();
   const versions = new Set(manifest.execution.artifacts.map((artifact) => artifact.version));
-  if (packages.join(",") !== "wsr-dsh-intake,wsr-execution" || versions.size !== 1) {
+  if (packages.join(",") !== "wsr-execution" || versions.size !== 1) {
     throw new Error("UNIFIED_CANDIDATE_COORDINATE_MISMATCH");
   }
 

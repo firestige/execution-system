@@ -1,5 +1,5 @@
 name: Bug report
-description: 报告 Execution System / DSH Intake 的问题。 / Report a problem with the Execution System or DSH Intake.
+description: 报告 Execution System 的问题。 / Report a problem with the Execution System.
 title: "[bug] 一句话摘要 / one-line summary"
 labels: ["bug"]
 body:
@@ -27,7 +27,7 @@ body:
       label: Steps to reproduce / 复现步骤
       description: 从安装到出问题的完整步骤 / Complete steps from install to the problem
       placeholder: |
-        1. dsh plugin --profile web add wsr-dsh-intake
+        1. dsh plugin --profile web add dsh-wsr-execution@0.1.0
         2. /wsr create implementation-workflow@0.3.0
         3. ...
     validations:
@@ -50,5 +50,5 @@ body:
     attributes:
       label: 自查 / Self-check
       options:
-        - label: 已用最新发布版本（`npm view wsr-dsh-intake version`）复现 / reproduced on the latest published version
+        - label: 已用最新发布版本（`npm view dsh-wsr-execution version`）复现 / reproduced on the latest published version
         - label: 错误信息与日志已脱敏（无 API key / 无真实路径）/ logs redacted (no API keys / no real paths)

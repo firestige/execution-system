@@ -19,7 +19,7 @@ describe("release workflow bootstrap", () => {
     expect(ci).not.toContain("permissions:\n      contents: write");
     expect(candidate).toContain("workflow_call:");
     expect(candidate).toContain("candidate_tag:");
-    expect(candidate).toContain("local_manual_e2e_evidence:");
+    expect(candidate).not.toContain("local_manual_e2e_evidence:");
   });
 
   it("qualifies and tags the RC at the immutable Wave11 product pin, not the publisher revision", async () => {
@@ -39,7 +39,7 @@ describe("release workflow bootstrap", () => {
     expect(candidate).not.toContain('--target "$GITHUB_SHA"');
     expect(candidate).toContain("Install frozen contract checker dependencies");
     expect(candidate).toContain("working-directory: execution-system");
-    expect(candidate).toContain('"$GITHUB_WORKSPACE/execution-system"');
+    expect(candidate).toContain("remoteArtifactVerification");
   });
 
   it("passes the unified authority manifest through the registered CI bootstrap", async () => {

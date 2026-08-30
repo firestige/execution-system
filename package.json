@@ -43,7 +43,7 @@
     "release:config:verify": "node --import tsx release/cli/verify-release-config.ts",
     "release:matrix:verify": "node --import tsx release/cli/verify-release-matrix.ts",
     "release:check-coordinates": "node --import tsx release/cli/verify-execution-coordinates.ts",
-    "release:publish-npm": "node --import tsx release/cli/publish-npm-pair.ts",
+    "release:publish-npm": "node --import tsx release/cli/publish-npm-core.ts",
     "release:simulate": "node --import tsx release/cli/simulate-release-lifecycle.ts",
     "release:notes:verify": "node --import tsx release/cli/verify-release-notes.ts",
     "release:prepack-guard": "node --import tsx release/cli/prepack-guard.ts",
