@@ -148,6 +148,50 @@ describe("package-scoped GitHub Workflow Source", () => {
     });
   });
 
+  it("prefers a scoped release when the same immutable version also remains in the legacy cohort", async () => {
+    const archive = bytes("same-immutable-package");
+    const archiveUrl = "https://example.test/workflow-package-demo-1.0.0.tar.gz";
+    const scopedDescriptorUrl = "https://example.test/workflow-package-demo-1.0.0.json";
+    const checksumUrl = `${archiveUrl}.sha256`;
+    const legacyDescriptorUrl = "https://example.test/workflow-package-release-1.0.0.json";
+    const scoped = scopedRelease("demo", "1.0.0", scopedDescriptorUrl, archiveUrl, checksumUrl);
+    const legacy = {
+      tag_name: "1.0.0", draft: false, prerelease: false,
+      assets: [
+        { name: "workflow-package-release-1.0.0.json", browser_download_url: legacyDescriptorUrl },
+        { name: "workflow-package-demo-1.0.0.tar.gz", browser_download_url: archiveUrl },
+      ],
+    };
+    const source = new GitHubWorkflowPackageSource({
+      kind: "github", repository: "example/workflows",
+      releasesBaseUrl: "https://api.github.com/repos/example/workflows/releases",
+      assetPattern: "workflow-package-{name}-{version}.tar.gz",
+    }, Object.freeze({ request: async (url: string) => {
+      if (url.includes("?per_page=")) return { status: 200, body: bytes([scoped, legacy]) };
+      if (url === scopedDescriptorUrl) return { status: 200, body: bytes({
+        schemaVersion: "workflow-package.package-release@1.0.0",
+        revision: "a".repeat(40), tag: "workflow-package/demo/v1.0.0",
+        package: { name: "demo", version: "1.0.0", digest: `sha256:${"b".repeat(64)}` },
+        archive: { name: "workflow-package-demo-1.0.0.tar.gz", sha256: sha256(archive), bytes: archive.byteLength },
+        checksum: { name: "workflow-package-demo-1.0.0.tar.gz.sha256" },
+      }) };
+      if (url === legacyDescriptorUrl) return { status: 200, body: bytes({
+        schemaVersion: "workflow-package.release@1.0.0", revision: "c".repeat(40), tag: "1.0.0",
+        assets: [{
+          name: "workflow-package-demo-1.0.0.tar.gz", sha256: sha256(archive), bytes: archive.byteLength,
+          package: "demo", version: "1.0.0", packageDigest: `sha256:${"b".repeat(64)}`,
+        }],
+      }) };
+      if (url === checksumUrl) return { status: 200, body: bytes(`${sha256(archive).slice(7)}  workflow-package-demo-1.0.0.tar.gz\n`) };
+      if (url === archiveUrl) return { status: 200, body: archive };
+      return { status: 404, body: bytes("missing") };
+    } }));
+
+    await expect(source.fetch({ name: "demo", version: { kind: "EXACT", value: "1.0.0" } })).resolves.toMatchObject({
+      kind: "FOUND", candidate: { exactVersion: "1.0.0", archiveDigest: sha256(archive) },
+    });
+  });
+
   it("fails closed on malformed metadata, transport failure, or checksum mismatch", async () => {
     const configuration = {
       kind: "github", repository: "example/workflows",
