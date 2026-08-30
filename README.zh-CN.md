@@ -113,7 +113,7 @@ dsh plugin --profile web add dsh-wsr-execution@0.1.0
 
 ## 面向维护者
 
-- **发布 qualification** —— 见[发布流程](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md)。`pnpm quickstart:prepare` 一次完成两个 artifact 的构建、验证与本地 E2E 配置初始化。
+- **发布 qualification** —— 见[发布流程](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md)。本仓只验证宿主无关 core；DSH bundle 与 clean-profile qualification 由 [firestige/wsr-dsh](https://github.com/firestige/wsr-dsh) 负责。
 - **Changelog** —— 由 `pnpm changelog:generate` 从 git history 自动生成；`pnpm changelog:check`（CI 门禁）拒绝手工篡改。
 - **本地发布前 E2E** —— [指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.md)；最终 [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md)；[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md)；[DSH Intake package reference](packages/dsh-intake/README.md)。
 

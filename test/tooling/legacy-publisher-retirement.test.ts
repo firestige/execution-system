@@ -12,6 +12,7 @@ describe("legacy DSH publisher retirement", () => {
       ".github/workflows/release-promote.yml",
       ".github/workflows/ci.yml",
       "release/config/component.json",
+      "package.json",
       "scripts/build-release-artifacts.ts",
       "scripts/verify-release-artifacts.ts",
       "scripts/materialize-unified-release-candidate.ts",
@@ -28,6 +29,7 @@ describe("legacy DSH publisher retirement", () => {
       ".github/ISSUE_TEMPLATE/bug_report.yml",
       ".github/ISSUE_TEMPLATE/compatibility.yml",
       ".github/ISSUE_TEMPLATE/feature_request.yml",
+      "docs/assets/architecture.svg",
     ].map((file) => readFile(path.join(repository, file), "utf8")));
 
     expect(entryPoints.join("\n")).not.toContain("wsr-dsh-intake");

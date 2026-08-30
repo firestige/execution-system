@@ -113,7 +113,7 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 
 ## For maintainers
 
-- **Release qualification** — see [the release process](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md). `pnpm quickstart:prepare` builds and verifies both artifacts and initializes local E2E configuration in one operation.
+- **Release qualification** — see [the release process](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md). This repository qualifies the host-neutral core; DSH bundle and clean-profile qualification are owned by [firestige/wsr-dsh](https://github.com/firestige/wsr-dsh).
 - **Changelog** — generated from git history by `pnpm changelog:generate`; `pnpm changelog:check` (CI-gated) rejects hand-edited drift.
 - **Local pre-release E2E** — [guide](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.md); final [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md); [configuration reference](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md); [DSH Intake package reference](packages/dsh-intake/README.md).
 

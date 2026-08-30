@@ -40,7 +40,7 @@
   <!-- DSH Intake -->
   <g font-family="'SF Pro Display','Segoe UI',sans-serif">
     <rect x="290" y="280" width="260" height="150" rx="12" fill="#142038" stroke="#a78bfa" stroke-opacity="0.8" stroke-width="1.6"/>
-    <text x="420" y="312" text-anchor="middle" fill="#cbbcfb" font-size="17" font-weight="600">DSH Intake · wsr-dsh-intake</text>
+    <text x="420" y="312" text-anchor="middle" fill="#cbbcfb" font-size="17" font-weight="600">DSH Execution · dsh-wsr-execution</text>
     <text x="308" y="340" fill="#9fb3d9" font-size="14">/wsr commands (DSH-I)</text>
     <text x="308" y="364" fill="#9fb3d9" font-size="14">/workflow-execution skill</text>
     <text x="308" y="388" fill="#9fb3d9" font-size="14">sidebar Deliveries / Current</text>
