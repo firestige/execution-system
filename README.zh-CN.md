@@ -6,8 +6,8 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/wsr-execution)](https://www.npmjs.com/package/wsr-execution)
-[![npm](https://img.shields.io/npm/v/wsr-dsh-intake)](https://www.npmjs.com/package/wsr-dsh-intake)
-[![CI](https://github.com/firestige/execution-system/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/execution-system/actions)
+[![DSH bundle](https://img.shields.io/npm/v/dsh-wsr-execution)](https://www.npmjs.com/package/dsh-wsr-execution)
+[![CI](https://github.com/firestige/wsr-execution/actions/workflows/ci.yml/badge.svg)](https://github.com/firestige/wsr-execution/actions)
 
 **把每一次 Agent 对话变成一条可审计、可恢复、版本绑定的交付。**
 
@@ -20,7 +20,7 @@ Execution System 是宿主无关的产品，不是某个插件。DSH 只是入�
 | 形态 | 包 | 适用 |
 |---|---|---|
 | **嵌入库** | `wsr-execution` | 宿主无关嵌入 —— 导入 `ExecutionApplicationFactory`，用 `create(configFile, dependencies)` 引导 |
-| **DSH 插件入口** | `wsr-dsh-intake` | DeepSeek Harness 用户 —— 在对话与侧边栏中运行工作流 |
+| **DSH 插件入口** | `dsh-wsr-execution` | DeepSeek Harness 用户 —— 在对话与侧边栏中运行工作流 |
 | **CLI** | `execution-config`（随 `wsr-execution`）| 配置 init / copy / validate / dump-effective |
 
 DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runner 所有、隔离的 DSH 执行上下文（`DSH-E`）中运行，绝不在 Intake 上下文（`DSH-I`）中。
@@ -42,7 +42,7 @@ DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runn
 - **Runtime Interaction** 拥有规范工作区排他性、当前 Delivery 槽位、Manifest 持久化、Runtime 调用、恢复与最终处理。
 - **Delivery Observation** 将出站有界事实映射到单向、尽力而为的 OTLP profile，但不控制执行。
 
-默认 Source 是配置指定的 `firestige/workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
+默认 Source 是配置指定的 `firestige/wsr-workflow-package` GitHub Release。`implementation-workflow@0.3.0` 与 `system-design-workflow@0.3.0` 会经过下载、校验并发布到本地 READY store；它们不会嵌进任何 Execution artifact。
 
 ![架构图](docs/assets/architecture.png)
 
@@ -52,11 +52,11 @@ DSH 插件是首个产品入口；每个被接纳的 Workflow Action 都在 Runn
 ```sh
 # 1. 批准一次 better-sqlite3 原生构建（pnpm 11）
 dsh plugin --profile web config set --location=project --json allowBuilds '{"better-sqlite3":true}'
-# 2. 安装 Intake 入口 —— 引擎（wsr-execution）作为其依赖自动装上
-dsh plugin --profile web add wsr-dsh-intake
+# 2. 从 DSH 发布权威安装 Execution bundle
+dsh plugin --profile web add dsh-wsr-execution@0.1.0
 ```
 
-要求 Node `>=24.12 <25` 与 DSH `0.1.1-rc.2`。Core 与 Intake 版本联动（`wsr-dsh-intake@0.1.3` 依赖 `wsr-execution@0.1.3`），一次 `add` 装齐、一次 `update` 同升。
+要求 Node `>=24.12 <25` 与 DSH `0.1.1-rc.2`。独立版本的 DSH bundle 由 [firestige/wsr-dsh](https://github.com/firestige/wsr-dsh) 发布，并精确锁定兼容的 `wsr-execution` 版本。
 
 ## 快速开始
 
@@ -113,7 +113,7 @@ dsh plugin --profile web add wsr-dsh-intake
 
 ## 面向维护者
 
-- **发布 qualification** —— 见[发布流程](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md)。`pnpm quickstart:prepare` 一次完成两个 artifact 的构建、验证与本地 E2E 配置初始化。
+- **发布 qualification** —— 见[发布流程](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/execution-release-process.md)。本仓只验证宿主无关 core；DSH bundle 与 clean-profile qualification 由 [firestige/wsr-dsh](https://github.com/firestige/wsr-dsh) 负责。
 - **Changelog** —— 由 `pnpm changelog:generate` 从 git history 自动生成；`pnpm changelog:check`（CI 门禁）拒绝手工篡改。
 - **本地发布前 E2E** —— [指南](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-local-e2e.md)；最终 [DSH quickstart](https://github.com/firestige/workflow-self-recursive/blob/main/docs/guides/dsh-execution-quickstart.md)；[配置参考](https://github.com/firestige/workflow-self-recursive/blob/main/docs/reference/execution-configuration.md)；[DSH Intake package reference](packages/dsh-intake/README.md)。
 
@@ -138,7 +138,7 @@ git clone --recurse-submodules https://github.com/firestige/workflow-self-recurs
 单独克隆：
 
 ```sh
-git clone https://github.com/firestige/execution-system.git
+git clone https://github.com/firestige/wsr-execution.git
 ```
 
 ## 文档

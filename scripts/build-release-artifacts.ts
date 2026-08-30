@@ -4,26 +4,15 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { verifyExecutionReleaseArtifacts } from "./verify-release-artifacts.js";
-import { verifyDshIntakeDistribution } from "./verify-dsh-intake-distribution.js";
 import { renderReleaseNotes } from "../release/cli/verify-release-notes.js";
 
 const repository = path.resolve(import.meta.dirname, "..");
 const destination = path.resolve(process.argv[2] ?? path.join(repository, "tmp/release"));
 const coreManifest = JSON.parse(await readFile(path.join(repository, "package.json"), "utf8")) as { readonly version: string };
-const pluginManifest = JSON.parse(await readFile(path.join(repository, "packages/dsh-intake/package.json"), "utf8")) as {
-  readonly version: string;
-  readonly dsh?: { readonly compatibility?: { readonly executionSystem?: string } };
-};
-if (coreManifest.version !== pluginManifest.version
-  || pluginManifest.dsh?.compatibility?.executionSystem !== coreManifest.version) {
-  throw new Error("RELEASE_PACKAGE_VERSION_MISMATCH");
-}
 const version = coreManifest.version;
 const coreArchiveName = `wsr-execution-${version}.tgz`;
-const pluginArchiveName = `wsr-dsh-intake-${version}.tgz`;
 const packageNames = Object.freeze<Record<string, string>>({
   [coreArchiveName]: "wsr-execution",
-  [pluginArchiveName]: "wsr-dsh-intake",
 });
 
 function sha256(bytes: Uint8Array): string {
@@ -39,14 +28,9 @@ function pack(directory: string): void {
 }
 
 await mkdir(destination, { recursive: true });
-await verifyDshIntakeDistribution(path.join(repository, "packages/dsh-intake"));
-await Promise.all([
-  coreArchiveName,
-  pluginArchiveName,
-].map((name) => rm(path.join(destination, name), { force: true })));
+await rm(path.join(destination, coreArchiveName), { force: true });
 execFileSync("pnpm", ["build"], { cwd: repository, stdio: "inherit" });
 pack(repository);
-pack(path.join(repository, "packages/dsh-intake"));
 
 const archives = (await readdir(destination)).filter((name) => name.endsWith(".tgz")).sort();
 const artifacts = [];

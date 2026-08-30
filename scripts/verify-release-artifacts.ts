@@ -41,11 +41,9 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
     throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID");
   }
   const version = metadata.version as string;
-  const pluginArchiveName = `wsr-dsh-intake-${version}.tgz`;
   const coreArchiveName = `wsr-execution-${version}.tgz`;
-  const artifactsExpected = Object.freeze([pluginArchiveName, coreArchiveName]);
+  const artifactsExpected = Object.freeze([coreArchiveName]);
   const packageNames = Object.freeze<Record<string, string>>({
-    [pluginArchiveName]: "wsr-dsh-intake",
     [coreArchiveName]: "wsr-execution",
   });
   const compatibility = record(metadata.compatibility, Object.keys(COMPATIBILITY), "RELEASE_COMPATIBILITY_MISMATCH");
@@ -80,7 +78,7 @@ export async function verifyExecutionReleaseArtifacts(directory: string): Promis
       || new Set(artifact.inventory).size !== artifact.inventory.length) {
       throw new ReleaseArtifactVerificationError("RELEASE_METADATA_INVALID");
     }
-    if (artifact.name === pluginArchiveName && artifact.inventory.some((item) => /(?:workflow-packages?\/|implementation-workflow|system-design-workflow)/u.test(item as string))) {
+    if (artifact.inventory.some((item) => /(?:workflow-packages?\/|implementation-workflow|system-design-workflow)/u.test(item as string))) {
       throw new ReleaseArtifactVerificationError("RELEASE_ARTIFACT_INVENTORY_INVALID");
     }
     let bytes: Uint8Array;

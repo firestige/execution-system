@@ -1,5 +1,5 @@
 name: Feature request
-description: 建议 Execution System / DSH Intake 的新能力或改进。 / Suggest a new capability or improvement.
+description: 建议 Execution System 的新能力或改进。 / Suggest a new Execution System capability or improvement.
 title: "[feature] 一句话摘要 / one-line summary"
 labels: ["enhancement"]
 body:
@@ -35,5 +35,5 @@ body:
       label: 属于哪个面 / Which surface
       options:
         - label: 宿主无关核心（wsr-execution 嵌入 / CLI）
-        - label: DSH 插件入口（wsr-dsh-intake 命令 / 侧边栏 / 展示）
+        - label: DSH 插件入口（dsh-wsr-execution 命令 / 侧边栏 / 展示）
         - label: 契约 / 文档 / 发布流程

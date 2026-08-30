@@ -2,31 +2,31 @@
   "schemaVersion": "wsr.release-capability-matrix@1.0.0",
   "components": [
     {
-      "repository": "firestige/execution-system",
-      "assetMode": "npm-pair",
-      "publisherAdapter": "npm-pair+dsh+github-release",
+      "repository": "firestige/wsr-execution",
+      "assetMode": "npm-package",
+      "publisherAdapter": "npm-package+github-release",
       "releaseMode": "active"
     },
     {
-      "repository": "firestige/evidence-system",
+      "repository": "firestige/wsr-evidence",
       "assetMode": "python-wheel-sdist+oci",
       "publisherAdapter": "python-github-release+ghcr",
       "releaseMode": "active"
     },
     {
-      "repository": "firestige/system-contracts",
+      "repository": "firestige/wsr-contracts",
       "assetMode": "contract-publication-records",
       "publisherAdapter": "contract-publication+github-release",
       "releaseMode": "active"
     },
     {
-      "repository": "firestige/workflow-package",
+      "repository": "firestige/wsr-workflow-package",
       "assetMode": "workflow-assets",
       "publisherAdapter": "workflow-assets+github-release",
       "releaseMode": "active"
     },
     {
-      "repository": "firestige/evolution-system",
+      "repository": "firestige/wsr-evolution",
       "assetMode": "implementation-language-selected",
       "publisherAdapter": "implementation-language-selected",
       "releaseMode": "parameter-only"

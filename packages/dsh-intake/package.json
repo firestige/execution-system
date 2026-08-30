@@ -1,6 +1,7 @@
 {
   "name": "wsr-dsh-intake",
   "version": "0.1.4",
+  "private": true,
   "type": "module",
   "main": "./src/plugin.js",
   "types": "./src/index.d.ts",
@@ -67,11 +68,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/firestige/execution-system.git"
+    "url": "git+https://github.com/firestige/wsr-execution.git"
   },
-  "homepage": "https://github.com/firestige/execution-system",
+  "homepage": "https://github.com/firestige/wsr-execution",
   "bugs": {
-    "url": "https://github.com/firestige/execution-system/issues"
+    "url": "https://github.com/firestige/wsr-execution/issues"
   },
   "author": {
     "name": "firestige"

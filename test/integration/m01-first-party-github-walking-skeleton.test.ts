@@ -70,8 +70,8 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
     const archiveDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
     const source = new GitHubWorkflowPackageSource({
       kind: "github",
-      repository: "firestige/workflow-package",
-      releasesBaseUrl: "https://api.github.example.test/repos/firestige/workflow-package/releases",
+      repository: "firestige/wsr-workflow-package",
+      releasesBaseUrl: "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases",
       assetPattern: "workflow-package-{name}-{version}.tar.gz",
     }, Object.freeze({ request: async (url: string) => {
       sourceCalls.push(url);
@@ -180,7 +180,7 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
       expect(result).toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-first-party", outcome: "FAILED" });
       expect(await slots.read(workspace)).toEqual({ state: "EMPTY", worktree: workspace });
       expect(sourceCalls).toEqual([
-        "https://api.github.example.test/repos/firestige/workflow-package/releases?per_page=100&page=1",
+        "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases?per_page=100&page=1",
         descriptorUrl,
         checksumUrl,
         assetUrl,
