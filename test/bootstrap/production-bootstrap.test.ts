@@ -254,6 +254,18 @@ function recordingProvider(
 }
 
 describe("Wave 6 production bootstrap", () => {
+  it("starts v2 with the built-in exact Provider registry without acquiring a realm before Delivery admission", async () => {
+    const { configFile, dependencies, worktree } = await fixtureV2();
+    const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+
+    await application.start();
+    expect(application.status()).toEqual({ state: "READY" });
+    await expect(application.execute({ worktree, selector: "missing@1.0.0", prompt: { text: "run", attachments: [] } }))
+      .resolves.toMatchObject({ kind: "ERROR", code: "WORKFLOW_NOT_FOUND" });
+    await application.close();
+    expect(application.status()).toEqual({ state: "CLOSED" });
+  });
+
   it("downloads the published-format DSL2 package and completes one Delivery through Copilot then Codex", async () => {
     const workflowRoot = process.env.WSR_WORKFLOW_PACKAGE_ROOT ?? path.join(repositoryRoot, "workflow-package");
     const hello = path.join(workflowRoot, "hello-world-workflow");
