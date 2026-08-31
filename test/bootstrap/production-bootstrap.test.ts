@@ -329,6 +329,7 @@ describe("Wave 6 production bootstrap", () => {
     expect(acquired.map((request) => request.providerIdentity).sort()).toEqual(["provider.codex", "provider.copilot"]);
     await application.close();
     expect(observedPaths).toEqual(expect.arrayContaining(["/v1/logs", "/v1/traces"]));
+    expect(observedPaths.filter((value) => value === "/v1/logs")).toHaveLength(2);
   }, 30_000);
 
   it("starts the real production factory from v2 installation config without entering the historical DSH-only assembly", async () => {
