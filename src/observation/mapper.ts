@@ -29,6 +29,8 @@ function fieldValid(id: ObservationFieldId, value: ObservationScalar): boolean {
   if (id === "C59" && (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 65_536)) return false;
   if (id === "C60" && (typeof value !== "string" || !DIGEST.test(value))) return false;
   if (id === "C58" && typeof value === "string" && value.trim() !== value) return false;
+  if (id === "C08" && (typeof value !== "string" || !IDENTITY.test(value))) return false;
+  if (id === "C49" && (typeof value !== "string" || !/^([A-Za-z][A-Za-z0-9._-]{0,127})@1$/u.test(value))) return false;
   if (id === "C02" && (typeof value !== "string" || !TASK_ID.test(value))) return false;
   if (PROFILE_ENUMS[id] !== undefined && !PROFILE_ENUMS[id]!.includes(value)) return false;
   if ((id === "C07" || id === "C29") && (typeof value !== "string" || !DIGEST.test(value))) return false;
@@ -38,11 +40,11 @@ function fieldValid(id: ObservationFieldId, value: ObservationScalar): boolean {
 
 function familyMatches(fact: ObservationMappableFact): boolean {
   if (fact.signal === "span") return fact.fields.C08 === undefined
-    || (fact.familySchema === "implementation@1" ? fact.fields.C08 === "implementation" : fact.fields.C08 === "system-design");
+    || fact.familySchema === `${fact.fields.C08}@1`;
   const family = fact.fields.C08;
-  return fact.eventName === "sampling.decision" || fact.eventName === "task.binding"
+  return fact.eventName === "sampling.decision"
     ? fact.fields.C49 === undefined
-    : (fact.familySchema === "implementation@1" ? family === "implementation" : family === "system-design")
+    : typeof family === "string" && fact.familySchema === `${family}@1`
       && fact.fields.C49 === fact.familySchema;
 }
 
@@ -64,7 +66,7 @@ function eventComplete(fact: Extract<ObservationMappableFact, { signal: "event" 
     const recheck = fields.C23 !== undefined;
     if (recheck && (fields.C24 === undefined || fields.C27 === undefined || fields.C35 === undefined || fields.C38 === undefined)) return false;
     if (!recheck && fields.C27 !== undefined) return false;
-    if (fields.C13 === "FRESH_READER" && (fact.familySchema !== "system-design@1" || fields.S01 === undefined || fields.S02 === undefined)) return false;
+    if (fields.C13 === "FRESH_READER" && (fields.S01 === undefined || fields.S02 === undefined)) return false;
   }
   if (fact.eventName === "implementation.summary" && typeof fields.I06 === "number" && typeof fields.I07 === "number" && fields.I06 > fields.I07) return false;
   return true;
@@ -95,6 +97,7 @@ function manifestProjectionComplete(fields: Readonly<Partial<Record<ObservationF
     || typeof projection.workflow.exact_package_version !== "string" || typeof projection.workflow.workflow_version !== "string"
     || !/^\d+\.\d+\.\d+$/u.test(projection.workflow.exact_package_version) || !/^\d+\.\d+\.\d+$/u.test(projection.workflow.workflow_version)
     || typeof projection.workflow.workflow_id !== "string" || !IDENTITY.test(projection.workflow.workflow_id)
+    || projection.workflow.workflow_id !== fields.C08 || fields.C49 !== `${fields.C08}@1`
     || typeof projection.workflow.snapshot_id !== "string" || !IDENTITY.test(projection.workflow.snapshot_id)
     || typeof projection.workflow.package_digest !== "string" || !SHA256.test(projection.workflow.package_digest)
     || typeof projection.workflow.snapshot_digest !== "string" || !SHA256.test(projection.workflow.snapshot_digest)
@@ -187,8 +190,6 @@ export class DeliveryObservationMapper {
       const rule = EVENT_RULES[fact.eventName];
       const ids = new Set(entries.map(([id]) => id));
       if (entries.some(([id]) => !rule.allowed.includes(id))) return invalid(fact, "OBSERVATION_FIELD_PROHIBITED");
-      if (entries.some(([id]) => (id.startsWith("I") && fact.familySchema !== "implementation@1")
-        || (id.startsWith("S") && fact.familySchema !== "system-design@1"))) return invalid(fact, "OBSERVATION_FIELD_PROHIBITED");
       if (rule.required.some((id) => !ids.has(id)) || fact.fields.C09 !== fact.identity || !familyMatches(fact) || !eventComplete(fact)) return invalid(fact, "OBSERVATION_SHAPE_INCOMPLETE");
       const attributes = Object.freeze(Object.fromEntries(entries.map(([id, value]) => [PROFILE_FIELDS[id].name, value])));
       const taskBinding = fact.eventName === "task.binding";

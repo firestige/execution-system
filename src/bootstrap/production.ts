@@ -116,10 +116,9 @@ function segment(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function observationFamily(workflowIdentity: string): Readonly<{ schema: ObservationFamilySchema; value: "implementation" | "system-design" }> | undefined {
-  if (/^implementation-workflow@/u.test(workflowIdentity)) return Object.freeze({ schema: "implementation@1", value: "implementation" });
-  if (/^system-design-workflow@/u.test(workflowIdentity)) return Object.freeze({ schema: "system-design@1", value: "system-design" });
-  return undefined;
+function observationFamily(workflowIdentity: string): Readonly<{ schema: ObservationFamilySchema; value: string }> | undefined {
+  if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/u.test(workflowIdentity)) return undefined;
+  return Object.freeze({ schema: `${workflowIdentity}@1`, value: workflowIdentity });
 }
 
 function nanoseconds(milliseconds: number): string {
@@ -144,7 +143,9 @@ export function createTaskBindingObservationFact(
       C01: fact.deliveryId,
       C02: fact.taskId,
       C07: fact.deliveryBindingIdentity.replace(/^sha256:/u, ""),
+      C08: family.value,
       C09: identity,
+      C49: family.schema,
       ...(fact.taskDisplayName === undefined ? {} : { C58: fact.taskDisplayName }),
       C59: fact.manifestProjection,
       C60: fact.manifestProjectionDigest,
@@ -157,8 +158,8 @@ function deliveryOwnerFactIngress(
   activation: RunnerActivationContext,
   emitter: DeliveryObservationEmitter,
 ): OwnerFactIngress {
-  const family = observationFamily(activation.correlation.workflowIdentity as string);
   const bound = manifestPackage(manifest);
+  const family = observationFamily(bound.workflowId);
   if (family === undefined || emitter.kind === "disabled") return Object.freeze({ emit(): void {} });
   const traceId = segment(`trace:${manifest.deliveryBindingIdentity}`).slice(0, 32);
   const spanId = segment(`span:${manifest.deliveryBindingIdentity}`).slice(0, 16);

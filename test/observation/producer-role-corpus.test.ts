@@ -110,11 +110,11 @@ describe("M03 producer-role corpus", () => {
     expect(incompleteModel).toMatchObject({ ok: false, diagnostic: { code: "OBSERVATION_SHAPE_INCOMPLETE" } });
   });
 
-  it("rejects sibling-family fields and malformed native Span formats", () => {
+  it("uses Event shape rather than a Workflow-name allowlist for specialized fields and rejects malformed native Span formats", () => {
     const sibling = mapper.map(fact("review.summary", "event-sibling", "implementation@1", {
       C08: "implementation", C09: "event-sibling", C11: "FINAL", C12: "review-1", C13: "FRESH_READER", C14: "WHOLE_SCOPE", C28: "artifact-1", C29: digest, C33: "writer", C34: "reviewer", C36: "invocation-w", C37: "invocation-r", C49: "implementation@1", S01: "PASS", S02: 0,
     }));
-    expect(sibling).toMatchObject({ ok: false, diagnostic: { code: "OBSERVATION_FIELD_PROHIBITED" } });
+    expect(sibling).toMatchObject({ ok: true });
 
     const malformed = mapper.map(createObservationOwnerFact({
       owner: "M02", phase: "ACTIVITY", correlation: { deliveryId: "delivery-1", traceId: "1".repeat(32), spanId: "2".repeat(16) }, identity: "span-malformed", signal: "span", familySchema: "implementation@1",

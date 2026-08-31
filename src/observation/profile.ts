@@ -45,7 +45,7 @@ const rows = [
 
 export type ObservationFieldId = typeof rows[number][0];
 export type ObservationEventName = typeof EVENT_NAMES[number];
-export type ObservationFamilySchema = "implementation@1" | "system-design@1";
+export type ObservationFamilySchema = `${string}@1`;
 
 const PUBLISHED_EVENT_NAMES = Object.freeze([
   "delivery.summary", "review.finding", "review.summary", "test.summary", "implementation.summary",
@@ -82,7 +82,7 @@ export const OBSERVATION_PROFILE_SOURCE_MATRIX = Object.freeze({
 export const PROFILE_FIELDS = allFields;
 
 export const EVENT_RULES: Readonly<Record<ObservationEventName, Readonly<{ allowed: readonly ObservationFieldId[]; required: readonly ObservationFieldId[] }>>> = Object.freeze({
-  "task.binding": { allowed: ["C01","C02","C07","C09","C58","C59","C60"], required: ["C01","C02","C07","C09","C59","C60"] },
+  "task.binding": { allowed: ["C01","C02","C07","C08","C09","C49","C58","C59","C60"], required: ["C01","C02","C07","C08","C09","C49","C59","C60"] },
   "delivery.summary": { allowed: ["C08","C09","C10","C11","C30","C49","C55","C56"], required: ["C08","C09","C10","C11","C49"] },
   "review.finding": { allowed: ["C08","C09","C12","C13","C14","C15","C18","C19","C20","C21","C22","C23","C24","C25","C26","C27","C28","C29","C33","C34","C35","C36","C37","C38","C49","C50","C51","C52","C53","C54"], required: ["C08","C09","C12","C13","C14","C15","C18","C19","C20","C28","C29","C33","C34","C36","C37","C49","C50","C51","C52","C53"] },
   "review.summary": { allowed: ["C08","C09","C11","C12","C13","C14","C16","C17","C23","C24","C25","C26","C27","C28","C29","C33","C34","C35","C36","C37","C38","C49","S01","S02"], required: ["C08","C09","C11","C12","C13","C14","C28","C29","C33","C34","C36","C37","C49"] },
@@ -96,12 +96,12 @@ export const EVENT_RULES: Readonly<Record<ObservationEventName, Readonly<{ allow
 });
 
 export const PROFILE_ENUMS: Readonly<Record<string, readonly ObservationScalar[]>> = Object.freeze({
-  C08: ["implementation", "system-design"], C10: ["COMPLETED", "INCOMPLETE", "FAILED", "CANCELLED", "START_FAILED"],
+  C10: ["COMPLETED", "INCOMPLETE", "FAILED", "CANCELLED", "START_FAILED"],
   C11: ["FINAL", "LOWER_BOUND", "NOT_APPLICABLE", "UNAVAILABLE"],
   C13: ["GOAL_BLACKBOX", "IMPLEMENTATION_WHITEBOX", "ARCHITECTURE", "PROBLEM_SOLUTION", "QUALITY_ACCEPTANCE", "FRESH_READER"],
   C15: ["BLOCKING", "MAJOR", "MINOR"], C19: ["OPEN", "CLOSED_FIXED", "CLOSED_NOT_VALID", "ACCEPTED_MINOR"],
   C39: ["USER_REDIRECT"], C42: ["native_credit", "request", "premium_request", "provider_native", "money"],
-  C44: ["runtime", "provider"], C47: ["RECORD_AND_SAMPLE", "DROP"], C49: ["implementation@1", "system-design@1"],
+  C44: ["runtime", "provider"], C47: ["RECORD_AND_SAMPLE", "DROP"],
   C52: ["ARTIFACT", "SECTION", "COMPONENT", "REQUIREMENT"], I05: ["line", "branch", "function"],
   S01: ["PASS", "FINDINGS_REPORTED"], S04: ["PASS", "FAIL", "INCONCLUSIVE", "KNOWN_RED_NO_DELTA"],
 });
