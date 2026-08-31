@@ -321,7 +321,6 @@ export class DeliveryLifecycleService {
     if (slot.state === "START_FAILED") {
       const finishedAt = this.#options.clock.now();
       await this.#options.slots.transition(slot.worktree, "M01_START_FAILURE_HANDLED", finishedAt);
-      this.#publishChange();
       await this.#publishCompleted(manifest, "FAILED", finishedAt, Object.freeze({ code: "RUNNER_START_FAILED" }));
       return failure("RUNNER_START_FAILED");
     }
@@ -339,7 +338,6 @@ export class DeliveryLifecycleService {
       if (manifest.deliveryBindingIdentity !== current.deliveryBindingIdentity) return failure("DELIVERY_UNKNOWN");
       const finishedAt = this.#options.clock.now();
       await this.#options.slots.transition(worktree, "ADMINISTRATIVE_CLOSE", finishedAt, { authorization: deliveryId });
-      this.#publishChange();
       await this.#publishCompleted(manifest, "CANCELLED", finishedAt, null);
       this.#ownerFacts.emit({ owner: "M01", name: "authorized-abandonment", occurredAt: this.#options.clock.now() });
       return Object.freeze({ kind: "TERMINAL", worktree, deliveryId, outcome: "CANCELLED", summary: "AUTHORIZED_ABANDONMENT" });
@@ -426,7 +424,6 @@ export class DeliveryLifecycleService {
       ownerFacts.emit({ owner: "M01", name: "start-failure-handled", occurredAt: this.#options.clock.now() });
       const finishedAt = this.#options.clock.now();
       await this.#options.slots.transition(manifest.canonicalWorktree, "M01_START_FAILURE_HANDLED", finishedAt);
-      this.#publishChange();
       await this.#publishCompleted(manifest, "FAILED", finishedAt, Object.freeze({ code: "RUNNER_START_FAILED" }));
       return failure("RUNNER_START_FAILED");
     }
@@ -459,7 +456,6 @@ export class DeliveryLifecycleService {
     ownerFacts.emit({ owner: "M01", name: "terminal-handling-complete", occurredAt: this.#options.clock.now() });
     const finishedAt = this.#options.clock.now();
     await this.#options.slots.transition(manifest.canonicalWorktree, "M01_TERMINAL_HANDLING_COMPLETE", finishedAt);
-    this.#publishChange();
     const outcome = result.outcome === "COMPLETED" ? "SUCCEEDED" : result.outcome === "CANCELLED" ? "CANCELLED" : "FAILED";
     await this.#publishCompleted(manifest, outcome, finishedAt, outcome === "FAILED" ? Object.freeze({ code: result.outcome }) : null);
     return Object.freeze({ kind: "TERMINAL", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, outcome });

@@ -10,6 +10,7 @@ export interface BrokerDelivery {
   readonly package: string;
   readonly deliveryBindingIdentity: string;
   correlation?: string;
+  sessionCorrelation?: string;
   readonly actionBySite?: Readonly<Record<string, string>>;
   readonly finalActionSites?: readonly string[];
   finalOutput?: string;
@@ -41,13 +42,17 @@ export class ProductionInteractionBroker {
   attach(deliveryId: string, correlation: string): void {
     this.#correlationByDelivery.set(deliveryId, correlation);
     const delivery = this.#deliveries.get(deliveryId);
-    if (delivery !== undefined) delivery.correlation = correlation;
+    if (delivery !== undefined) {
+      delivery.correlation = correlation;
+      delivery.sessionCorrelation = correlation;
+    }
     this.invalidate();
   }
   register(deliveryId: string, worktree: string, packageCoordinate: string, deliveryBindingIdentity: string, actionBySite?: Readonly<Record<string, string>>, finalActionSites?: readonly string[]): void {
-    const correlation = this.#correlationByDelivery.get(deliveryId) ?? this.#correlationByWorktree.get(worktree);
+    const sessionCorrelation = this.#correlationByDelivery.get(deliveryId);
+    const correlation = sessionCorrelation ?? this.#correlationByWorktree.get(worktree);
     this.#correlationByWorktree.delete(worktree);
-    const delivery: BrokerDelivery = { deliveryId, worktree, package: packageCoordinate, deliveryBindingIdentity, ...(correlation === undefined ? {} : { correlation }), ...(actionBySite === undefined ? {} : { actionBySite }), ...(finalActionSites === undefined ? {} : { finalActionSites }) };
+    const delivery: BrokerDelivery = { deliveryId, worktree, package: packageCoordinate, deliveryBindingIdentity, ...(correlation === undefined ? {} : { correlation }), ...(sessionCorrelation === undefined ? {} : { sessionCorrelation }), ...(actionBySite === undefined ? {} : { actionBySite }), ...(finalActionSites === undefined ? {} : { finalActionSites }) };
     this.#deliveries.set(deliveryId, delivery);
     if (correlation !== undefined) for (const resolve of this.#waiters.get(correlation) ?? []) resolve(delivery);
     if (correlation !== undefined) this.#waiters.delete(correlation);
@@ -112,8 +117,8 @@ export class ProductionInteractionBroker {
   deliveryForCorrelation(correlation: string): BrokerDelivery | undefined {
     return [...this.#deliveries.values()].find((delivery) => delivery.correlation === correlation);
   }
-  isBound(deliveryId: string): boolean { return this.#deliveries.get(deliveryId)?.correlation !== undefined; }
-  bindingForDelivery(deliveryId: string): string | undefined { return this.#deliveries.get(deliveryId)?.correlation; }
+  isBound(deliveryId: string): boolean { return this.#deliveries.get(deliveryId)?.sessionCorrelation !== undefined; }
+  bindingForDelivery(deliveryId: string): string | undefined { return this.#deliveries.get(deliveryId)?.sessionCorrelation; }
   finalOutput(deliveryId: string): string | undefined { return this.#deliveries.get(deliveryId)?.finalOutput; }
   pending(deliveryId: string): boolean { return this.#pending.has(deliveryId); }
   beginAction(deliveryId: string, actionIdentity: string): void {
@@ -147,7 +152,7 @@ export class ProductionInteractionBroker {
     return Object.freeze([...this.#deliveries.values()].map((delivery) => Object.freeze({
       deliveryId: delivery.deliveryId,
       deliveryBindingIdentity: delivery.deliveryBindingIdentity,
-      ...(delivery.correlation === undefined ? {} : { sessionCorrelation: delivery.correlation }),
+      ...(delivery.sessionCorrelation === undefined ? {} : { sessionCorrelation: delivery.sessionCorrelation }),
     })));
   }
   enumerateRuntime(): readonly DeliveryProjectionRuntime[] {

@@ -353,6 +353,29 @@ describe("Wave 6 production bootstrap", () => {
     await expect(second).resolves.toMatchObject({ deliveryId: "delivery-waiter" });
   });
 
+  it("keeps an expected Intake correlation private until its durable Session binding is attached", async () => {
+    let invalidations = 0;
+    const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }), () => { invalidations += 1; });
+    const waiting = broker.waitForDelivery("correlation-pending", 100);
+
+    broker.expect("/pending-worktree", "correlation-pending");
+    broker.register("delivery-pending", "/pending-worktree", "fixture@1.0.0", `sha256:${"a".repeat(64)}`);
+
+    await expect(waiting).resolves.toMatchObject({ deliveryId: "delivery-pending", correlation: "correlation-pending" });
+    expect(broker.enumerateBindings()).toEqual([{
+      deliveryId: "delivery-pending",
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+    }]);
+
+    broker.attach("delivery-pending", "correlation-pending");
+    expect(broker.enumerateBindings()).toEqual([{
+      deliveryId: "delivery-pending",
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+      sessionCorrelation: "correlation-pending",
+    }]);
+    expect(invalidations).toBe(2);
+  });
+
   it("projects an ordinary attachment-free chat answer into a string Action response schema", async () => {
     const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }));
     broker.register("delivery-string-input", "/worktree", "fixture@1.0.0", `sha256:${"b".repeat(64)}`);

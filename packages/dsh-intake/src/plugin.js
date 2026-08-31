@@ -302,6 +302,7 @@ export async function createPluginRuntime(config, options = {}) {
         return result;
       }
       await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: delivery.deliveryId, worktree: delivery.worktree, deliveryBindingIdentity: delivery.deliveryBindingIdentity }));
+      control.attach(delivery.deliveryId, correlation);
       void track(execution.then(async (result) => {
         try { await options.present?.(Object.freeze({
           sessionKey: input.sessionKey,
@@ -335,6 +336,7 @@ export async function createPluginRuntime(config, options = {}) {
         const recovered = (await bindingInventory()).filter((item) => item.deliveryId === result.deliveryId && item.worktree === result.worktree);
         if (recovered.length !== 1) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
         await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: result.deliveryId, worktree: result.worktree, deliveryBindingIdentity: recovered[0].deliveryBindingIdentity }));
+        control.attach(result.deliveryId, correlation);
         sessionByCorrelation.set(correlation, input.sessionKey);
       }
       return result;
