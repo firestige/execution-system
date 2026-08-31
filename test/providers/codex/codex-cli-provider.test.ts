@@ -185,7 +185,10 @@ describe("Codex CLI Agent Provider", () => {
       delete process.env.WSR_TEST_SECRET;
     }
 
-    expect(events).toEqual([{ kind: "structured-completion", result: { accepted: true, cwd: value.worktree } }]);
+    expect(events).toEqual([
+      { kind: "output", content: { accepted: true, cwd: value.worktree } },
+      { kind: "structured-completion", result: { accepted: true, cwd: value.worktree } },
+    ]);
     const capture = JSON.parse(await readFile(value.capture, "utf8"));
     expect(capture.cwd).toBe(value.worktree);
     expect(capture.argv).toEqual(expect.arrayContaining([

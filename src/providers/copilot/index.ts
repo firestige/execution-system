@@ -74,7 +74,7 @@ function workspaceTools(worktree: string, dispatch: InvocationDispatch): Copilot
   });
 }
 function compatibilityPrefix(dispatch: InvocationDispatch): string { return `wsr-${sha256(JSON.stringify({ delivery: dispatch.episode.thread.delivery.deliveryIdentity, manifest: dispatch.episode.thread.delivery.manifestBindingIdentity, role: dispatch.executor.session.roleIdentity, route: dispatch.executor.session.routeIdentity, model: dispatch.executor.session.model.providerModelIdentity, session: dispatch.executor.sessionCompatibilityIdentity })).slice(0, 24)}-`; }
-function eventProjection(event: unknown): NativeTurnEvent | undefined { if (!plain(event) || typeof event.type !== "string") return undefined; const data = plain(event.data) ? event.data : {}; if (event.type === "assistant.message" && typeof data.content === "string") return { kind: "output", content: data.content }; if (event.type === "session.error") return { kind: "provider-failed", code: "PROVIDER_PROTOCOL_ERROR", detail: "Copilot session reported an error" }; if (event.type === "abort") return { kind: "provider-failed", code: "PROVIDER_CANCELLED", detail: "Copilot turn was cancelled" }; return undefined; }
+function eventProjection(event: unknown): NativeTurnEvent | undefined { if (!plain(event) || typeof event.type !== "string") return undefined; const data = plain(event.data) ? event.data : {}; if (event.type === "assistant.message" && typeof data.content === "string" && data.content.length > 0) return { kind: "output", content: data.content }; if (event.type === "session.error") return { kind: "provider-failed", code: "PROVIDER_PROTOCOL_ERROR", detail: "Copilot session reported an error" }; if (event.type === "abort") return { kind: "provider-failed", code: "PROVIDER_CANCELLED", detail: "Copilot turn was cancelled" }; return undefined; }
 
 class CopilotNativeSession implements NativeProviderSession {
   readonly opaqueIdentity: string; #disposed = false; #events: NativeTurnEvent[] = [];
@@ -85,7 +85,16 @@ class CopilotNativeSession implements NativeProviderSession {
     try { await Promise.race([this.session.sendAndWait({ prompt: JSON.stringify({ kind: "WSR_AGENT_ACTION", input }) }, this.turnTimeoutMs), new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(Object.assign(new Error("timeout"), { code: "WSR_COPILOT_TIMEOUT" })), this.turnTimeoutMs); })]); }
     catch (error) { if ((error as { code?: unknown }).code === "WSR_COPILOT_TIMEOUT") { await this.session.abort().catch(() => undefined); return Object.freeze([...this.#events, { kind: "provider-failed", code: "PROVIDER_TIMED_OUT", detail: "Copilot turn timed out" } as const]); } return Object.freeze([...this.#events, { kind: "provider-failed", code: "PROVIDER_EXITED", detail: "Copilot runtime exited during the turn" } as const]); }
     finally { if (timeout !== undefined) clearTimeout(timeout); }
-    if (!this.#events.some((event) => event.kind === "structured-completion" || event.kind === "input-request" || event.kind === "provider-failed")) this.#events.push({ kind: "turn-ended" }); return Object.freeze([...this.#events]);
+    if (!this.#events.some((event) => event.kind === "structured-completion" || event.kind === "input-request" || event.kind === "provider-failed")) this.#events.push({ kind: "turn-ended" });
+    const completion = this.#events.find((event): event is Extract<NativeTurnEvent, { kind: "structured-completion" }> => event.kind === "structured-completion");
+    if (completion === undefined) return Object.freeze([...this.#events]);
+    const projected: NativeTurnEvent[] = [];
+    for (const event of this.#events) {
+      if (event.kind === "output") continue;
+      if (event === completion) projected.push({ kind: "output", content: completion.result });
+      projected.push(event);
+    }
+    return Object.freeze(projected);
   }
   async persist(): Promise<void> { try { if (await this.client.getSessionMetadata(this.opaqueIdentity) === undefined) throw new Error("missing"); } catch { throw new TypeError("Copilot result persistence is uncertain"); } }
   async cancel(): Promise<void> { if (!this.#disposed) await this.session.abort(); }

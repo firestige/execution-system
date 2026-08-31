@@ -488,7 +488,8 @@ class CodexCliSession implements NativeProviderSession {
       catch {
         return events({ kind: "provider-uncertain", phase: "result", detail: "Codex typed result is not observable" });
       }
-      return events({ kind: "structured-completion", result: deepFreeze(result) as FrozenJsonValue });
+      const completion = deepFreeze(result) as FrozenJsonValue;
+      return events({ kind: "output", content: completion }, { kind: "structured-completion", result: completion });
     } finally {
       this.#running = false;
       await rm(operationDirectory, { recursive: true, force: true });

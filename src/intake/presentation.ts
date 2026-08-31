@@ -77,7 +77,7 @@ function statusData(result: Record<string, unknown>): Readonly<Record<string, Fr
 }
 
 function visibleActionText(value: FrozenJsonValue): string | undefined {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return value.length === 0 ? undefined : value;
   if (Array.isArray(value)) {
     for (const item of value) {
       const completion = visibleCompletionText(item);
@@ -93,7 +93,7 @@ function visibleActionText(value: FrozenJsonValue): string | undefined {
   }
   if (value === null || typeof value !== "object") return undefined;
   const record = value as Readonly<Record<string, FrozenJsonValue>>;
-  if (typeof record.type === "string") return record.type === "text" && typeof record.text === "string"
+  if (typeof record.type === "string") return record.type === "text" && typeof record.text === "string" && record.text.length > 0
     ? record.text
     : visibleCompletionText(record);
   for (const key of ["text", "message", "greeting", "summary", "result"] as const) {
@@ -139,8 +139,9 @@ export function presentationForIntakeResult(
   return Buffer.byteLength(JSON.stringify(event), "utf8") <= maxBytes ? event : truncated(correlation);
 }
 
-export function actionOutputPresentation(correlation: string, content: FrozenJsonValue): IntakePresentation {
+export function actionOutputPresentation(correlation: string, content: FrozenJsonValue, label?: string): IntakePresentation {
   return createIntakePresentation(correlation, "action-output", {
+    ...(label === undefined ? {} : { label }),
     content: { text: visibleActionText(content) ?? "WSR content unavailable" },
   });
 }
