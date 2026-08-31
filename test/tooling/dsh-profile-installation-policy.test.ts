@@ -40,7 +40,7 @@ describe("DSH profile installation policy", () => {
     expect(calls[1]?.at(-1)).toBe('{"better-sqlite3":true}');
   });
 
-  it("binds an exact unpublished dependency to the locally qualified archive", async () => {
+  it("binds every locator for the qualified package, including a direct tarball URL, to the local archive", async () => {
     const profile = await mkdtemp(path.join(tmpdir(), "dsh-profile-candidate-"));
     const archive = path.join(profile, "wsr-execution-0.1.3.tgz");
     try {
@@ -57,7 +57,7 @@ describe("DSH profile installation policy", () => {
       const workspace = parse(await readFile(path.join(profile, "pnpm-workspace.yaml"), "utf8"));
       expect(workspace.overrides).toEqual({
         "existing@1.0.0": "file:/existing.tgz",
-        "wsr-execution@0.1.3": `file:${archive}`,
+        "wsr-execution": `file:${archive}`,
       });
     } finally {
       await rm(profile, { recursive: true, force: true });

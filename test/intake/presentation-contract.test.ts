@@ -81,6 +81,11 @@ describe("WSR host-neutral presentation contract", () => {
       .toEqual({ content: { text: expected } });
   });
 
+  it.each(["", { type: "text", text: "" }])("never emits an empty public Action card for %j", (content) => {
+    expect(actionOutputPresentation("correlation-1", content as never).data)
+      .toEqual({ content: { text: "WSR content unavailable" } });
+  });
+
   it("fails closed to a bounded error when public presentation content exceeds its bound", () => {
     const event = presentationForIntakeResult("correlation-1", {
       kind: "TERMINAL", worktree: "/workspace", deliveryId: "delivery-1", outcome: "FAILED", summary: "x".repeat(10_000),

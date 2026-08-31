@@ -24,7 +24,8 @@ class FakeSession implements CopilotSdkSession {
   async sendAndWait(message: Readonly<{ prompt: string }>): Promise<unknown> {
     if (this.scenario === "timeout") return await new Promise(() => undefined);
     if (this.scenario === "process-error") throw new Error("transport exited");
-    this.config.onEvent?.({ type: "assistant.message", data: { content: `frame:${message.prompt}` } });
+    this.config.onEvent?.({ type: "assistant.message", data: { content: "" } });
+    this.config.onEvent?.({ type: "assistant.message", data: { content: "" } });
     const name = this.scenario === "input" ? "workflow_request_input" : "workflow_complete";
     const tool = this.config.tools.find((candidate) => candidate.name === name);
     if (tool?.handler === undefined) throw new Error("missing terminal tool");
@@ -130,7 +131,10 @@ describe("Copilot SDK Agent Provider", () => {
 
   it("uses exact local runtime/login, frozen Role/model, canonical cwd, scoped tools, and typed completion", async () => {
     const prepared = await fixture(); const native = await prepared.lease.adapter.sessions.open({ dispatch: dispatch(prepared), signal: new AbortController().signal });
-    expect(await native.run({ review: "current change" })).toEqual([{ kind: "output", content: expect.stringContaining("current change") }, { kind: "structured-completion", result: { accepted: true } }]);
+    expect(await native.run({ review: "current change" })).toEqual([
+      { kind: "output", content: { accepted: true } },
+      { kind: "structured-completion", result: { accepted: true } },
+    ]);
     expect(prepared.client.start).toHaveBeenCalledOnce(); expect(prepared.client.getAuthStatus).toHaveBeenCalledOnce();
     const clientOptions = (prepared.binding.createClient as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(clientOptions).toMatchObject({ mode: "empty", useLoggedInUser: true, workingDirectory: prepared.workspace });

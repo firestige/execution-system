@@ -11,6 +11,8 @@ export interface BrokerDelivery {
   readonly deliveryBindingIdentity: string;
   correlation?: string;
   readonly actionBySite?: Readonly<Record<string, string>>;
+  readonly finalActionSites?: readonly string[];
+  finalOutput?: string;
 }
 
 type PendingInteraction =
@@ -42,10 +44,10 @@ export class ProductionInteractionBroker {
     if (delivery !== undefined) delivery.correlation = correlation;
     this.invalidate();
   }
-  register(deliveryId: string, worktree: string, packageCoordinate: string, deliveryBindingIdentity: string, actionBySite?: Readonly<Record<string, string>>): void {
+  register(deliveryId: string, worktree: string, packageCoordinate: string, deliveryBindingIdentity: string, actionBySite?: Readonly<Record<string, string>>, finalActionSites?: readonly string[]): void {
     const correlation = this.#correlationByDelivery.get(deliveryId) ?? this.#correlationByWorktree.get(worktree);
     this.#correlationByWorktree.delete(worktree);
-    const delivery: BrokerDelivery = { deliveryId, worktree, package: packageCoordinate, deliveryBindingIdentity, ...(correlation === undefined ? {} : { correlation }), ...(actionBySite === undefined ? {} : { actionBySite }) };
+    const delivery: BrokerDelivery = { deliveryId, worktree, package: packageCoordinate, deliveryBindingIdentity, ...(correlation === undefined ? {} : { correlation }), ...(actionBySite === undefined ? {} : { actionBySite }), ...(finalActionSites === undefined ? {} : { finalActionSites }) };
     this.#deliveries.set(deliveryId, delivery);
     if (correlation !== undefined) for (const resolve of this.#waiters.get(correlation) ?? []) resolve(delivery);
     if (correlation !== undefined) this.#waiters.delete(correlation);
@@ -54,8 +56,22 @@ export class ProductionInteractionBroker {
   bridge(deliveryId: string): ActionInteractionBridge {
     return Object.freeze({
       publish: async (frame: AgentOutputFrame) => {
-        const correlation = this.#deliveries.get(deliveryId)?.correlation ?? deliveryId;
-        await this.presentation.publish(actionOutputPresentation(correlation, frame.content)).catch(() => undefined);
+        const delivery = this.#deliveries.get(deliveryId);
+        const correlation = delivery?.correlation ?? deliveryId;
+        const site = frame.episode.site;
+        const siteKey = site.kind === "node" ? `node:${site.nodeIdentity}`
+          : site.kind === "parallel-branch" ? `parallel-branch:${site.nodeIdentity}:${site.branchIdentity}`
+            : `parallel-join:${site.nodeIdentity}`;
+        const presentation = actionOutputPresentation(correlation, frame.content, delivery?.actionBySite?.[siteKey]);
+        if (delivery?.finalActionSites?.includes(siteKey)) {
+          const content = presentation.data.content;
+          if (content !== null && typeof content === "object" && !Array.isArray(content)
+            && typeof (content as Readonly<Record<string, FrozenJsonValue>>).text === "string") {
+            delivery.finalOutput = (content as Readonly<Record<string, FrozenJsonValue>>).text as string;
+          }
+        } else {
+          await this.presentation.publish(presentation).catch(() => undefined);
+        }
         return Object.freeze({ ok: true as const, value: undefined });
       },
       requestInput: async (request: ActionInputRequest): Promise<Result<ActionInputResponse, InteractionError>> => new Promise((resolve) => {
@@ -98,6 +114,7 @@ export class ProductionInteractionBroker {
   }
   isBound(deliveryId: string): boolean { return this.#deliveries.get(deliveryId)?.correlation !== undefined; }
   bindingForDelivery(deliveryId: string): string | undefined { return this.#deliveries.get(deliveryId)?.correlation; }
+  finalOutput(deliveryId: string): string | undefined { return this.#deliveries.get(deliveryId)?.finalOutput; }
   pending(deliveryId: string): boolean { return this.#pending.has(deliveryId); }
   beginAction(deliveryId: string, actionIdentity: string): void {
     if (!this.#deliveries.has(deliveryId) || actionIdentity.length === 0) return;

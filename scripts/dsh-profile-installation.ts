@@ -57,7 +57,7 @@ export async function bindLocalPackageCandidate(
   }
   document.overrides = {
     ...(existing as Record<string, unknown> | undefined),
-    [`${packageName}@${version}`]: `file:${archive}`,
+    [packageName]: `file:${archive}`,
   };
   await writeFile(workspaceFile, stringify(document), "utf8");
 }

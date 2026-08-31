@@ -307,7 +307,11 @@ class ProductionRuntimeManager implements DeliveryRuntimeFactory {
           : `parallel-join:${value.nodeIdentity}`;
       return [key, site.actionIdentity];
     })));
-    this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`, manifest.deliveryBindingIdentity, actionBySite);
+    const successfulTerminals = new Set<string>(activation.program.control.terminals.filter((terminal) => terminal.kind === "success").map((terminal) => terminal.id));
+    const finalActionSites = Object.freeze(activation.program.control.ordinarySuccessor
+      .filter((transition) => successfulTerminals.has(transition.to) && actionBySite[`node:${transition.from}`] !== undefined)
+      .map((transition) => `node:${transition.from}`));
+    this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${manifest.resolvedPackage.name}@${manifest.resolvedPackage.exactVersion}`, manifest.deliveryBindingIdentity, actionBySite, finalActionSites);
     const interaction = this.interactions.bridge(manifest.deliveryId);
     const workflow = this.interactions.workflowBridge(manifest.deliveryId);
     const observation = createRunnerOwnerFactPort(Object.freeze({ emit: (fact: RunnerSettlementOwnerFact) => this.observation.emit(fact) }));
@@ -396,7 +400,11 @@ class ProductionAgentProviderRuntimeManager implements DeliveryRuntimeFactory {
         return [key, site.actionIdentity];
       })));
       const bound = manifestPackage(manifest);
-      this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${bound.name}@${bound.exactVersion}`, manifest.deliveryBindingIdentity, actionBySite);
+      const successfulTerminals = new Set<string>(activation.program.control.terminals.filter((terminal) => terminal.kind === "success").map((terminal) => terminal.id));
+      const finalActionSites = Object.freeze(activation.program.control.ordinarySuccessor
+        .filter((transition) => successfulTerminals.has(transition.to) && actionBySite[`node:${transition.from}`] !== undefined)
+        .map((transition) => `node:${transition.from}`));
+      this.interactions.register(manifest.deliveryId, manifest.canonicalWorktree, `${bound.name}@${bound.exactVersion}`, manifest.deliveryBindingIdentity, actionBySite, finalActionSites);
       const adapter = await this.#runner.create(config, Object.freeze({
         interaction: this.interactions.bridge(manifest.deliveryId),
         workflow: this.interactions.workflowBridge(manifest.deliveryId),
@@ -589,7 +597,11 @@ export class DefaultExecutionApplicationFactory implements ExecutionApplicationF
       if (state !== "READY") return failure(state === "CLOSING" || state === "CLOSED" ? "APPLICATION_CLOSING" : "APPLICATION_NOT_READY");
       const admitted = await core.begin(request, authorization);
       if (admitted.kind === "NEW") interactions.expect(admitted.command.canonicalWorktree, admitted.command.intakeCorrelation);
-      return admitted.kind === "NEW" ? delivery.activate(admitted) : admitted;
+      if (admitted.kind !== "NEW") return admitted;
+      const result = await delivery.activate(admitted);
+      if (result.kind !== "TERMINAL" || result.outcome !== "SUCCEEDED") return result;
+      const summary = interactions.finalOutput(result.deliveryId);
+      return summary === undefined ? result : Object.freeze({ ...result, summary });
     }
 
     const application: ExecutionApplication = Object.freeze({

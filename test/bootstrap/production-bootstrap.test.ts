@@ -238,7 +238,10 @@ function recordingProvider(
                 : Object.freeze({ success: true, greeting: "Hello from Copilot", reviewed: true });
               const session: NativeProviderSession = Object.freeze({
                 opaqueIdentity: `${identity}:${dispatch.executor.session.roleIdentity}`,
-                async run() { return Object.freeze([{ kind: "structured-completion" as const, result }]); },
+                async run() { return Object.freeze([
+                  { kind: "output" as const, content: result },
+                  { kind: "structured-completion" as const, result },
+                ]); },
                 async persist() {}, async cancel() {}, async dispose() {},
               });
               return session;
@@ -302,7 +305,9 @@ describe("Wave 6 production bootstrap", () => {
 
     await application.start();
     const result = await application.execute({ worktree, selector: "hello-world-workflow@0.2.0", prompt: { text: "Say hello", attachments: [] } });
-    expect(result, JSON.stringify({ result, openedRoles, acquired })).toMatchObject({ kind: "TERMINAL", outcome: "SUCCEEDED" });
+    expect(result, JSON.stringify({ result, openedRoles, acquired })).toMatchObject({
+      kind: "TERMINAL", outcome: "SUCCEEDED", summary: "Hello from Copilot",
+    });
     expect(openedRoles).toEqual(["copilot-sdk:role.greeter", "codex-cli:role.reviewer"]);
     expect(acquired.map((request) => request.providerIdentity).sort()).toEqual(["provider.codex", "provider.copilot"]);
     await application.close();
@@ -408,6 +413,37 @@ describe("Wave 6 production bootstrap", () => {
       ok: true,
       value: { controlIdentity: "control-1", correlationIdentity: "correlation-1", content: { confirmed: true }, contentIdentity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u) },
     });
+  });
+
+  it("labels process Actions and retains the direct-success Action as the final answer", async () => {
+    const presentations: any[] = [];
+    const broker = new ProductionInteractionBroker(Object.freeze({ async publish(message: any) { presentations.push(message); } }));
+    broker.expect("/worktree", "intake-correlation");
+    broker.register("delivery-output", "/worktree", "fixture@1.0.0", `sha256:${"f".repeat(64)}`, Object.freeze({
+      "node:node-greet": "action.greet",
+      "node:node-review": "action.review",
+    }), Object.freeze(["node:node-review"]));
+    const frame = (nodeIdentity: string, content: any) => Object.freeze({
+      episode: Object.freeze({
+        thread: Object.freeze({ delivery: Object.freeze({}), threadIdentity: "thread-1" }),
+        site: Object.freeze({ kind: "node", nodeIdentity }),
+        invocationIdentity: `invocation-${nodeIdentity}`,
+        attemptIdentity: `attempt-${nodeIdentity}`,
+      }),
+      sequence: 0,
+      content,
+    }) as any;
+
+    await broker.bridge("delivery-output").publish(frame("node-greet", { greeting: "Hello" }));
+    await broker.bridge("delivery-output").publish(frame("node-review", { greeting: "Reviewed hello" }));
+
+    expect(presentations).toEqual([{
+      schemaVersion: "wsr.presentation@1.0.0",
+      correlation: "intake-correlation",
+      kind: "action-output",
+      data: { label: "action.greet", content: { text: "Hello" } },
+    }]);
+    expect(broker.finalOutput("delivery-output")).toBe("Reviewed hello");
   });
 
   it("builds only exact admitted Host Operation handlers from installation factories", async () => {
