@@ -254,6 +254,19 @@ export async function createPluginRuntime(config, options = {}) {
     return promise;
   }
 
+  async function awaitRegistrationOrResult(execution, correlation) {
+    const result = execution.then((value) => Object.freeze({ kind: "result", result: value }));
+    while (true) {
+      const first = await Promise.race([
+        result,
+        control.waitForDelivery(correlation, options.deliveryRegistrationTimeoutMs ?? 10_000)
+          .then((delivery) => Object.freeze({ kind: "delivery", delivery })),
+      ]);
+      if (first.kind === "result" || first.delivery !== undefined) return first;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
   async function invokeForSession(input) {
     if (!accepting) return error("APPLICATION_CLOSING");
     const candidateBinding = await bindings.bySession(input.sessionKey);
@@ -286,22 +299,14 @@ export async function createPluginRuntime(config, options = {}) {
       if (authorization === undefined) return error("DSH_INTAKE_WORKSPACE_UNAUTHORIZED");
       sessionByCorrelation.set(correlation, input.sessionKey);
       const execution = track(service.invoke(Object.freeze({ operation: "create", selector: operation.selector, worktree: authorization.path, directive: operation.directive, turn, correlation }), authorization));
-      const first = await Promise.race([
-        execution.then((result) => Object.freeze({ kind: "result", result })),
-        control.waitForDelivery(correlation, options.deliveryRegistrationTimeoutMs ?? 10_000)
-          .then((delivery) => Object.freeze({ kind: "delivery", delivery })),
-      ]);
+      const first = await awaitRegistrationOrResult(execution, correlation);
       if (first.kind === "result") {
         if (first.result.kind === "ERROR" || first.result.kind === "TERMINAL" || first.result.kind === "RECOVERY") sessionByCorrelation.delete(correlation);
         return first.result;
       }
       const delivery = first.delivery;
-      if (delivery === undefined) {
-        const result = await execution;
-        if (result.kind === "ERROR" || result.kind === "TERMINAL") sessionByCorrelation.delete(correlation);
-        return result;
-      }
       await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: delivery.deliveryId, worktree: delivery.worktree, deliveryBindingIdentity: delivery.deliveryBindingIdentity }));
+      control.attach(delivery.deliveryId, correlation);
       void track(execution.then(async (result) => {
         try { await options.present?.(Object.freeze({
           sessionKey: input.sessionKey,
@@ -335,6 +340,7 @@ export async function createPluginRuntime(config, options = {}) {
         const recovered = (await bindingInventory()).filter((item) => item.deliveryId === result.deliveryId && item.worktree === result.worktree);
         if (recovered.length !== 1) return error("INTAKE_BINDING_INVARIANT_VIOLATION");
         await bindings.claim(Object.freeze({ sessionKey: input.sessionKey, correlation, deliveryId: result.deliveryId, worktree: result.worktree, deliveryBindingIdentity: recovered[0].deliveryBindingIdentity }));
+        control.attach(result.deliveryId, correlation);
         sessionByCorrelation.set(correlation, input.sessionKey);
       }
       return result;

@@ -132,6 +132,7 @@ async function fixture(options: Readonly<{
 
 async function fixtureV2(options: Readonly<{
   network?: (url: string) => Promise<Readonly<{ status: number; body: Uint8Array }>>;
+  observationEndpoint?: string;
 }> = {}) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "execution-bootstrap-v2-")));
   roots.push(root);
@@ -147,7 +148,7 @@ async function fixtureV2(options: Readonly<{
     paths: { repositoryRoot: repository, workspaceRoot, allowedWorktreeRoots: [workspaceRoot], stateRoot },
     workflowSource: { kind: "github", repository: "firestige/wsr-workflow-package", releasesBaseUrl: "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases", assetPattern: "workflow-package-{name}-{version}.tar.gz" },
     runner: { implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 2 },
-    observation: { enabled: false, timeoutMs: 100, maxBatchRecords: 512, maxBatchBytes: 4_194_304, flushIntervalMs: 1_000, shutdownFlushMs: 1_000, serviceName: "execution-v2-fixture" },
+    observation: { enabled: options.observationEndpoint !== undefined, ...(options.observationEndpoint === undefined ? {} : { endpoint: options.observationEndpoint }), timeoutMs: 100, maxBatchRecords: 512, maxBatchBytes: 4_194_304, flushIntervalMs: 1_000, shutdownFlushMs: 1_000, serviceName: "execution-v2-fixture" },
     controls: { startupTimeoutMs: 10_000, executionTimeoutMs: 10_000, shutdownTimeoutMs: 10_000, maxConcurrentDeliveries: 2, allowExplicitRefresh: false, diagnosticMaxBytes: 512 },
     intake: { maxCorrelationBytes: 256, maxOutputBytes: 1_024 },
   })}\n`);
@@ -270,6 +271,19 @@ describe("Wave 6 production bootstrap", () => {
   });
 
   it("downloads the published-format DSL2 package and completes one Delivery through Copilot then Codex", async () => {
+    const observedPaths: string[] = [];
+    const observationEndpoint = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        observedPaths.push(request.url ?? "");
+        response.writeHead(200, { "content-type": "application/x-protobuf" });
+        response.end();
+      });
+    });
+    servers.push(observationEndpoint);
+    await new Promise<void>((resolve) => observationEndpoint.listen(0, "127.0.0.1", resolve));
+    const observationAddress = observationEndpoint.address();
+    if (observationAddress === null || typeof observationAddress === "string") throw new Error("observation endpoint unavailable");
     const workflowRoot = process.env.WSR_WORKFLOW_PACKAGE_ROOT ?? path.join(repositoryRoot, "workflow-package");
     const hello = path.join(workflowRoot, "hello-world-workflow");
     const packageDocument = JSON.parse(await readFile(path.join(hello, "definition/package.json"), "utf8")) as { package: { digest: string } };
@@ -281,7 +295,10 @@ describe("Wave 6 production bootstrap", () => {
     const packed = spawnSync("tar", ["-czf", archivePath, "-C", path.join(materialRoot, "material"), "."], { encoding: "utf8", shell: false });
     if (packed.status !== 0) throw new Error(packed.stderr);
     const archive = Uint8Array.from(await readFile(archivePath));
-    const { configFile, dependencies, worktree } = await fixtureV2({ network: scopedReleaseNetworkV2(archive, packageDocument.package.digest) });
+    const { configFile, dependencies, worktree } = await fixtureV2({
+      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest),
+      observationEndpoint: `http://127.0.0.1:${observationAddress.port}`,
+    });
     await mkdir(path.join(worktree, ".wsr"));
     await writeFile(path.join(worktree, ".wsr/role-provider-bindings.json"), `${JSON.stringify({
       schemaVersion: "execution.repository-role-provider-bindings@1.0.0",
@@ -311,6 +328,8 @@ describe("Wave 6 production bootstrap", () => {
     expect(openedRoles).toEqual(["copilot-sdk:role.greeter", "codex-cli:role.reviewer"]);
     expect(acquired.map((request) => request.providerIdentity).sort()).toEqual(["provider.codex", "provider.copilot"]);
     await application.close();
+    expect(observedPaths).toEqual(expect.arrayContaining(["/v1/logs", "/v1/traces"]));
+    expect(observedPaths.filter((value) => value === "/v1/logs")).toHaveLength(2);
   }, 30_000);
 
   it("starts the real production factory from v2 installation config without entering the historical DSH-only assembly", async () => {
@@ -332,6 +351,29 @@ describe("Wave 6 production bootstrap", () => {
     broker.expect("/waiter-worktree", "correlation-waiters");
     broker.register("delivery-waiter", "/waiter-worktree", "fixture@1.0.0", `sha256:${"a".repeat(64)}`);
     await expect(second).resolves.toMatchObject({ deliveryId: "delivery-waiter" });
+  });
+
+  it("keeps an expected Intake correlation private until its durable Session binding is attached", async () => {
+    let invalidations = 0;
+    const broker = new ProductionInteractionBroker(Object.freeze({ async publish() {} }), () => { invalidations += 1; });
+    const waiting = broker.waitForDelivery("correlation-pending", 100);
+
+    broker.expect("/pending-worktree", "correlation-pending");
+    broker.register("delivery-pending", "/pending-worktree", "fixture@1.0.0", `sha256:${"a".repeat(64)}`);
+
+    await expect(waiting).resolves.toMatchObject({ deliveryId: "delivery-pending", correlation: "correlation-pending" });
+    expect(broker.enumerateBindings()).toEqual([{
+      deliveryId: "delivery-pending",
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+    }]);
+
+    broker.attach("delivery-pending", "correlation-pending");
+    expect(broker.enumerateBindings()).toEqual([{
+      deliveryId: "delivery-pending",
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+      sessionCorrelation: "correlation-pending",
+    }]);
+    expect(invalidations).toBe(2);
   });
 
   it("projects an ordinary attachment-free chat answer into a string Action response schema", async () => {

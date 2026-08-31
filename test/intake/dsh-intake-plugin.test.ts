@@ -555,6 +555,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     const answers: any[] = [];
     const finishes: any[] = [];
     const presentations: any[] = [];
+    const attached: any[] = [];
     let resolveExecution!: (value: any) => void;
     const execution = new Promise<any>((resolve) => { resolveExecution = resolve; });
     let capturedDependencies: any;
@@ -572,7 +573,7 @@ describe("Wave 6 DSH Intake plugin", () => {
     });
     const control = Object.freeze({
       async list() { return []; },
-      attach() {},
+      attach(deliveryId: string, correlation: string) { attached.push({ deliveryId, correlation }); },
       async waitForDelivery() { return { deliveryId: "delivery-1", worktree, deliveryBindingIdentity: bindingIdentity("delivery-1") }; },
       async recover() { return { kind: "ERROR", code: "DELIVERY_UNKNOWN", message: "DELIVERY_UNKNOWN" }; },
       async status() { return { kind: "ERROR", code: "DELIVERY_UNKNOWN", message: "DELIVERY_UNKNOWN" }; },
@@ -594,6 +595,7 @@ describe("Wave 6 DSH Intake plugin", () => {
       signal: new AbortController().signal,
     });
     expect(result).toMatchObject({ kind: "START_UNCERTAIN", deliveryId: "delivery-1" });
+    expect(attached).toEqual([{ deliveryId: "delivery-1", correlation: requests[0].intakeCorrelation }]);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       worktree, selector: "implementation-workflow@0.3.0",

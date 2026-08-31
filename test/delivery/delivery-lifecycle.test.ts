@@ -321,6 +321,32 @@ describe("M01 production Delivery lifecycle", () => {
     expect(f.events).toContain("fact:M01:terminal-handling-complete");
   });
 
+  it("publishes no projection invalidation between clearing the current slot and persisting terminal truth", async () => {
+    const f = await fixture("terminal");
+    const observedStates: Array<Promise<string>> = [];
+    let enterCompleted!: () => void;
+    let releaseCompleted!: () => void;
+    const completedEntered = new Promise<void>((resolve) => { enterCompleted = resolve; });
+    const completedReleased = new Promise<void>((resolve) => { releaseCompleted = resolve; });
+    const service = new DeliveryLifecycleService({
+      ...f.options,
+      invalidations: Object.freeze({ publish() {
+        observedStates.push(f.slots.read(f.worktree).then((slot) => slot.state));
+      } }),
+      completed: Object.freeze({ async publish() {
+        enterCompleted();
+        await completedReleased;
+      } }),
+    });
+
+    const activation = service.activate(f.ready);
+    await completedEntered;
+    expect(await Promise.all(observedStates)).not.toContain("EMPTY");
+    releaseCompleted();
+    await expect(activation).resolves.toMatchObject({ kind: "TERMINAL", outcome: "SUCCEEDED" });
+    expect(await Promise.all(observedStates)).toContain("EMPTY");
+  });
+
   it("maps preparation and startup boundary failures without fabricating terminal truth", async () => {
     const resolution = await fixture("unknown");
     const resolverFailure = new DeliveryLifecycleService({

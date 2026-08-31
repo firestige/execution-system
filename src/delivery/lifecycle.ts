@@ -1,7 +1,7 @@
 import type { ExecutionFailure, ExecutionResult } from "../application/execution-application.js";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { AttachmentContentPort, ClockPort, DisabledObservationSink, IdPort, OwnerFact, OwnerFactIngress } from "../bootstrap/contracts.js";
+import type { AttachmentContentPort, ClockPort, DeliveryBoundOwnerFact, DisabledObservationSink, IdPort, OwnerFact, OwnerFactIngress } from "../bootstrap/contracts.js";
 import { deepFreeze, type DeliveryConfigProjection, type DeliveryConfigProjectionV2 } from "../configuration/index.js";
 import type { RunnerActivationContext } from "../contracts/index.js";
 import type { RunnerStartCorrelationFact, RunnerStartCorrelationPort } from "../coordinator/runner-coordinator.js";
@@ -16,7 +16,7 @@ import {
   type DeliveryManifestRepository,
   discardTaskPromptSnapshot,
 } from "./manifest.js";
-import { createDeliveryManifestV2, type DeliveryManifestRepositoryV2, type DeliveryManifestV2 } from "./manifest-v2.js";
+import { createDeliveryManifestProjection, createDeliveryManifestV2, type DeliveryManifestRepositoryV2, type DeliveryManifestV2 } from "./manifest-v2.js";
 import { loadRepositoryModelBindings } from "./repository-model-bindings.js";
 import { resolveRoleModelBindings, type AgentProviderAdmissionRegistry } from "./resolved-role-model-bindings.js";
 import { extractWorkflowV2RoleSnapshot } from "./workflow-v2-role-snapshot.js";
@@ -91,6 +91,30 @@ function packageBinding(manifest: ProductionDeliveryManifest): Readonly<{ name: 
   return manifest.schemaVersion === "execution.delivery-manifest@2.0.0"
     ? { name: manifest.workflowPackage.name, exactVersion: manifest.workflowPackage.exactVersion, packageDigest: manifest.workflowPackage.packageDigest, localPath: manifest.workflowPackage.localMaterializationPath, workflowId: manifest.workflowSnapshot.workflowId }
     : manifest.resolvedPackage;
+}
+
+function deliveryBoundOwnerFact(manifest: ProductionDeliveryManifest, occurredAt: number): DeliveryBoundOwnerFact {
+  const base = {
+    owner: "M01" as const,
+    name: "delivery-bound" as const,
+    occurredAt,
+    deliveryId: manifest.deliveryId,
+    taskId: manifest.taskId,
+    ...(manifest.taskDisplayName === undefined ? {} : { taskDisplayName: manifest.taskDisplayName }),
+    deliveryBindingIdentity: manifest.deliveryBindingIdentity,
+    workflowIdentity: packageBinding(manifest).workflowId,
+  };
+  if (manifest.schemaVersion !== "execution.delivery-manifest@2.0.0") return Object.freeze(base);
+  try {
+    const portable = createDeliveryManifestProjection(manifest);
+    return Object.freeze({
+      ...base,
+      manifestProjection: portable.canonicalJson,
+      manifestProjectionDigest: portable.projectionDigest,
+    });
+  } catch {
+    return Object.freeze(base);
+  }
 }
 
 async function workflowV2Snapshot(localPath: string) {
@@ -275,18 +299,7 @@ export class DeliveryLifecycleService {
       });
       this.#publishChange();
       await ready.holder.release();
-      safeEmit(this.#ownerFacts, {
-        owner: "M01",
-        name: "delivery-bound",
-        occurredAt: this.#options.clock.now(),
-        deliveryId: manifest.deliveryId,
-        taskId: manifest.taskId,
-        ...(manifest.taskDisplayName === undefined
-          ? {}
-          : { taskDisplayName: manifest.taskDisplayName }),
-        deliveryBindingIdentity: manifest.deliveryBindingIdentity,
-        workflowIdentity: packageBinding(manifest).workflowId,
-      });
+      safeEmit(this.#ownerFacts, deliveryBoundOwnerFact(manifest, this.#options.clock.now()));
     } catch {
       if (persisted !== undefined) await (this.#options.manifests as unknown as Readonly<{ discard(path: string): Promise<void> }>).discard(persisted.path).catch(() => undefined);
       await ready.holder.release().catch(() => undefined);
@@ -304,22 +317,10 @@ export class DeliveryLifecycleService {
     } catch {
       return failure("DELIVERY_BINDING_FAILED");
     }
-    safeEmit(this.#ownerFacts, {
-      owner: "M01",
-      name: "delivery-bound",
-      occurredAt: this.#options.clock.now(),
-      deliveryId: manifest.deliveryId,
-      taskId: manifest.taskId,
-      ...(manifest.taskDisplayName === undefined
-        ? {}
-        : { taskDisplayName: manifest.taskDisplayName }),
-      deliveryBindingIdentity: manifest.deliveryBindingIdentity,
-      workflowIdentity: packageBinding(manifest).workflowId,
-    });
+    safeEmit(this.#ownerFacts, deliveryBoundOwnerFact(manifest, this.#options.clock.now()));
     if (slot.state === "START_FAILED") {
       const finishedAt = this.#options.clock.now();
       await this.#options.slots.transition(slot.worktree, "M01_START_FAILURE_HANDLED", finishedAt);
-      this.#publishChange();
       await this.#publishCompleted(manifest, "FAILED", finishedAt, Object.freeze({ code: "RUNNER_START_FAILED" }));
       return failure("RUNNER_START_FAILED");
     }
@@ -337,7 +338,6 @@ export class DeliveryLifecycleService {
       if (manifest.deliveryBindingIdentity !== current.deliveryBindingIdentity) return failure("DELIVERY_UNKNOWN");
       const finishedAt = this.#options.clock.now();
       await this.#options.slots.transition(worktree, "ADMINISTRATIVE_CLOSE", finishedAt, { authorization: deliveryId });
-      this.#publishChange();
       await this.#publishCompleted(manifest, "CANCELLED", finishedAt, null);
       this.#ownerFacts.emit({ owner: "M01", name: "authorized-abandonment", occurredAt: this.#options.clock.now() });
       return Object.freeze({ kind: "TERMINAL", worktree, deliveryId, outcome: "CANCELLED", summary: "AUTHORIZED_ABANDONMENT" });
@@ -424,7 +424,6 @@ export class DeliveryLifecycleService {
       ownerFacts.emit({ owner: "M01", name: "start-failure-handled", occurredAt: this.#options.clock.now() });
       const finishedAt = this.#options.clock.now();
       await this.#options.slots.transition(manifest.canonicalWorktree, "M01_START_FAILURE_HANDLED", finishedAt);
-      this.#publishChange();
       await this.#publishCompleted(manifest, "FAILED", finishedAt, Object.freeze({ code: "RUNNER_START_FAILED" }));
       return failure("RUNNER_START_FAILED");
     }
@@ -457,7 +456,6 @@ export class DeliveryLifecycleService {
     ownerFacts.emit({ owner: "M01", name: "terminal-handling-complete", occurredAt: this.#options.clock.now() });
     const finishedAt = this.#options.clock.now();
     await this.#options.slots.transition(manifest.canonicalWorktree, "M01_TERMINAL_HANDLING_COMPLETE", finishedAt);
-    this.#publishChange();
     const outcome = result.outcome === "COMPLETED" ? "SUCCEEDED" : result.outcome === "CANCELLED" ? "CANCELLED" : "FAILED";
     await this.#publishCompleted(manifest, outcome, finishedAt, outcome === "FAILED" ? Object.freeze({ code: result.outcome }) : null);
     return Object.freeze({ kind: "TERMINAL", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, outcome });

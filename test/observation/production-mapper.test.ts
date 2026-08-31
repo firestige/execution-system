@@ -95,12 +95,14 @@ describe("M03 production owner-fact mapper", () => {
         identity: taskBindingIdentity("delivery-1"),
         signal: "event",
         eventName: "task.binding",
-        familySchema: "implementation@1",
+        familySchema: "workflow.system-design@1",
         fields: {
           C01: "delivery-1",
           C02: "task-1",
           C07: "a".repeat(64),
+          C08: "workflow.system-design",
           C09: taskBindingIdentity("delivery-1"),
+          C49: "workflow.system-design@1",
           C58: "Token tuning",
           C59: portable.canonical,
           C60: portable.digest,
@@ -181,8 +183,8 @@ describe("M03 production owner-fact mapper", () => {
       identity: taskBindingIdentity("delivery-1"),
       signal: "event",
       eventName: "task.binding",
-      familySchema: "implementation@1",
-      fields: { C01: "delivery-1", C02: "task-1", C07: "a".repeat(64), C09: taskBindingIdentity("delivery-1"), C59: portable.canonical, C60: portable.digest },
+      familySchema: "workflow.system-design@1",
+      fields: { C01: "delivery-1", C02: "task-1", C07: "a".repeat(64), C08: "workflow.system-design", C09: taskBindingIdentity("delivery-1"), C49: "workflow.system-design@1", C59: portable.canonical, C60: portable.digest },
     });
     const mapper = new DeliveryObservationMapper({ serviceName: "execution", serviceVersion: "0.1.0" });
 
@@ -216,7 +218,7 @@ describe("M03 production owner-fact mapper", () => {
       taskId: "task-1",
       taskDisplayName: "Token tuning",
       deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
-      workflowIdentity: "implementation-workflow@0.3.0",
+      workflowIdentity: "workflow.system-design",
       manifestProjection: portable.canonical,
       manifestProjectionDigest: portable.digest,
     };
@@ -240,6 +242,42 @@ describe("M03 production owner-fact mapper", () => {
     });
   });
 
+  it("uses the Manifest Workflow name as the Task binding family without a closed allowlist", () => {
+    const portable = manifestProjection();
+    const projection = JSON.parse(portable.canonical);
+    projection.delivery_id = "delivery-hello";
+    projection.task_id = "task-hello";
+    projection.workflow.package_name = "hello-world-workflow";
+    projection.workflow.workflow_id = "hello-world-workflow";
+    const canonical = Buffer.from(canonicalJsonBytes(projection)).toString("utf8");
+    const fact: DeliveryBoundOwnerFact = {
+      owner: "M01",
+      name: "delivery-bound",
+      occurredAt: 10,
+      deliveryId: "delivery-hello",
+      taskId: "task-hello",
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+      workflowIdentity: "hello-world-workflow",
+      manifestProjection: canonical,
+      manifestProjectionDigest: createHash("sha256").update(canonical).digest("hex"),
+    };
+
+    const binding = createTaskBindingObservationFact(fact);
+
+    expect(binding).toMatchObject({
+      owner: "M01",
+      phase: "DELIVERY_BOUND",
+      eventName: "task.binding",
+      familySchema: "hello-world-workflow@1",
+      fields: {
+        C01: "delivery-hello",
+        C02: "task-hello",
+        C08: "hello-world-workflow",
+        C49: "hello-world-workflow@1",
+      },
+    });
+  });
+
   it("rejects noncanonical, digest-mismatched, identity-mismatched, or incomplete Manifest projections", () => {
     const portable = manifestProjection();
     const base = {
@@ -249,8 +287,8 @@ describe("M03 production owner-fact mapper", () => {
       identity: taskBindingIdentity("delivery-1"),
       signal: "event" as const,
       eventName: "task.binding" as const,
-      familySchema: "implementation@1" as const,
-      fields: { C01: "delivery-1", C02: "task-1", C07: "a".repeat(64), C09: taskBindingIdentity("delivery-1"), C59: portable.canonical, C60: portable.digest },
+      familySchema: "workflow.system-design@1" as const,
+      fields: { C01: "delivery-1", C02: "task-1", C07: "a".repeat(64), C08: "workflow.system-design", C09: taskBindingIdentity("delivery-1"), C49: "workflow.system-design@1", C59: portable.canonical, C60: portable.digest },
     };
     const cases = [
       { ...base, fields: { ...base.fields, C60: "d".repeat(64) } },
