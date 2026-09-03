@@ -6,7 +6,7 @@
 
 ### Bug Fixes
 
-- **delivery** normalize absent action input schemas
+- **delivery** normalize absent DSL2 Action input (#34)
 - **release** install DSL2 checker for candidate gates (#33)
 
 ## Compatibility
