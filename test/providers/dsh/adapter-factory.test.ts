@@ -21,9 +21,16 @@ function dispatch(instructionsPath: string, baseURL?: string) {
       workspace: { kind: "none" },
       executor: {
         session: {
+          agent: {
+            resourceIdentity: "role.test",
+            localReadOnlyPath: instructionsPath,
+            contentIdentity: `sha256:${createHash("sha256").update(instructions).digest("hex")}`,
+          },
+          skills: [],
           tools: [],
           providedCapabilities: ["structured-completion"],
           instructions: {
+            resourceIdentity: "role.test",
             localReadOnlyPath: instructionsPath,
             contentIdentity: `sha256:${createHash("sha256").update(instructions).digest("hex")}`,
           },

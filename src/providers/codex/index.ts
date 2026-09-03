@@ -16,6 +16,7 @@ import type {
   NativeProviderSession,
   NativeTurnEvent,
 } from "../provider.js";
+import { projectAdmittedInstructionChain } from "../admitted-instruction-chain.js";
 
 const EXACT_VERSION = "0.144.5";
 const MAX_PROCESS_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -304,15 +305,14 @@ async function captureBinding(
     (sandbox !== "read-only" && sandbox !== "workspace-write") ||
     Object.keys(modelConfiguration ?? {}).sort().join(",") !== "reasoningEffort" ||
     typeof reasoningEffort !== "string" || !["low", "medium", "high", "xhigh"].includes(reasoningEffort) ||
-    !Array.isArray(session?.tools) || session.tools.length !== 0 ||
+    !Array.isArray(session?.skills) || !Array.isArray(session?.tools) || session.tools.length !== 0 ||
     !session.providedCapabilities.includes("structured-completion") || session.providedCapabilities.includes("action-interaction") ||
     (workspaceKind === "write" ? sandbox !== "workspace-write" : sandbox !== "read-only") || !accessMatches ||
     !isAbsolute(instructionPath)) {
     throw new CodexCliProviderError("CODEX_BINDING_REJECTED");
   }
-  const instructions = await readFile(instructionPath, "utf8").catch(() => undefined);
-  const instructionIdentity = instructions === undefined ? undefined : `sha256:${createHash("sha256").update(instructions).digest("hex")}`;
-  if (instructions === undefined || instructionIdentity !== session.instructions.contentIdentity) {
+  const instructions = await projectAdmittedInstructionChain(session).catch(() => undefined);
+  if (instructions === undefined) {
     throw new CodexCliProviderError("CODEX_BINDING_REJECTED", "instruction projection mismatch");
   }
   const projection = deepFreeze({

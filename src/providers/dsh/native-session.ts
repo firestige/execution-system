@@ -13,6 +13,7 @@ import type {
 } from "../provider.js";
 import { resolveDshPublicClosure, type DshPublicClosure } from "./public-closure.js";
 import { createDshOperationAuthority, type DshOperationAuthority } from "./operation-authority.js";
+import { projectAdmittedInstructionChain } from "../admitted-instruction-chain.js";
 
 interface DshSessionEvent {
   readonly seq: number;
@@ -82,12 +83,10 @@ function outputText(value: unknown): readonly { readonly type: "text"; readonly 
 }
 
 async function admittedInstructions(options: DshNativeSessionFactoryOptions, dispatch: InvocationDispatch): Promise<string> {
-  const projection = dispatch.executor.session.instructions;
-  if (!projection.localReadOnlyPath.startsWith("/")) throw new TypeError("DSH instruction projection path is not managed");
-  const text = await (options.readProjection ?? (async (filename) => readFile(filename, "utf8")))(projection.localReadOnlyPath);
-  const observed = `sha256:${createHash("sha256").update(text).digest("hex")}`;
-  if (observed !== projection.contentIdentity) throw new TypeError("DSH instruction projection identity mismatch");
-  return text;
+  return projectAdmittedInstructionChain(
+    dispatch.executor.session,
+    options.readProjection ?? (async (filename) => readFile(filename, "utf8")),
+  );
 }
 
 function dispositionSetup(

@@ -153,6 +153,7 @@ export async function buildFirstPartyCompileActivation(options: FirstPartyCompil
           contentIdentity: rawDigest(promptBytes),
           localReadOnlyPath: promptPath,
         },
+        skills: [],
         tools: (route.resources.tools ?? []).map((tool: any) => ({
           resourceIdentity: tool.id,
           contentIdentity: canonicalDigest({ package: pkg.package.digest, tool: tool.id }),
