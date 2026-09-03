@@ -270,6 +270,54 @@ describe("Git custody", () => {
     expect(git(f.repository, "status", "--porcelain")).toBe("");
   });
 
+  it("accepts root and nested mutations covered by the admitted recursive wildcard", async () => {
+    const f = fixture();
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
+    if (!baseline.ok) throw new Error("baseline was not established");
+    const handle = await custody.acquireWriteHandle({
+      episode: f.episode,
+      savepoint: baseline.value,
+      access: [{ mode: "write", path: "**" as WorkspaceRelativePath }],
+    });
+    if (!handle.ok) throw new Error("handle was not issued");
+    writeFileSync(path.join(f.repository, "root.txt"), "root\n");
+    writeFileSync(path.join(f.repository, "allowed", "value.txt"), "nested\n");
+
+    const disposition = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "write", handle: handle.value },
+      hostDecision: "accept",
+    });
+
+    expect(disposition.ok && disposition.value.kind).toBe("accepted");
+    expect(readFileSync(path.join(f.repository, "root.txt"), "utf8")).toBe("root\n");
+    expect(readFileSync(path.join(f.repository, "allowed", "value.txt"), "utf8")).toBe("nested\n");
+  });
+
+  it("accepts only mutations below an admitted recursive prefix wildcard", async () => {
+    const f = fixture();
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
+    if (!baseline.ok) throw new Error("baseline was not established");
+    const handle = await custody.acquireWriteHandle({
+      episode: f.episode,
+      savepoint: baseline.value,
+      access: [{ mode: "write", path: "allowed/**" as WorkspaceRelativePath }],
+    });
+    if (!handle.ok) throw new Error("handle was not issued");
+    writeFileSync(path.join(f.repository, "allowed", "value.txt"), "nested\n");
+
+    const disposition = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "write", handle: handle.value },
+      hostDecision: "accept",
+    });
+
+    expect(disposition.ok && disposition.value.kind).toBe("accepted");
+    expect(readFileSync(path.join(f.repository, "allowed", "value.txt"), "utf8")).toBe("nested\n");
+  });
+
   it("restores an otherwise valid mutation when Host rejects the result", async () => {
     const f = fixture();
     const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
