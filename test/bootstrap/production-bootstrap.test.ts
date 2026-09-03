@@ -21,6 +21,7 @@ import {
   type NativeProviderSession,
 } from "../../src/index.js";
 import { ProductionInteractionBroker } from "../../src/bootstrap/interaction-broker.js";
+import { createFormatHostOperationHandler } from "../../src/bootstrap/production.js";
 
 const roots: string[] = [];
 const servers: Server[] = [];
@@ -470,6 +471,18 @@ describe("Wave 6 production bootstrap", () => {
     expect(() => new DefaultExecutionApplicationFactory({ hostOperationFactories: {
       "host-operation.deterministic-validation.v1": formatFactory,
     } })).toThrow(ProductionHostOperationRegistryError);
+  });
+
+  it("lets an admitted no-op Host Operation pass true and still reject false", async () => {
+    const handler = createFormatHostOperationHandler();
+    const input = Object.freeze({ candidate: Object.freeze({ path: "system-design.md" }) });
+    await expect(handler.execute(input, Object.freeze({}))).resolves.toEqual({ accepted: true, value: input });
+    await expect(handler.execute(input, Object.freeze({
+      accepted: true,
+      result: Object.freeze({ status: "PASS", routing: "pass" }),
+    }))).resolves.toEqual({ accepted: true, value: { status: "PASS", routing: "pass" } });
+    await expect(handler.execute(input, Object.freeze({ accepted: false })))
+      .resolves.toEqual({ accepted: false, value: input });
   });
 
   it("fails closed across pre-ready, unknown-control, and close-before-start paths", async () => {
