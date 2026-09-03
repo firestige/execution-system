@@ -82,8 +82,8 @@ export async function buildMinimalRunnerActivation(options: MinimalBuilderOption
       roleIdentity: route.role,
       routeIdentity: route.id,
       agent: {
-        resourceIdentity: "agent.definition.managed",
-        contentIdentity: syntheticResource("agent", route.agent),
+        resourceIdentity: `instruction.${actionIdentity.slice("action.".length)}`,
+        contentIdentity: digestBytes(promptBytes),
         projectionIdentity: syntheticResource("agent-projection", { route: route.id }),
         localReadOnlyPath: promptPath,
       },
@@ -105,6 +105,7 @@ export async function buildMinimalRunnerActivation(options: MinimalBuilderOption
         contentIdentity: digestBytes(promptBytes),
         localReadOnlyPath: promptPath,
       },
+      skills: [],
       tools: route.resources.tools.map((tool: { id: string }) => ({
         resourceIdentity: tool.id,
         contentIdentity: syntheticResource("tool", tool.id),

@@ -96,9 +96,11 @@ process.stdin.on("end", () => {
       executor: Object.freeze({
         session: Object.freeze({
           roleIdentity: "role.reviewer",
+          agent: Object.freeze({ resourceIdentity: "role.reviewer", localReadOnlyPath: instructionPath, contentIdentity: sha(instructions) }),
           model: Object.freeze({ providerModelIdentity: options.model ?? "gpt-5.6-sol", configuration: Object.freeze({ reasoningEffort: "medium" }) }),
           driver: Object.freeze({ providerIdentity: "codex-cli", configuration: Object.freeze({ approvalPolicy: "never", sandbox: workspace === "write" ? "workspace-write" : "read-only" }) }),
-          instructions: Object.freeze({ localReadOnlyPath: instructionPath, contentIdentity: sha(instructions) }),
+          instructions: Object.freeze({ resourceIdentity: "role.reviewer", localReadOnlyPath: instructionPath, contentIdentity: sha(instructions) }),
+          skills: Object.freeze([]),
           tools: Object.freeze(options.tools ?? []),
           providedCapabilities: Object.freeze(["structured-completion"]),
         }),
