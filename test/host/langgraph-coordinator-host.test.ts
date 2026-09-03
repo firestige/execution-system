@@ -830,6 +830,69 @@ describe("LangGraph CoordinatorHost", () => {
     expect(custody.calls.filter((call) => call === "baseline")).toHaveLength(1);
   });
 
+  it("continues through a routed successor after an Action input response", async () => {
+    const workspace = gitWorkspace();
+    const compiled = compiledActivation((draft) => {
+      draft.initial.workspace.canonicalWorktreePath = workspace.directory;
+      draft.initial.workspace.admittedGitTree = workspace.tree;
+      draft.program.execution.agents["executor.fixture"].turn.access = [{ mode: "write", path: "**" }];
+      draft.program.control.nodes.push({ id: "node.next", kind: "action", action: "action.next" });
+      draft.program.control.ordinarySuccessor = [
+        { id: "edge.route", from: "node.action", to: "decision.action" },
+        { id: "edge.done", from: "node.next", to: "terminal.success" },
+      ];
+      draft.program.control.decisions = [{
+        identity: "decision.action",
+        source: { kind: "site-result", site: { kind: "node", nodeIdentity: "node.action" }, slot: { kind: "property", name: "routing" } },
+        selector: { kind: "case-map", cases: [{ value: "continue", target: "node.next" }] },
+      }];
+      draft.program.execution.actions["action.fixture"].resultSchema = {
+        type: "object", required: ["routing"], properties: { routing: { const: "continue" } }, additionalProperties: false,
+      };
+      draft.program.execution.actions["action.next"] = {
+        identity: "action.next", purpose: "next", inputSchema: { kind: "ABSENT" }, resultSchema: {}, gate: { freeTextBypass: "prohibited" },
+      };
+      draft.program.execution.sites.push({
+        site: { kind: "node", nodeIdentity: "node.next" }, actionIdentity: "action.next",
+        executor: { kind: "agent", identity: "executor.fixture", requiredCapabilities: ["structured-completion"] },
+      });
+      draft.program.dataflow.edges = [];
+    });
+    const invocation = new FakeInvocation(
+      (dispatch) => dispatch.episode.site.kind === "node" && dispatch.episode.site.nodeIdentity === "node.action"
+        ? {
+          kind: "awaiting-input", episode: dispatch.episode,
+          request: { identity: "interaction.routed" as never, episode: dispatch.episode, prompt: "continue?", responseSchema: { type: "string" } },
+          session: { bindingIdentity: "session-binding.fixture" as never, affinity: dispatch.session, generation: 1 },
+          journal: { identity: "journal.fixture" as never, episode: dispatch.episode },
+        }
+        : completed(dispatch, {}),
+      (episode) => completed({ ...invocation.dispatches[0]!, episode }, { routing: "continue" }),
+    );
+    const host = createLangGraphCoordinatorHost({
+      invocation,
+      custody: createGitCustody({ recordsDirectory: checkpointDirectory() as never }),
+      checkpointDirectory: checkpointDirectory(),
+    });
+    const started = await host.start(compiled, { publish: async () => ({ ok: true, value: undefined }) });
+    if (!started.ok || started.value.kind !== "action-input") throw new Error("expected Action suspension");
+
+    const resumed = await host.resumeAction({
+      thread: started.value.wait.checkpoint.thread,
+      episode: started.value.wait.episode,
+      response: {
+        kind: "ANSWER", requestIdentity: started.value.wait.request.identity,
+        content: "continue", contentIdentity: canonicalDigest("continue"),
+      },
+    }, { publish: async () => ({ ok: true, value: undefined }) });
+
+    expect(resumed).toMatchObject({ ok: true, value: { kind: "terminal-proposal", proposal: { proposedOutcome: "COMPLETED" } } });
+    expect(invocation.dispatches.map((dispatch) => dispatch.episode.site)).toEqual([
+      { kind: "node", nodeIdentity: "node.action" },
+      { kind: "node", nodeIdentity: "node.next" },
+    ]);
+  });
+
   it("rejects an Action response that fails the exact pending response schema before continuation", async () => {
     const custody = new FakeCustody();
     const invocation = new FakeInvocation((dispatch) => ({

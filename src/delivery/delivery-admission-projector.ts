@@ -334,7 +334,7 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
       [taskPromptStateField, initialActionInput(entryAction, taskPrompt, workspace)],
     ]);
     const artifactVersions = Object.fromEntries(artifactsDocument.artifacts.map((artifact: Document) => [artifact.id, { kind: "ABSENT" }]));
-    const actionTemplates = Object.fromEntries(actionsDocument.actions.map((action: Document) => [action.id, { identity: action.id, purpose: action.purpose, inputSchema: action.inputSchema, resultSchema: action.resultSchema, gate: action.gate }]));
+    const actionTemplates = Object.fromEntries(actionsDocument.actions.map((action: Document) => [action.id, { identity: action.id, purpose: action.purpose, inputSchema: action.inputSchema ?? { kind: "ABSENT" }, resultSchema: action.resultSchema, gate: action.gate }]));
     const draft: any = {
       schemaVersion: "runner.activation@1.0.0",
       bindingIdentity: `sha256:${"0".repeat(64)}`,
