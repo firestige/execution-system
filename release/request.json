@@ -1,5 +1,5 @@
 {
-  "candidate_tag": "0.2.3-rc.1",
-  "authority_ref": "b8c6ef31a8ec39f76ba1fdc307bc79748a2381de",
-  "authority_manifest": "release/candidates/issue-187-execution-0.2.3.json"
+  "candidate_tag": "0.2.4-rc.1",
+  "authority_ref": "256db9597d86802851f45ec47ad9e18bf580dcd5",
+  "authority_manifest": "release/candidates/issue-187-execution-0.2.4.json"
 }
