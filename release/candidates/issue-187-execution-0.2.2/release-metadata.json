@@ -9,8 +9,8 @@
   },
   "releaseNotes": {
     "file": "release-notes.md",
-    "sha256": "sha256:d4a21f2d4956a1f322690630424a39f389a1544788128ee1278982d628ed270f",
-    "changelogSectionSha256": "sha256:a8461db8c19f27f8c421b26238f61c863218176ed7164e8aba46316f83318381"
+    "sha256": "sha256:0d59a4aedf37c32fcb185321a074ad31402a45a2059fc1f6523b9aff77ac2f32",
+    "changelogSectionSha256": "sha256:774f0ec32fb593612e6a1a8c1999ad4964bd9dfba21f1073b71a649b6ba50958"
   },
   "artifacts": [
     {

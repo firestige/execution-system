@@ -6,7 +6,7 @@
 
 ### Features
 
-- converge execution quality for issue 187 (#187)
+- converge Execution quality for issue 187 (#31)
 
 ### Bug Fixes
 
