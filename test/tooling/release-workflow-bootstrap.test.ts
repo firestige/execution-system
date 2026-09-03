@@ -38,6 +38,8 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain('--target "$RELEASE_TARGET"');
     expect(candidate).not.toContain('--target "$GITHUB_SHA"');
     expect(candidate).toContain("Install frozen contract checker dependencies");
+    expect(candidate).toContain("npm --prefix system-contracts/workflow-dsl-2-candidate ci");
+    expect(candidate).not.toContain("npm --prefix system-contracts/workflow-dsl ci");
     expect(candidate).toContain("working-directory: execution-system");
     expect(candidate).toContain("remoteArtifactVerification");
   });
