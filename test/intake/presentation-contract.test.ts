@@ -40,6 +40,13 @@ describe("WSR host-neutral presentation contract", () => {
       .toBe("delivery-running");
     expect(presentationForIntakeResult("correlation-1", { kind: "RECOVERY", worktree: "/workspace", deliveryId: "delivery-1", state: "RUNNING_CORRELATED" }, 4096).kind)
       .toBe("delivery-status");
+    expect(presentationForIntakeResult("correlation-1", {
+      kind: "UNKNOWN", worktree: "/workspace", deliveryId: "delivery-1", state: "RESULT_UNRESOLVED",
+      diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" },
+    }, 4096)).toMatchObject({
+      kind: "delivery-status",
+      data: { state: "RESULT_UNRESOLVED", diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" } },
+    });
     expect(presentationForIntakeResult("correlation-1", { kind: "TERMINAL", worktree: "/workspace", deliveryId: "delivery-1", outcome: "SUCCEEDED", summary: "done", credential: "secret" } as never, 4096))
       .toMatchObject({ kind: "terminal-result", data: { worktree: "/workspace", deliveryId: "delivery-1", outcome: "SUCCEEDED", summary: "done" } });
     expect(serializeIntakePresentation(

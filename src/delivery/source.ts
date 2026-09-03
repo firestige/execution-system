@@ -13,8 +13,7 @@ const MAX_RELEASE_PAGES = 10;
 type Asset = Readonly<{ name: string; url: string }>;
 type Release = Readonly<{ tag: string; draft: boolean; prerelease: boolean; assets: readonly Asset[] }>;
 type PackageRecord = Readonly<{
-  name: string; version: string; archive: Asset;
-  descriptor?: Asset; checksum?: Asset; provenance?: Asset; expectedDigest?: string; expectedBytes?: number;
+  name: string; version: string; archive: Asset; descriptor: Asset; checksum: Asset; provenance: Asset;
 }>;
 
 function digest(bytes: Uint8Array): string {
@@ -56,12 +55,12 @@ function release(value: unknown): Release | undefined {
   return Object.freeze({ tag: record.tag_name, draft: record.draft, prerelease: record.prerelease, assets: Object.freeze(assets as Asset[]) });
 }
 
-type Semver = Readonly<{ major: number; minor: number; patch: number; prerelease: boolean }>;
+type Semver = Readonly<{ major: bigint; minor: bigint; patch: bigint; prerelease: boolean }>;
 function semver(value: string): Semver | undefined {
   if (!isExactWorkflowVersion(value)) return undefined;
   const separator = value.indexOf("-");
   const core = separator === -1 ? value : value.slice(0, separator);
-  const [major, minor, patch] = core.split(".").map(Number);
+  const [major, minor, patch] = core.split(".").map(BigInt);
   return Object.freeze({ major: major!, minor: minor!, patch: patch!, prerelease: separator !== -1 });
 }
 
@@ -84,40 +83,16 @@ function scopedCoordinates(tag: string): Readonly<{ name: string; version: strin
 function scopedRecord(item: Release, coordinates: Readonly<{ name: string; version: string }>): PackageRecord | undefined {
   const archiveName = `workflow-package-${coordinates.name}-${coordinates.version}.tar.gz`;
   const descriptorName = `workflow-package-${coordinates.name}-${coordinates.version}.json`;
-  if (item.assets.length !== 3 && item.assets.length !== 4) return undefined;
+  if (item.assets.length !== 4) return undefined;
   const archive = oneAsset(item.assets, archiveName);
   const descriptor = oneAsset(item.assets, descriptorName);
   const checksum = oneAsset(item.assets, `${archiveName}.sha256`);
   const provenance = oneAsset(item.assets, `workflow-package-${coordinates.name}-${coordinates.version}.provenance.json`);
-  return archive !== undefined && descriptor !== undefined && checksum !== undefined
-    && (item.assets.length === 3 || provenance !== undefined)
+  const version = semver(coordinates.version);
+  return archive !== undefined && descriptor !== undefined && checksum !== undefined && provenance !== undefined
+    && version?.prerelease === item.prerelease
     ? Object.freeze({ ...coordinates, archive, descriptor, checksum, provenance })
     : undefined;
-}
-
-function legacyRecords(item: Release, descriptor: Record<string, unknown>): readonly PackageRecord[] | undefined {
-  if (!isExactWorkflowVersion(item.tag)
-    || !exactKeys(descriptor, ["schemaVersion", "revision", "tag", "assets"])
-    || descriptor.schemaVersion !== "workflow-package.release@1.0.0" || descriptor.tag !== item.tag
-    || typeof descriptor.revision !== "string" || !/^[a-f0-9]{40}$/u.test(descriptor.revision)
-    || !Array.isArray(descriptor.assets)) return undefined;
-  const result: PackageRecord[] = [];
-  for (const value of descriptor.assets) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
-    const record = value as Record<string, unknown>;
-    if (!exactKeys(record, ["name", "sha256", "bytes", "package", "version", "packageDigest"])
-      || typeof record.name !== "string" || typeof record.package !== "string" || record.version !== item.tag
-      || typeof record.sha256 !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(record.sha256)
-      || typeof record.bytes !== "number" || !Number.isSafeInteger(record.bytes) || record.bytes <= 0
-      || typeof record.packageDigest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(record.packageDigest)) return undefined;
-    const archive = oneAsset(item.assets, record.name);
-    if (archive === undefined) return undefined;
-    result.push(Object.freeze({
-      name: record.package, version: item.tag, archive,
-      expectedDigest: record.sha256, expectedBytes: record.bytes,
-    }));
-  }
-  return Object.freeze(result);
 }
 
 type ScopedMetadata = Readonly<{
@@ -129,15 +104,8 @@ function scopedDescriptor(record: PackageRecord, body: Uint8Array): ScopedMetada
   const descriptor = json(body);
   if (descriptor === undefined
     || descriptor.tag !== `workflow-package/${record.name}/v${record.version}`
-    || (descriptor.schemaVersion !== "workflow-package.package-release@1.0.0"
-      && descriptor.schemaVersion !== "workflow-package.package-release@2.0.0")) return undefined;
-  const version = descriptor.schemaVersion;
-  if (version === "workflow-package.package-release@1.0.0") {
-    if (!exactKeys(descriptor, ["schemaVersion", "revision", "tag", "package", "archive", "checksum"])
-      || typeof descriptor.revision !== "string" || !/^[a-f0-9]{40}$/u.test(descriptor.revision)
-      || record.provenance !== undefined) return undefined;
-  } else if (!exactKeys(descriptor, ["schemaVersion", "tag", "package", "archive", "checksum", "provenance", "contract"])
-    || record.provenance === undefined) return undefined;
+    || descriptor.schemaVersion !== "workflow-package.package-release@2.0.0"
+    || !exactKeys(descriptor, ["schemaVersion", "tag", "package", "archive", "checksum", "provenance", "contract"])) return undefined;
   const packageValue = descriptor.package as Record<string, unknown> | null;
   const archiveValue = descriptor.archive as Record<string, unknown> | null;
   const checksumValue = descriptor.checksum as Record<string, unknown> | null;
@@ -153,9 +121,6 @@ function scopedDescriptor(record: PackageRecord, body: Uint8Array): ScopedMetada
     || typeof archiveValue.bytes !== "number" || !Number.isSafeInteger(archiveValue.bytes)
     || archiveValue.bytes <= 0 || archiveValue.bytes > MAX_ARCHIVE_BYTES
     || !exactKeys(checksumValue, ["name"]) || checksumValue.name !== record.checksum?.name) return undefined;
-  if (version === "workflow-package.package-release@1.0.0") {
-    return Object.freeze({ digest: archiveValue.sha256, bytes: archiveValue.bytes });
-  }
   const provenanceValue = descriptor.provenance as Record<string, unknown> | null;
   const contractValue = descriptor.contract as Record<string, unknown> | null;
   if (provenanceValue === null || contractValue === null
@@ -213,8 +178,6 @@ export class GitHubWorkflowPackageSource implements WorkflowPackageSource {
   }
 
   async fetch(request: WorkflowPackageSourceRequest): Promise<WorkflowPackageSourceResult> {
-    if (request.version.kind !== "EXACT") return Object.freeze({ kind: "INVALID" });
-    const exactVersion = request.version.value;
     const releases: Release[] = [];
     for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
       const response = await this.#request(`${this.configuration.releasesBaseUrl}?per_page=${PAGE_SIZE}&page=${page}`);
@@ -235,58 +198,47 @@ export class GitHubWorkflowPackageSource implements WorkflowPackageSource {
       const coordinates = scopedCoordinates(releaseItem.tag);
       if (coordinates !== undefined) {
         if (coordinates.name !== request.name) continue;
+        if (request.version.kind === "LATEST" && releaseItem.prerelease) continue;
         const record = scopedRecord(releaseItem, coordinates);
         if (record === undefined) return Object.freeze({ kind: "INVALID" });
         records.push(record);
         continue;
       }
-      if (!isExactWorkflowVersion(releaseItem.tag)) continue;
-      const descriptorAsset = oneAsset(releaseItem.assets, `workflow-package-release-${releaseItem.tag}.json`);
-      if (descriptorAsset === undefined) continue;
-      const response = await this.#request(descriptorAsset.url);
-      if (response === undefined || response.status < 200 || response.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
-      const descriptor = json(response.body);
-      const legacy = descriptor === undefined ? undefined : legacyRecords(releaseItem, descriptor);
-      if (legacy === undefined) return Object.freeze({ kind: "INVALID" });
-      records.push(...legacy.filter((entry) => entry.name === request.name));
     }
 
     const versions = new Map<string, PackageRecord>();
     for (const record of records) {
-      const existing = versions.get(record.version);
-      if (existing === undefined || (existing.descriptor === undefined && record.descriptor !== undefined)) {
-        versions.set(record.version, record);
-        continue;
-      }
-      if (existing.descriptor !== undefined && record.descriptor === undefined) continue;
-      return Object.freeze({ kind: "INVALID" });
+      if (versions.has(record.version)) return Object.freeze({ kind: "INVALID" });
+      versions.set(record.version, record);
     }
-    const selected = versions.get(exactVersion);
+    const selected = request.version.kind === "EXACT"
+      ? versions.get(request.version.value)
+      : [...versions.values()]
+        .filter((record) => semver(record.version)?.prerelease === false)
+        .sort((left, right) => {
+          const a = semver(left.version)!;
+          const b = semver(right.version)!;
+          return a.major < b.major ? 1 : a.major > b.major ? -1
+            : a.minor < b.minor ? 1 : a.minor > b.minor ? -1
+              : a.patch < b.patch ? 1 : a.patch > b.patch ? -1 : 0;
+        })[0];
     if (selected === undefined) return Object.freeze({ kind: "NOT_FOUND" });
 
-    let expectedDigest = selected.expectedDigest;
-    let expectedBytes = selected.expectedBytes;
-    if (selected.descriptor !== undefined && selected.checksum !== undefined) {
-      const descriptorResponse = await this.#request(selected.descriptor.url);
-      if (descriptorResponse === undefined || descriptorResponse.status < 200 || descriptorResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
-      const metadata = scopedDescriptor(selected, descriptorResponse.body);
-      if (metadata === undefined) return Object.freeze({ kind: "INVALID" });
-      if (metadata.provenance !== undefined) {
-        const provenanceResponse = await this.#request(selected.provenance!.url);
-        if (provenanceResponse === undefined || provenanceResponse.status < 200 || provenanceResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
-        if (digest(provenanceResponse.body) !== metadata.provenance.digest) return Object.freeze({ kind: "DIGEST_MISMATCH" });
-        if (!validProvenance(selected, metadata, provenanceResponse.body, this.configuration.repository)) return Object.freeze({ kind: "INVALID" });
-      }
-      const checksumResponse = await this.#request(selected.checksum.url);
-      if (checksumResponse === undefined || checksumResponse.status < 200 || checksumResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
-      if (Buffer.from(checksumResponse.body).toString("utf8") !== `${metadata.digest.slice(7)}  ${selected.archive.name}\n`) return Object.freeze({ kind: "DIGEST_MISMATCH" });
-      expectedDigest = metadata.digest;
-      expectedBytes = metadata.bytes;
-    }
+    const descriptorResponse = await this.#request(selected.descriptor.url);
+    if (descriptorResponse === undefined || descriptorResponse.status < 200 || descriptorResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
+    const metadata = scopedDescriptor(selected, descriptorResponse.body);
+    if (metadata === undefined) return Object.freeze({ kind: "INVALID" });
+    const provenanceResponse = await this.#request(selected.provenance.url);
+    if (provenanceResponse === undefined || provenanceResponse.status < 200 || provenanceResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
+    if (digest(provenanceResponse.body) !== metadata.provenance?.digest) return Object.freeze({ kind: "DIGEST_MISMATCH" });
+    if (!validProvenance(selected, metadata, provenanceResponse.body, this.configuration.repository)) return Object.freeze({ kind: "INVALID" });
+    const checksumResponse = await this.#request(selected.checksum.url);
+    if (checksumResponse === undefined || checksumResponse.status < 200 || checksumResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
+    if (Buffer.from(checksumResponse.body).toString("utf8") !== `${metadata.digest.slice(7)}  ${selected.archive.name}\n`) return Object.freeze({ kind: "DIGEST_MISMATCH" });
     const archiveResponse = await this.#request(selected.archive.url);
     if (archiveResponse === undefined || archiveResponse.status < 200 || archiveResponse.status >= 300) return Object.freeze({ kind: "UNAVAILABLE" });
     if (archiveResponse.body.byteLength === 0 || archiveResponse.body.byteLength > MAX_ARCHIVE_BYTES
-      || archiveResponse.body.byteLength !== expectedBytes || digest(archiveResponse.body) !== expectedDigest) return Object.freeze({ kind: "DIGEST_MISMATCH" });
+      || archiveResponse.body.byteLength !== metadata.bytes || digest(archiveResponse.body) !== metadata.digest) return Object.freeze({ kind: "DIGEST_MISMATCH" });
     const archive = Uint8Array.from(archiveResponse.body);
     const candidate: WorkflowPackageCandidate = Object.freeze({
       name: request.name, exactVersion: selected.version, archiveDigest: digest(archive), archive,

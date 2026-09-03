@@ -82,7 +82,7 @@ export async function buildFirstPartyCompileActivation(options: FirstPartyCompil
     json(path.join(definition, "routes.json")),
     json(path.join(definition, "artifacts.json")),
   ]);
-  if (pkg.schemaVersion !== "agentops.workflow-dsl@1.1.0"
+  if (pkg.schemaVersion !== "agentops.workflow-dsl@2.0.0"
     || snapshot.schemaVersion !== pkg.schemaVersion
     || workflow.schemaVersion !== pkg.schemaVersion
     || snapshot.snapshot.package.digest !== pkg.package.digest
@@ -130,14 +130,14 @@ export async function buildFirstPartyCompileActivation(options: FirstPartyCompil
         roleIdentity: route.role,
         routeIdentity: route.id,
         agent: {
-          resourceIdentity: route.agent.definition.id,
-          contentIdentity: canonicalDigest({ package: pkg.package.digest, agent: route.agent.definition.id }),
+          resourceIdentity: route.resources.rolePrompt.id,
+          contentIdentity: resources.get(route.resources.rolePrompt.id).contentIdentity,
           projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, projection: "agent" }),
           localReadOnlyPath: promptPath,
         },
         model: {
-          resourceIdentity: route.resources.model.id,
-          contentIdentity: canonicalDigest({ package: pkg.package.digest, model: route.resources.model.id }),
+          resourceIdentity: `model.${route.role}`,
+          contentIdentity: canonicalDigest({ package: pkg.package.digest, role: route.role, model: "qualification-model" }),
           projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, projection: "model" }),
           providerModelIdentity: "deepseek-chat",
           configuration: {},
@@ -280,9 +280,9 @@ export async function buildFirstPartyCompileActivation(options: FirstPartyCompil
       },
     },
     admission: {
-      contractRevision: "agentops.workflow-dsl@1.1.0",
+      contractRevision: "agentops.workflow-dsl@2.0.0",
       authorityMergeIdentity: canonicalDigest({ authority: pkg.authority, proof: snapshot.snapshot.authority.mergeProof }),
-      deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0",
+      deliveryAdmissionContractIdentity: "agentops.delivery-admission@2.0.0",
     },
   };
   draft.bindingIdentity = activationBindingDigest(draft);

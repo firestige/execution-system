@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -15,6 +14,7 @@ import type { DeliveryActivationProjector } from "./lifecycle.js";
 import type { DeliveryManifest } from "./manifest.js";
 import type { DeliveryManifestV2 } from "./manifest-v2.js";
 import type { ResolvedRoleModelBinding } from "./resolved-role-model-bindings.js";
+import { captureManagedWorkspaceTree } from "../custody/managed-workspace-snapshot.js";
 
 type Document = Record<string, any>;
 type ProjectedTaskPrompt = Readonly<{
@@ -146,10 +146,10 @@ async function verifyPromptSnapshot(manifest: DeliveryManifest | DeliveryManifes
 
 export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
   async project(manifest: DeliveryManifest | DeliveryManifestV2): Promise<RunnerActivationContext> {
-    const v2 = manifest.schemaVersion === "execution.delivery-manifest@2.0.0";
-    const packageBinding = v2
-      ? { name: manifest.workflowPackage.name, exactVersion: manifest.workflowPackage.exactVersion, packageDigest: manifest.workflowPackage.packageDigest, localPath: manifest.workflowPackage.localMaterializationPath, workflowId: manifest.workflowSnapshot.workflowId }
-      : manifest.resolvedPackage;
+    if (manifest.schemaVersion !== "execution.delivery-manifest@2.0.0") {
+      throw new TypeError("Delivery admission requires a v2 manifest");
+    }
+    const packageBinding = { name: manifest.workflowPackage.name, exactVersion: manifest.workflowPackage.exactVersion, packageDigest: manifest.workflowPackage.packageDigest, localPath: manifest.workflowPackage.localMaterializationPath, workflowId: manifest.workflowSnapshot.workflowId };
     const definition = await definitionDirectory(packageBinding.localPath);
     const workspace = await realpath(manifest.canonicalWorktree);
     const taskPrompt = await verifyPromptSnapshot(manifest);
@@ -161,7 +161,7 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
       json(path.join(definition, "routes.json")),
       json(path.join(definition, "artifacts.json")),
     ]);
-    const expectedContract = v2 ? "agentops.workflow-dsl@2.0.0" : "agentops.workflow-dsl@1.1.0";
+    const expectedContract = "agentops.workflow-dsl@2.0.0";
     if (pkg.schemaVersion !== expectedContract
       || snapshot.schemaVersion !== pkg.schemaVersion || workflow.schemaVersion !== pkg.schemaVersion
       || pkg.package.name !== packageBinding.name || pkg.package.version !== packageBinding.exactVersion
@@ -221,37 +221,32 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
         const promptResource = promptIdentity === undefined ? undefined : resources.get(promptIdentity);
         const promptPath = promptResource?.owner === "owned" ? await realpath(path.join(definition, promptResource.path)) : workflowPath;
         const promptBytes = await readFile(promptPath);
-        const resolvedRole: ResolvedRoleModelBinding | undefined = v2
-          ? manifest.resolvedRoles.find((binding) => binding.roleId === route.role)
-          : undefined;
-        if (v2 && resolvedRole === undefined) throw new TypeError(`Role '${String(route.role)}' has no frozen Provider binding`);
-        const provider = v2 ? undefined : manifest.deliveryConfigProjection.value.runner.provider;
+        const resolvedRole: ResolvedRoleModelBinding | undefined = manifest.resolvedRoles.find((binding) => binding.roleId === route.role);
+        if (resolvedRole === undefined) throw new TypeError(`Role '${String(route.role)}' has no frozen Provider binding`);
         const adapterKey = resolvedRole?.agentProviderAdapterKey ?? "dsh-headless";
         const session = {
           roleIdentity: route.role,
           routeIdentity: route.id,
           agent: {
-            resourceIdentity: v2 ? rolePromptRef : route.agent.definition.id,
-            contentIdentity: resolvedRole?.rolePromptDigest ?? canonicalDigest({ package: pkg.package.digest, agent: route.agent.definition.id }),
+            resourceIdentity: rolePromptRef,
+            contentIdentity: resolvedRole.rolePromptDigest,
             projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, projection: "agent" }),
             localReadOnlyPath: promptPath,
           },
           model: {
-            resourceIdentity: v2 ? `model.${String(route.role).replace(/^role\./u, "")}` : route.resources.model.id,
-            contentIdentity: canonicalDigest({ package: pkg.package.digest, model: resolvedRole?.modelId ?? route.resources.model.id }),
-            projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, provider: resolvedRole?.modelProviderId ?? "dsh", model: resolvedRole?.modelId ?? provider!.modelId }),
-            providerModelIdentity: resolvedRole?.modelId ?? provider!.modelId,
+            resourceIdentity: `model.${String(route.role).replace(/^role\./u, "")}`,
+            contentIdentity: canonicalDigest({ package: pkg.package.digest, model: resolvedRole.modelId }),
+            projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, provider: resolvedRole.modelProviderId, model: resolvedRole.modelId }),
+            providerModelIdentity: resolvedRole.modelId,
             configuration: adapterKey === "codex-cli" ? { reasoningEffort: "medium" } : {},
           },
           driver: {
-            resourceIdentity: v2 ? `driver.${adapterKey}` : route.resources.driver.id,
-            projectionIdentity: canonicalDigest(v2
-              ? { package: pkg.package.digest, route: route.id, provider: resolvedRole!.agentProviderId, adapter: adapterKey }
-              : { package: pkg.package.digest, route: route.id, provider: provider!.route, baseUrl: provider!.baseUrl }),
+            resourceIdentity: `driver.${adapterKey}`,
+            projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, provider: resolvedRole.agentProviderId, adapter: adapterKey }),
             providerIdentity: adapterKey,
             configuration: adapterKey === "codex-cli"
               ? { approvalPolicy: "never", sandbox: (route.access ?? []).some((entry: Document) => entry.mode === "write") ? "workspace-write" : "read-only" }
-              : v2 ? {} : { providerRoute: provider!.route, credentialRef: provider!.credentialRef, baseURL: provider!.baseUrl },
+              : {},
           },
           instructions: {
             resourceIdentity: promptRef ?? rolePromptRef ?? `instruction.${actionIdentity}`,
@@ -272,7 +267,7 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
         for (const entry of route.access ?? []) {
           if ((entry.mode === "read" || entry.mode === "write") && !modes.has(entry.mode)) {
             modes.add(entry.mode);
-            access.push({ mode: entry.mode, path: v2 ? "." : "**" });
+            access.push({ mode: entry.mode, path: "**" });
           }
         }
         const turn = { access };
@@ -352,7 +347,7 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
         snapshotIdentity: snapshot.snapshot.id,
         snapshotDigest: snapshot.snapshot.digest,
         workflowIdentity: `${String(workflow.workflow.id)}@${String(workflow.workflow.version)}`,
-        runtimeProfileIdentity: v2 ? "runtime-profile.runner.langgraph-agent-providers" : "runtime-profile.runner.langgraph-dsh",
+        runtimeProfileIdentity: "runtime-profile.runner.langgraph-agent-providers",
       },
       program: {
         control: {
@@ -376,13 +371,13 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
         workspace: {
           identity: `workspace.${createHash("sha256").update(workspace).digest("hex").slice(0, 24)}`,
           canonicalWorktreePath: workspace,
-          admittedGitTree: execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: workspace, encoding: "utf8" }).trim(),
+          admittedGitTree: captureManagedWorkspaceTree(workspace),
         },
       },
       admission: {
         contractRevision: expectedContract,
         authorityMergeIdentity: canonicalDigest({ authority: pkg.authority, proof: snapshot.snapshot.authority.mergeProof }),
-        deliveryAdmissionContractIdentity: v2 ? "agentops.delivery-admission@2.0.0" : "agentops.delivery-admission@1.0.0",
+        deliveryAdmissionContractIdentity: "agentops.delivery-admission@2.0.0",
       },
     };
     draft.bindingIdentity = activationBindingDigest(draft);

@@ -12,6 +12,13 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import {
+  captureManagedWorkspaceTree,
+  DEFAULT_MANAGED_WORKSPACE_SNAPSHOT_LIMITS,
+  ManagedWorkspaceSnapshotError,
+  managedWorkspaceObjectEnvironment,
+  type ManagedWorkspaceSnapshotLimits,
+} from "./managed-workspace-snapshot.js";
 
 import type {
   AbsolutePath,
@@ -53,6 +60,7 @@ export interface GitPublicationTarget {
 export interface GitCustodyOptions {
   readonly recordsDirectory: AbsolutePath;
   readonly publicationTargets?: readonly GitPublicationTarget[];
+  readonly snapshotLimits?: ManagedWorkspaceSnapshotLimits;
 }
 
 interface StoredHandle extends AuthorizedInvocationHandle {
@@ -141,10 +149,12 @@ function pathAllowed(changedPath: string, access: readonly ResolvedAccessRule[])
 export class GitCustody implements HostCustody, CoordinatorCustody {
   readonly #recordsDirectory: string;
   readonly #publicationTargets: Map<string, GitPublicationTarget>;
+  readonly #snapshotLimits: ManagedWorkspaceSnapshotLimits;
 
   constructor(options: GitCustodyOptions) {
     this.#recordsDirectory = path.resolve(options.recordsDirectory);
     mkdirSync(this.#recordsDirectory, { recursive: true });
+    this.#snapshotLimits = options.snapshotLimits ?? DEFAULT_MANAGED_WORKSPACE_SNAPSHOT_LIMITS;
     this.#publicationTargets = new Map(
       (options.publicationTargets ?? []).map((binding) => [binding.target.identity, binding]),
     );
@@ -158,11 +168,16 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
       }
       return success(existing.currentSavepoint);
     }
+    let objectDirectory: string | undefined;
     try {
       const repository = this.#canonicalRepository(request.workspace.canonicalWorktreePath);
-      const observed = this.#snapshot(repository, request.workspace.admittedGitTree);
-      if (observed !== request.workspace.admittedGitTree) return failure("GIT_STATE_MISMATCH");
-      const workspaceTree = this.#snapshot(repository, request.workspace.admittedGitTree, true);
+      objectDirectory = this.#objectDirectory(request.delivery);
+      const observed = this.#snapshot(repository, undefined, objectDirectory);
+      if (observed !== request.workspace.admittedGitTree) {
+        rmSync(path.dirname(objectDirectory), { recursive: true, force: true });
+        return failure("GIT_STATE_MISMATCH");
+      }
+      const workspaceTree = observed;
       const savepoint: SavepointRef = {
         deliveryIdentity: request.delivery.deliveryIdentity,
         savepointIdentity: stableId<SavepointId>("savepoint", {
@@ -172,8 +187,6 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
         }),
         gitTree: observed,
       };
-      this.#anchor(repository, request.delivery, savepoint);
-      this.#anchorWorkspaceTree(repository, request.delivery, savepoint, workspaceTree);
       const record: CustodyRecord = {
         delivery: request.delivery,
         workspace: request.workspace,
@@ -186,7 +199,12 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
       this.#store(record);
       return success(savepoint);
     } catch (error) {
-      return failure(error instanceof GitCommandError ? "GIT_STATE_MISMATCH" : "CORRELATION_MISMATCH");
+      if (objectDirectory !== undefined) {
+        rmSync(path.dirname(objectDirectory), { recursive: true, force: true });
+      }
+      return failure(error instanceof ManagedWorkspaceSnapshotError
+        ? error.code
+        : error instanceof GitCommandError ? "GIT_STATE_MISMATCH" : "CORRELATION_MISMATCH");
     }
   }
 
@@ -269,10 +287,11 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     if (!same(registered.savepoint, record.currentSavepoint)) return failure("CORRELATION_MISMATCH");
     try {
       const repository = this.#canonicalRepository(record.workspace.canonicalWorktreePath);
-      const nextTree = this.#snapshot(repository, registered.savepoint.gitTree);
+      const objectDirectory = this.#objectDirectory(record.delivery);
+      const nextTree = this.#snapshot(repository, registered.savepoint.gitTree, objectDirectory);
       const priorWorkspaceTree = this.#workspaceTree(record, registered.savepoint);
-      const nextWorkspaceTree = this.#snapshot(repository, priorWorkspaceTree, true);
-      const changed = this.#changedPaths(repository, priorWorkspaceTree, nextWorkspaceTree);
+      const nextWorkspaceTree = nextTree;
+      const changed = this.#changedPaths(repository, priorWorkspaceTree, nextWorkspaceTree, objectDirectory);
       if (!changed.every((changedPath) => pathAllowed(changedPath, registered.access))) {
         return this.#restoreDisposition(record, registered.savepoint, "scope-violation-restored");
       }
@@ -288,9 +307,6 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
         }),
         gitTree: nextTree,
       };
-      this.#anchor(repository, record.delivery, nextSavepoint);
-      this.#anchorWorkspaceTree(repository, record.delivery, nextSavepoint, nextWorkspaceTree);
-      git(repository, ["read-tree", nextTree]);
       record.currentSavepoint = nextSavepoint;
       record.savepoints.push(nextSavepoint);
       record.workspaceTrees[nextSavepoint.savepointIdentity] = nextWorkspaceTree;
@@ -313,7 +329,11 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     try {
       const repository = this.#canonicalRepository(record.workspace.canonicalWorktreePath);
       const workspaceTree = this.#workspaceTree(record, registered.source);
-      const observed = this.#snapshot(repository, workspaceTree, true);
+      const observed = this.#snapshot(
+        repository,
+        workspaceTree,
+        this.#objectDirectory(record.delivery),
+      );
       if (observed === workspaceTree) return success({ kind: "current", view: this.#publicView(registered) });
       const restored = this.#restore(record, registered.source);
       return success({ kind: "mutation-detected", restored: restored ? known(registered.source) : custodyUnknown("CALL_INTERRUPTED") });
@@ -366,7 +386,11 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
       const targetRepository = this.#canonicalRepository(target.repositoryPath);
       if (workspaceRepository !== targetRepository) return failure("PUBLICATION_GUARD_INVALID");
       const expectedWorkspaceTree = this.#workspaceTree(record, record.currentSavepoint);
-      const observedWorkspaceTree = this.#snapshot(workspaceRepository, expectedWorkspaceTree, true);
+      const observedWorkspaceTree = this.#snapshot(
+        workspaceRepository,
+        expectedWorkspaceTree,
+        this.#objectDirectory(record.delivery),
+      );
       if (observedWorkspaceTree !== expectedWorkspaceTree) return failure("PUBLICATION_GUARD_INVALID");
       const reference = {
         identity: stableId<PublicationId>("publication", {
@@ -392,6 +416,11 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
         return success(disposition);
       }
       try {
+        this.#promotePublishedTree(
+          targetRepository,
+          request.guard.expectedGitTree,
+          this.#objectDirectory(record.delivery),
+        );
         const publicationCommit = git(
           targetRepository,
           ["commit-tree", request.guard.expectedGitTree, "-m", `Custody publication ${reference.identity}`],
@@ -469,6 +498,7 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     record.views = [];
     record.retiredAuthorizationIdentity = authorization.identity;
     this.#store(record);
+    rmSync(path.dirname(this.#objectDirectory(record.delivery)), { recursive: true, force: true });
     return success({
       owner: "custody",
       authorization,
@@ -480,7 +510,11 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     try {
       const repository = this.#canonicalRepository(record.workspace.canonicalWorktreePath);
       const workspaceTree = this.#workspaceTree(record, record.currentSavepoint);
-      const observed = this.#snapshot(repository, workspaceTree, true);
+      const observed = this.#snapshot(
+        repository,
+        workspaceTree,
+        this.#objectDirectory(record.delivery),
+      );
       if (observed !== workspaceTree || hostDecision === "reject") {
         return this.#restoreDisposition(record, record.currentSavepoint,
           observed !== workspaceTree ? "scope-violation-restored" : "host-rejected-restored");
@@ -505,14 +539,14 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     try {
       const repository = this.#canonicalRepository(record.workspace.canonicalWorktreePath);
       const targetWorkspaceTree = this.#workspaceTree(record, savepoint);
-      const currentWorkspaceTree = this.#snapshot(repository, targetWorkspaceTree, true);
-      for (const changedPath of this.#changedPaths(repository, targetWorkspaceTree, currentWorkspaceTree)) {
+      const objectDirectory = this.#objectDirectory(record.delivery);
+      const currentWorkspaceTree = this.#snapshot(repository, targetWorkspaceTree, objectDirectory);
+      for (const changedPath of this.#changedPaths(repository, targetWorkspaceTree, currentWorkspaceTree, objectDirectory)) {
         this.#removeWorkspacePath(repository, changedPath);
       }
-      this.#materializeTree(repository, targetWorkspaceTree);
-      git(repository, ["read-tree", savepoint.gitTree]);
-      if (this.#snapshot(repository, savepoint.gitTree) !== savepoint.gitTree
-        || this.#snapshot(repository, targetWorkspaceTree, true) !== targetWorkspaceTree) {
+      this.#materializeTree(repository, targetWorkspaceTree, objectDirectory);
+      if (this.#snapshot(repository, savepoint.gitTree, objectDirectory) !== savepoint.gitTree
+        || this.#snapshot(repository, targetWorkspaceTree, objectDirectory) !== targetWorkspaceTree) {
         return false;
       }
       record.currentSavepoint = savepoint;
@@ -523,22 +557,18 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     }
   }
 
-  #snapshot(repository: string, baseTree: GitTreeId, includeIgnored = false): GitTreeId {
-    const temporary = mkdtempSync(path.join(tmpdir(), "custody-index-"));
-    const index = path.join(temporary, "index");
-    const environment = { ...process.env, GIT_INDEX_FILE: index };
-    try {
-      git(repository, ["read-tree", baseTree], environment);
-      git(repository, includeIgnored ? ["add", "-A", "-f", "--", "."] : ["add", "-A", "--", "."], environment);
-      return git(repository, ["write-tree"], environment) as GitTreeId;
-    } finally {
-      rmSync(temporary, { recursive: true, force: true });
-    }
+  #snapshot(repository: string, baseTree: GitTreeId | undefined, objectDirectory: string): GitTreeId {
+    return captureManagedWorkspaceTree(repository, baseTree, objectDirectory, this.#snapshotLimits);
   }
 
-  #changedPaths(repository: string, from: GitTreeId, to: GitTreeId): string[] {
+  #changedPaths(repository: string, from: GitTreeId, to: GitTreeId, objectDirectory: string): string[] {
     if (from === to) return [];
-    return git(repository, ["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", from, to], undefined, false)
+    return git(
+      repository,
+      ["diff-tree", "--no-commit-id", "--name-only", "-z", "-r", from, to],
+      managedWorkspaceObjectEnvironment(repository, objectDirectory),
+      false,
+    )
       .split("\0")
       .filter((item) => item.length > 0);
   }
@@ -557,10 +587,13 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     rmSync(candidate, { recursive: true, force: true });
   }
 
-  #materializeTree(repository: string, tree: GitTreeId): void {
+  #materializeTree(repository: string, tree: GitTreeId, objectDirectory: string): void {
     const temporary = mkdtempSync(path.join(tmpdir(), "custody-restore-index-"));
     const index = path.join(temporary, "index");
-    const environment = { ...process.env, GIT_INDEX_FILE: index, GIT_WORK_TREE: repository };
+    const environment = managedWorkspaceObjectEnvironment(repository, objectDirectory, {
+      GIT_INDEX_FILE: index,
+      GIT_WORK_TREE: repository,
+    });
     try {
       git(repository, ["read-tree", tree], environment);
       git(repository, ["checkout-index", "--all", "--force"], environment);
@@ -569,16 +602,25 @@ export class GitCustody implements HostCustody, CoordinatorCustody {
     }
   }
 
-  #anchor(repository: string, delivery: DeliveryRef, savepoint: SavepointRef): void {
-    const deliveryKey = this.#deliveryKey(delivery);
-    const savepointKey = createHash("sha256").update(savepoint.savepointIdentity).digest("hex");
-    git(repository, ["update-ref", `refs/agentops/custody/${deliveryKey}/${savepointKey}`, savepoint.gitTree]);
+  #objectDirectory(delivery: DeliveryRef): string {
+    return path.join(this.#recordsDirectory, "objects", this.#deliveryKey(delivery), "objects");
   }
 
-  #anchorWorkspaceTree(repository: string, delivery: DeliveryRef, savepoint: SavepointRef, tree: GitTreeId): void {
-    const deliveryKey = this.#deliveryKey(delivery);
-    const savepointKey = createHash("sha256").update(savepoint.savepointIdentity).digest("hex");
-    git(repository, ["update-ref", `refs/agentops/custody/${deliveryKey}/workspace/${savepointKey}`, tree]);
+  #promotePublishedTree(repository: string, tree: GitTreeId, objectDirectory: string): void {
+    const pack = execFileSync("git", ["pack-objects", "--stdout", "--revs"], {
+      cwd: repository,
+      env: managedWorkspaceObjectEnvironment(repository, objectDirectory),
+      input: `${tree}\n`,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    execFileSync("git", ["unpack-objects", "-r"], {
+      cwd: repository,
+      input: pack,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (git(repository, ["cat-file", "-t", tree]) !== "tree") {
+      throw new GitCommandError("published tree promotion failed");
+    }
   }
 
   #tryResolveTree(repository: string, reference: string): GitTreeId | undefined {

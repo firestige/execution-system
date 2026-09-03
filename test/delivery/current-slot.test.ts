@@ -31,7 +31,7 @@ describe("M01 current-slot state machine", () => {
       M02_RECONCILED_TERMINAL: { owner: "M02_FACT", from: ["RESULT_UNRESOLVED"], to: "TERMINAL_HANDLING" },
       M01_START_FAILURE_HANDLED: { owner: "M01", from: ["START_FAILED"], to: "EMPTY" },
       M01_TERMINAL_HANDLING_COMPLETE: { owner: "M01", from: ["TERMINAL_HANDLING"], to: "EMPTY" },
-      ADMINISTRATIVE_CLOSE: { owner: "ADMINISTRATION", from: ["BOUND", "START_UNCERTAIN", "RESULT_UNRESOLVED"], to: "EMPTY" },
+      ADMINISTRATIVE_CLOSE: { owner: "ADMINISTRATION", from: ["BOUND", "START_UNCERTAIN", "RUNNING_CORRELATED", "START_FAILED", "RESULT_UNRESOLVED", "TERMINAL_HANDLING"], to: "EMPTY" },
     });
     expect(Object.isFrozen(CURRENT_SLOT_TRANSITIONS)).toBe(true);
   });
@@ -48,10 +48,35 @@ describe("M01 current-slot state machine", () => {
     expect(await f.repository.read(f.worktree)).toMatchObject({ state: "BOUND", deliveryId: "delivery-1" });
     expect(await f.repository.transition(f.worktree, "M01_RUNNER_LAUNCH_REQUESTED", 2)).toMatchObject({ state: "START_UNCERTAIN" });
     expect(await f.repository.transition(f.worktree, "M02_START_CORRELATED", 3)).toMatchObject({ state: "RUNNING_CORRELATED" });
-    expect(await f.repository.transition(f.worktree, "M02_RESULT_UNRESOLVED", 4)).toMatchObject({ state: "RESULT_UNRESOLVED" });
+    expect(await f.repository.transition(f.worktree, "M02_RESULT_UNRESOLVED", 4, {
+      diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" },
+    })).toMatchObject({
+      state: "RESULT_UNRESOLVED",
+      diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" },
+    });
+    expect(await f.repository.read(f.worktree)).toMatchObject({
+      state: "RESULT_UNRESOLVED",
+      diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" },
+    });
     expect(await f.repository.transition(f.worktree, "M02_RECONCILED_TERMINAL", 5)).toMatchObject({ state: "TERMINAL_HANDLING" });
     expect(await f.repository.transition(f.worktree, "M01_TERMINAL_HANDLING_COMPLETE", 6)).toEqual({ state: "EMPTY", worktree: f.worktree });
     expect(await f.repository.read(f.worktree)).toEqual({ state: "EMPTY", worktree: f.worktree });
+  });
+
+  it("fails closed on an unbounded or misplaced public diagnostic", async () => {
+    const f = await fixture();
+    await f.repository.persistBound({
+      worktree: f.worktree, deliveryId: "delivery-1", manifestPath: f.manifestPath,
+      deliveryBindingIdentity: `sha256:${"b".repeat(64)}`, updatedAt: 1,
+    });
+    await f.repository.transition(f.worktree, "M01_RUNNER_LAUNCH_REQUESTED", 2);
+    await expect(f.repository.transition(f.worktree, "M02_START_CORRELATED", 3, {
+      diagnostic: { stage: "HOST_START", causeCode: "GIT_STATE_MISMATCH" },
+    } as any)).rejects.toMatchObject({ code: "CURRENT_SLOT_TRANSITION_INVALID" });
+    await f.repository.transition(f.worktree, "M02_START_CORRELATED", 3);
+    await expect(f.repository.transition(f.worktree, "M02_RESULT_UNRESOLVED", 4, {
+      diagnostic: { stage: "host start", causeCode: "secret/path" },
+    } as any)).rejects.toMatchObject({ code: "CURRENT_SLOT_TRANSITION_INVALID" });
   });
 
   it("rejects invalid edges, duplicate binding, and mismatched administrative authority", async () => {
@@ -70,6 +95,30 @@ describe("M01 current-slot state machine", () => {
       .rejects.toMatchObject({ code: "CURRENT_SLOT_AUTHORIZATION_INVALID" });
     expect(await f.repository.transition(f.worktree, "ADMINISTRATIVE_CLOSE", 3, { authorization: "delivery-1" }))
       .toEqual({ state: "EMPTY", worktree: f.worktree });
+  });
+
+  it.each([
+    ["BOUND", []],
+    ["START_UNCERTAIN", ["M01_RUNNER_LAUNCH_REQUESTED"]],
+    ["RUNNING_CORRELATED", ["M01_RUNNER_LAUNCH_REQUESTED", "M02_START_CORRELATED"]],
+    ["START_FAILED", ["M01_RUNNER_LAUNCH_REQUESTED", "M02_START_FAILED"]],
+    ["RESULT_UNRESOLVED", ["M01_RUNNER_LAUNCH_REQUESTED", "M02_START_CORRELATED", "M02_RESULT_UNRESOLVED"]],
+    ["TERMINAL_HANDLING", ["M01_RUNNER_LAUNCH_REQUESTED", "M02_START_CORRELATED", "M02_TERMINAL_VALIDATED"]],
+  ] as const)("administratively closes an occupied %s slot", async (state, transitions) => {
+    const f = await fixture();
+    await f.repository.persistBound({
+      worktree: f.worktree,
+      deliveryId: "delivery-1",
+      manifestPath: f.manifestPath,
+      deliveryBindingIdentity: `sha256:${"b".repeat(64)}`,
+      updatedAt: 1,
+    });
+    for (const [index, transition] of transitions.entries()) {
+      await f.repository.transition(f.worktree, transition, index + 2);
+    }
+    expect(await f.repository.read(f.worktree)).toMatchObject({ state });
+    await expect(f.repository.transition(f.worktree, "ADMINISTRATIVE_CLOSE", 20, { authorization: "delivery-1" }))
+      .resolves.toEqual({ state: "EMPTY", worktree: f.worktree });
   });
 
   it("enumerates one occupied slot per canonical worktree and fails closed on corrupt truth", async () => {

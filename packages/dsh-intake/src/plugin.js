@@ -356,10 +356,12 @@ export async function createPluginRuntime(config, options = {}) {
       if (existing === undefined) return error("DELIVERY_UNKNOWN");
       return service.invoke(Object.freeze({ operation: "action-finish", ...(operation.remainder === undefined && attachments.length === 0 ? {} : { turn: Object.freeze({ text: operation.remainder ?? "", attachments }) }), correlation: existing.correlation }));
     }
-    const result = await service.invoke(Object.freeze({ operation: "abandon", deliveryId: operation.deliveryId, correlation }));
+    const deliveryId = operation.deliveryId ?? existing?.deliveryId;
+    if (deliveryId === undefined) return error("WSR_COMMAND_INVALID");
+    const result = await service.invoke(Object.freeze({ operation: "abandon", deliveryId, correlation }));
     if (result.kind === "TERMINAL") {
-      const detached = await bindings.byDelivery(operation.deliveryId);
-      await bindings.detach(operation.deliveryId);
+      const detached = await bindings.byDelivery(deliveryId);
+      await bindings.detach(deliveryId);
       if (detached !== undefined) sessionByCorrelation.delete(detached.correlation);
     }
     return result;
@@ -420,7 +422,8 @@ export function mapIntakeToolOperation(args) {
     || Object.keys(args).some((key) => !["operation", "selector", "deliveryId"].includes(key))
     || !operationNames.includes(args.operation)
     || (args.operation === "create") !== (typeof args.selector === "string" && args.selector.length > 0)
-    || (args.operation === "abandon" && (typeof args.deliveryId !== "string" || args.deliveryId.length === 0))
+    || (args.operation === "abandon" && args.deliveryId !== undefined
+      && (typeof args.deliveryId !== "string" || args.deliveryId.length === 0))
     || (!["recover", "status", "abandon"].includes(args.operation) && args.deliveryId !== undefined)) {
     throw new TypeError("INTAKE_OPERATION_INVALID");
   }
@@ -438,7 +441,7 @@ export async function apply(ctx, config) {
   const command = ctx.commands.register({
     name: "wsr",
     description: "Create, list, recover, inspect, finish, or abandon a Workflow Delivery",
-    input: { hint: "list | create <selector> | recover [delivery-id] | status [delivery-id] | action finish | abandon <delivery-id>", images: true },
+    input: { hint: "list | create <selector> | recover [delivery-id] | status [delivery-id] | action finish | abandon [delivery-id]", images: true },
     recordInput: true,
     async handler(invocation) {
       return run((async () => {
@@ -473,7 +476,8 @@ export async function apply(ctx, config) {
         } catch (cause) {
           const { createIntakePresentation, serializeIntakePresentation } = await import("wsr-execution");
           const code = typeof cause?.code === "string" ? cause.code : "DSH_INTAKE_FAILED";
-          const presentation = createIntakePresentation(`presentation-${randomUUID()}`, "error", { code, message: code });
+          const message = code === "WSR_COMMAND_INVALID" && typeof cause?.message === "string" ? cause.message : code;
+          const presentation = createIntakePresentation(`presentation-${randomUUID()}`, "error", { code, message });
           if (!query) presentToDshSession(invocation.agent, presentation);
           return { kind: "error", text: serializeIntakePresentation(presentation, 4096) };
         }

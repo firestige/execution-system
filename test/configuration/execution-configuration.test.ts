@@ -13,6 +13,7 @@ import {
   createDeliveryConfigProjection,
   createRunnerConfigurationProjection,
   loadExecutionInstallationConfig,
+  loadExecutionInstallationConfigV2,
   initializeExecutionConfiguration,
   dumpEffectiveExecutionConfiguration,
   redactEffectiveConfiguration,
@@ -86,6 +87,21 @@ function input(paths: Awaited<ReturnType<typeof deployment>>) {
   } as const;
 }
 
+function inputV2(paths: Awaited<ReturnType<typeof deployment>>) {
+  const legacy = input(paths);
+  return {
+    ...legacy,
+    schemaVersion: "execution.config@2.0.0",
+    paths: {
+      repositoryRoot: legacy.paths.repositoryRoot,
+      workspaceRoot: legacy.paths.workspaceRoot,
+      allowedWorktreeRoots: legacy.paths.allowedWorktreeRoots,
+      stateRoot: legacy.paths.stateRoot,
+    },
+    runner: { implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 4 },
+  } as const;
+}
+
 async function loadDocument(extension: ".json" | ".yaml", document: unknown) {
   const paths = await deployment();
   const configPath = join(paths.root, `execution${extension}`);
@@ -105,8 +121,8 @@ describe("execution installation configuration", () => {
 
     const result = await execFileAsync(process.execPath, ["--import", "tsx", bin, "init", output, "yaml"]);
 
-    expect(result.stdout).toContain("initialized from execution.default@execution.config@1.0.0");
-    expect(await readFile(output, "utf8")).toContain("schemaVersion: execution.config@1.0.0");
+    expect(result.stdout).toContain("initialized from execution.default@execution.config@2.0.0");
+    expect(await readFile(output, "utf8")).toContain("schemaVersion: execution.config@2.0.0");
   });
   it("normalizes equivalent YAML and JSON to one frozen value and stable identities", async () => {
     const paths = await deployment();
@@ -245,14 +261,14 @@ describe("execution installation configuration", () => {
     expect(alternate.config.workflowSource).toEqual({ kind: "adapter", adapterKey: "fixture", adapterConfigFile: await realpath(adapterConfigFile) });
   });
 
-  it("redacts credential references and never exposes credential-store paths or material", async () => {
+  it("redacts V2 paths and never introduces Provider credentials", async () => {
     const paths = await deployment();
-    const loaded = await loadDocument(".json", input(paths));
+    const configPath = join(paths.root, "redaction-v2.json");
+    await writeFile(configPath, JSON.stringify(inputV2(paths)));
+    const loaded = await loadExecutionInstallationConfigV2(configPath);
     const redacted = JSON.stringify(redactEffectiveConfiguration(loaded.config));
-    expect(redacted).toContain("[credential-reference]");
     expect(redacted).toContain("[sensitive-path]");
-    expect(redacted).not.toContain(paths.credentialStorePath);
-    expect(redacted).not.toContain("secret material");
+    for (const forbidden of [paths.credentialStorePath, "secret material", "credentialRef", "provider.default"]) expect(redacted).not.toContain(forbidden);
   });
 
   it("ships structurally equivalent YAML and JSON defaults with exact required markers", async () => {
@@ -261,8 +277,8 @@ describe("execution installation configuration", () => {
     const parsedYaml = (await import("yaml")).parse(yaml);
     const parsedJson = JSON.parse(json) as unknown;
     expect(parsedYaml).toEqual(parsedJson);
-    expect(new Set(json.match(/__REQUIRED__:[^"\]]+/gu))).toHaveLength(8);
-    const schema = JSON.parse(await readFile(new URL("../../config/schema/execution.config.schema.json", import.meta.url), "utf8")) as Record<string, unknown>;
+    expect(new Set(json.match(/__REQUIRED__:[^"\]]+/gu))).toHaveLength(3);
+    const schema = JSON.parse(await readFile(new URL("../../config/schema/execution.config.v2.schema.json", import.meta.url), "utf8")) as Record<string, unknown>;
     expect(schema).toMatchObject({
       $schema: "https://json-schema.org/draft/2020-12/schema",
       type: "object",
@@ -287,11 +303,6 @@ describe("execution installation configuration", () => {
       ["paths.repositoryRoot", paths.repositoryRoot],
       ["paths.workspaceRoot", paths.workspaceRoot],
       ["paths.stateRoot", paths.stateRoot],
-      ["paths.credentialStorePath", paths.credentialStorePath],
-      ["runner.provider.route", "openai-compatible"],
-      ["runner.provider.modelId", "fixture-model"],
-      ["runner.provider.baseUrl", "https://provider.example/v1"],
-      ["runner.provider.credentialRef", "provider.default"],
     ]);
     const fill = (document: string) => [...replacements].reduce(
       (result, [field, value]) => result.replaceAll(`__REQUIRED__:${field}`, value),
@@ -301,7 +312,7 @@ describe("execution installation configuration", () => {
     const yamlPath = join(paths.root, "from-default.yaml");
     await writeFile(jsonPath, fill(await readFile(new URL("../../config/defaults/execution.default.json", import.meta.url), "utf8")));
     await writeFile(yamlPath, fill(await readFile(new URL("../../config/defaults/execution.default.yaml", import.meta.url), "utf8")));
-    const [json, yaml] = await Promise.all([loadExecutionInstallationConfig(jsonPath), loadExecutionInstallationConfig(yamlPath)]);
+    const [json, yaml] = await Promise.all([loadExecutionInstallationConfigV2(jsonPath), loadExecutionInstallationConfigV2(yamlPath)]);
     expect(json).toEqual(yaml);
   });
 
@@ -327,25 +338,24 @@ describe("execution installation configuration", () => {
     const target = join(paths.root, "new-config.yaml");
     await initializeExecutionConfiguration(target, "yaml");
     const initialized = await readFile(target, "utf8");
-    expect(initialized).toContain("execution.config@1.0.0");
+    expect(initialized).toContain("execution.config@2.0.0");
     await expect(initializeExecutionConfiguration(target, "yaml")).rejects.toMatchObject({ code: "CONFIG_PATH_INVALID" });
 
     const configPath = join(paths.root, "effective.json");
-    await writeFile(configPath, JSON.stringify(input(paths)));
+    await writeFile(configPath, JSON.stringify(inputV2(paths)));
     const dumped = await dumpEffectiveExecutionConfiguration(configPath);
     expect(dumped).toContain('"requiredComplete":true');
-    expect(dumped).toContain("execution.default@execution.config@1.0.0");
-    expect(dumped).toContain("[credential-reference]");
-    expect(dumped).not.toContain(paths.credentialStorePath);
+    expect(dumped).toContain("execution.default@execution.config@2.0.0");
+    expect(dumped).not.toContain("credential");
   });
 
   it("provides init, validate, and dump-effective CLI operations without nested overrides", async () => {
     const paths = await deployment();
     const initializedPath = join(paths.root, "cli-default.json");
-    expect(await runExecutionConfigCli(["init", initializedPath, "json"])).toContain("execution.default@execution.config@1.0.0");
+    expect(await runExecutionConfigCli(["init", initializedPath, "json"])).toContain("execution.default@execution.config@2.0.0");
 
     const configPath = join(paths.root, "cli-effective.json");
-    await writeFile(configPath, JSON.stringify(input(paths)));
+    await writeFile(configPath, JSON.stringify(inputV2(paths)));
     expect(await runExecutionConfigCli(["validate", configPath])).toMatch(/^sha256:[0-9a-f]{64}\n$/u);
     expect(await runExecutionConfigCli(["dump-effective", configPath])).toContain('"requiredComplete":true');
     await expect(runExecutionConfigCli([])).rejects.toThrow("usage: execution-config");

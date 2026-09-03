@@ -1,5 +1,7 @@
+const USAGE = "Usage: /wsr list | create <selector> | recover [delivery-id] | status [delivery-id] | action finish. Usage: /wsr abandon [delivery-id]";
+
 function invalid() {
-  throw new TypeError("WSR_COMMAND_INVALID");
+  throw Object.assign(new TypeError(`WSR_COMMAND_INVALID. ${USAGE}`), { code: "WSR_COMMAND_INVALID" });
 }
 
 function split(value) {
@@ -30,6 +32,10 @@ export function parseWsrCommand(value) {
     return Object.freeze({ operation: "status", deliveryId });
   }
   if (line === "action finish") return Object.freeze({ operation: "action-finish", ...(remainder === undefined ? {} : { remainder }) });
+  if (line === "abandon") {
+    if (remainder !== undefined) invalid();
+    return Object.freeze({ operation: "abandon" });
+  }
   if (line.startsWith("abandon ")) {
     const deliveryId = line.slice(8);
     if (deliveryId.length === 0 || deliveryId.includes(" ") || remainder !== undefined) invalid();

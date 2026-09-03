@@ -1,11 +1,10 @@
 {
-  "schemaVersion": "execution.config@1.0.0",
+  "schemaVersion": "execution.config@2.0.0",
   "paths": {
     "repositoryRoot": "__REQUIRED__:paths.repositoryRoot",
     "workspaceRoot": "__REQUIRED__:paths.workspaceRoot",
     "allowedWorktreeRoots": ["__REQUIRED__:paths.workspaceRoot"],
-    "stateRoot": "__REQUIRED__:paths.stateRoot",
-    "credentialStorePath": "__REQUIRED__:paths.credentialStorePath"
+    "stateRoot": "__REQUIRED__:paths.stateRoot"
   },
   "workflowSource": {
     "kind": "github",
@@ -14,16 +13,9 @@
     "assetPattern": "workflow-package-{name}-{version}.tar.gz"
   },
   "runner": {
-    "implementationKey": "runner.v1",
+    "implementationKey": "runner.v2",
     "host": { "engine": "langgraph" },
-    "provider": {
-      "key": "dsh",
-      "route": "__REQUIRED__:runner.provider.route",
-      "modelId": "__REQUIRED__:runner.provider.modelId",
-      "baseUrl": "__REQUIRED__:runner.provider.baseUrl",
-      "credentialRef": "__REQUIRED__:runner.provider.credentialRef",
-      "maxParallelToolCalls": 4
-    }
+    "maxParallelToolCalls": 4
   },
   "observation": {
     "enabled": false,

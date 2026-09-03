@@ -20,6 +20,7 @@ import {
   type PersistBoundInput,
 } from "../../src/delivery/index.js";
 import { validRunnerActivation } from "../support/runner-activation-fixtures.js";
+import { ManagedWorkspaceSnapshotError } from "../../src/custody/managed-workspace-snapshot.js";
 
 const sha = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}` as const;
 
@@ -68,7 +69,9 @@ async function fixture(runtimeResult: "start-failed" | "unknown" | "invalid" | "
       return runtimeResult === "start-failed"
         ? { ok: true as const, value: Object.freeze({ kind: "start-failed" as const, code: "START_FAILED" as const, detail: Object.freeze({ reason: "compile" }) }) }
         : runtimeResult === "unknown"
-          ? { ok: true as const, value: Object.freeze({ kind: "unknown" as const, delivery, detail: Object.freeze({ reason: "uncertain" }) }) }
+          ? { ok: true as const, value: Object.freeze({ kind: "unknown" as const, delivery, detail: Object.freeze({
+            reason: "HOST_START_DISPOSITION_UNRESOLVED", stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION",
+          }) }) }
           : runtimeResult === "invalid"
             ? { ok: true as const, value: Object.freeze({ kind: "unknown" as const, delivery, detail: "malformed" }) as never }
             : { ok: true as const, value: Object.freeze({ kind: "terminal" as const, outcome: "COMPLETED" as const, settlement: Object.freeze({ delivery }), result: Object.freeze({}) }) as never };
@@ -285,8 +288,14 @@ describe("M01 production Delivery lifecycle", () => {
     const f = await fixture("unknown");
     const result = await f.service.activate(f.ready);
 
-    expect(result).toMatchObject({ kind: "UNKNOWN", deliveryId: "delivery-1", state: "RESULT_UNRESOLVED" });
-    expect(await f.slots.read(f.worktree)).toMatchObject({ state: "RESULT_UNRESOLVED", deliveryId: "delivery-1" });
+    expect(result).toMatchObject({
+      kind: "UNKNOWN", deliveryId: "delivery-1", state: "RESULT_UNRESOLVED",
+      diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" },
+    });
+    expect(await f.slots.read(f.worktree)).toMatchObject({
+      state: "RESULT_UNRESOLVED", deliveryId: "delivery-1",
+      diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" },
+    });
   });
 
   it("recovers from the persisted Manifest identity and supports exact authorized abandonment", async () => {
@@ -390,6 +399,16 @@ describe("M01 production Delivery lifecycle", () => {
     expect(await projection.slots.read(projection.worktree)).toMatchObject({ state: "BOUND" });
     expect(projection.events).toContain("fact:M01:delivery-bound");
 
+    const capacity = await fixture("unknown");
+    const capacityFailure = new DeliveryLifecycleService({
+      ...capacity.options,
+      projector: Object.freeze({ project: async () => {
+        throw new ManagedWorkspaceSnapshotError("total-bytes", 100, 101);
+      } }),
+    });
+    expect(await capacityFailure.activate(capacity.ready))
+      .toMatchObject({ kind: "ERROR", code: "WORKSPACE_SNAPSHOT_CAPACITY_EXCEEDED" });
+
     const startup = await fixture("unknown");
     const startupFailure = new DeliveryLifecycleService({
       ...startup.options,
@@ -435,7 +454,7 @@ describe("M01 production Delivery lifecycle", () => {
       .toMatchObject({ kind: "ERROR", code: "DELIVERY_BINDING_FAILED" });
     await mismatchedRecovery.slots.transition(mismatchedRecovery.worktree, "M02_RECONCILED_RUNNING", 101);
     expect(await mismatchedRecovery.service.abandon(mismatchedRecovery.worktree, "delivery-1"))
-      .toMatchObject({ kind: "ERROR", code: "DELIVERY_UNKNOWN" });
+      .toMatchObject({ kind: "TERMINAL", outcome: "CANCELLED", summary: "AUTHORIZED_ABANDONMENT" });
 
     const startFailedRecovery = await fixture("unknown");
     const projectionFailure = new DeliveryLifecycleService({

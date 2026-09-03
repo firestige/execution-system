@@ -14,7 +14,7 @@ let root = "";
 let activation: RunnerActivationContext;
 const minimalCorpus = path.join(
   path.dirname(fileURLToPath(new URL("../..", import.meta.url))),
-  "system-contracts/workflow-dsl/examples/minimal",
+  "system-contracts/workflow-dsl-2-candidate/generated/examples/minimal",
 );
 
 function freeze<T>(value: T): T {

@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: firestige/wsr-workflow-package
-          ref: 4f77fcc25c26d85cba170ba6aa859d05eee3b298
+          ref: 70ee6aa2d38595bcaabe5bd205e36d8e3b823538
           path: workflow-package
           fetch-depth: 0
 

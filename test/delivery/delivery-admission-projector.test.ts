@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, mkdtemp, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,13 +7,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { coordinateIdentity, type DeliveryConfigProjection, type DeliveryConfigProjectionV2 } from "../../src/configuration/index.js";
+import { coordinateIdentity, type DeliveryConfigProjectionV2 } from "../../src/configuration/index.js";
 import { compileRunnerActivation } from "../../src/interpreter/compile-runner-activation.js";
 import {
   captureTaskPromptSnapshot,
-  createDeliveryManifest,
   createDeliveryManifestV2,
   DeliveryAdmissionProjector,
+  extractWorkflowV2RoleSnapshot,
   resolveRoleModelBindings,
 } from "../../src/delivery/index.js";
 import { AgentProviderFactoryRegistry, type AgentProviderRealmFactory } from "../../src/providers/provider.js";
@@ -20,26 +21,87 @@ import { AgentProviderFactoryRegistry, type AgentProviderRealmFactory } from "..
 const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
 const executionRoot = fileURLToPath(new URL("../../", import.meta.url)).replace(/\/$/u, "");
 
-function projection(baseUrl = "https://api.example.test"): DeliveryConfigProjection {
-  return Object.freeze({
-    identity: `sha256:${"a".repeat(64)}`,
-    value: Object.freeze({
-      schemaVersion: "execution.delivery-config@1.0.0",
-      paths: Object.freeze({ repositoryRoot, workspaceRoot: repositoryRoot, allowedWorktreeRoots: Object.freeze([repositoryRoot]), runnerResources: Object.freeze({ journal: "runner/journal", checkpoints: "runner/checkpoints", sessions: "runner/sessions", custody: "runner/custody" }) }),
-      runner: Object.freeze({ implementationKey: "runner.v1", host: Object.freeze({ engine: "langgraph" }), provider: Object.freeze({ key: "dsh", route: "deepseek", modelId: "deepseek-chat", baseUrl, credentialRef: "PROVIDER_KEY", maxParallelToolCalls: 1 }) }),
-      controls: Object.freeze({ executionTimeoutMs: 60_000, maxConcurrentDeliveries: 2, allowExplicitRefresh: false }),
-    }),
-  }) as unknown as DeliveryConfigProjection;
+function digest(value: string): `sha256:${string}` {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-describe("frozen Delivery Admission 1.0.0 production projection", () => {
+function projectionV2(): DeliveryConfigProjectionV2 {
+  const value = Object.freeze({
+    schemaVersion: "execution.delivery-config@2.0.0" as const,
+    paths: Object.freeze({ repositoryRoot, workspaceRoot: repositoryRoot, allowedWorktreeRoots: Object.freeze([repositoryRoot]), runnerResources: Object.freeze({ journal: "runner/journal" as const, checkpoints: "runner/checkpoints" as const, sessions: "runner/sessions" as const, custody: "runner/custody" as const }) }),
+    runner: Object.freeze({ implementationKey: "runner.v2" as const, host: Object.freeze({ engine: "langgraph" as const }), maxParallelToolCalls: 2 }),
+    controls: Object.freeze({ executionTimeoutMs: 60_000, maxConcurrentDeliveries: 2, allowExplicitRefresh: false }),
+  });
+  return Object.freeze({ value, identity: coordinateIdentity("execution.delivery-config@2.0.0", value as never) });
+}
+
+async function firstPartyManifest(input: {
+  readonly name: string;
+  readonly definition: string;
+  readonly packageDocument: any;
+  readonly snapshotDocument: any;
+  readonly promptSnapshot: Awaited<ReturnType<typeof captureTaskPromptSnapshot>>;
+}) {
+  const [actionsDocument, rolesDocument, routesDocument] = await Promise.all([
+    readFile(path.join(input.definition, "actions.json"), "utf8").then(JSON.parse),
+    readFile(path.join(input.definition, "roles.json"), "utf8").then(JSON.parse),
+    readFile(path.join(input.definition, "routes.json"), "utf8").then(JSON.parse),
+  ]);
+  const extracted = extractWorkflowV2RoleSnapshot({
+    packageDocument: input.packageDocument,
+    snapshotDocument: input.snapshotDocument,
+    actionsDocument,
+    rolesDocument,
+    routesDocument,
+  });
+  const factory: AgentProviderRealmFactory = Object.freeze({
+    descriptor: Object.freeze({
+      schemaVersion: "execution.agent-provider-factory@1.0.0",
+      identity: "provider.dsh",
+      version: "1.0.0",
+      adapterKey: "dsh-headless",
+      capabilities: Object.freeze(["structured-completion", "action-interaction"]),
+    }),
+    async acquire() { throw new Error("projection does not acquire realms"); },
+  });
+  const registry = new AgentProviderFactoryRegistry([factory]);
+  const repositoryModelBindings = Object.freeze({
+    schemaVersion: "execution.repository-role-provider-bindings-snapshot@1.0.0" as const,
+    documentState: "PRESENT" as const,
+    documentDigest: digest(`repository-bindings.${input.name}`),
+    bindings: Object.freeze(Object.fromEntries(extracted.agentActionRoles.map(({ roleId }) => [roleId, Object.freeze({
+      agentProvider: Object.freeze({ identity: "provider.dsh", version: "1.0.0" }),
+      model: Object.freeze({ provider: "deepseek", model: "deepseek-chat" }),
+    })]))),
+  });
+  const resolvedRoleBindings = resolveRoleModelBindings({ registry, repository: repositoryModelBindings, agentActionRoles: extracted.agentActionRoles });
+  return createDeliveryManifestV2({
+    deliveryId: `delivery-${input.name}`,
+    taskId: `task-${input.name}`,
+    createdAt: 1,
+    canonicalWorktree: repositoryRoot,
+    workflowPackage: {
+      name: input.packageDocument.package.name,
+      exactVersion: input.packageDocument.package.version,
+      packageDigest: input.packageDocument.package.digest,
+      localMaterializationPath: input.definition,
+    },
+    workflowSnapshot: extracted.workflowSnapshot,
+    agentActionRoles: extracted.agentActionRoles,
+    repositoryModelBindings,
+    resolvedRoleBindings,
+    promptSnapshot: input.promptSnapshot,
+    deliveryConfigProjection: projectionV2(),
+  });
+}
+
+describe("frozen Delivery Admission production projection", () => {
   it.each([
     ["implementation", path.join(repositoryRoot, "workflow-package", "implementation", "definition")],
     ["system-design", path.join(repositoryRoot, "workflow-package", "system-design", "definition")],
-    ["contributed", path.join(repositoryRoot, "system-contracts", "workflow-dsl", "examples", "minimal")],
+    ["contract-minimal", path.join(repositoryRoot, "system-contracts", "workflow-dsl-2-candidate", "generated", "examples", "minimal")],
   ])("projects the exact %s Package and persisted Manifest without raw admission inputs", async (name, definition) => {
     const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
-    const workflowDocument = JSON.parse(await readFile(path.join(definition, "workflow.json"), "utf8"));
     const snapshotDocument = JSON.parse(await readFile(path.join(definition, "snapshot.json"), "utf8"));
     const routesDocument = JSON.parse(await readFile(path.join(definition, "routes.json"), "utf8"));
     const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-"));
@@ -49,21 +111,7 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
       prompt: Object.freeze({ text: "execute the admitted task", attachments: Object.freeze([]) }),
       attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }),
     });
-    const manifest = createDeliveryManifest({
-      deliveryId: `delivery-${name}`,
-      taskId: `task-${name}`,
-      createdAt: 1,
-      canonicalWorktree: repositoryRoot,
-      resolvedPackage: Object.freeze({
-        name: packageDocument.package.name,
-        exactVersion: packageDocument.package.version,
-        packageDigest: packageDocument.package.digest,
-        localPath: definition,
-        workflowId: workflowDocument.workflow.id,
-      }),
-      promptSnapshot: snapshot,
-      deliveryConfigProjection: projection(),
-    });
+    const manifest = await firstPartyManifest({ name, definition, packageDocument, snapshotDocument, promptSnapshot: snapshot });
 
     const activation = await new DeliveryAdmissionProjector().project(manifest);
     expect(Object.isFrozen(activation)).toBe(true);
@@ -78,23 +126,25 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
         snapshotIdentity: snapshotDocument.snapshot.id,
         snapshotDigest: snapshotDocument.snapshot.digest,
       },
-      admission: { deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0" },
+      admission: { deliveryAdmissionContractIdentity: "agentops.delivery-admission@2.0.0" },
     });
     expect(compileRunnerActivation(activation).ok).toBe(true);
     for (const agent of Object.values(activation.program.execution.agents)) {
       const route = routesDocument.routes.find((candidate: any) => candidate.id === agent.session.routeIdentity);
       const modes = [...new Set((route?.access ?? []).map((entry: any) => entry.mode).filter((mode: string) => mode === "read" || mode === "write"))];
-      expect(agent.turn.access).toEqual(modes.map((mode) => ({ mode, path: "**" })));
+      expect(agent.turn.access).toEqual(modes.map((mode) => ({
+        mode,
+        path: "**",
+      })));
     }
     const serialized = JSON.stringify(activation);
     expect(serialized).not.toContain('"path":"README.md"');
     expect(serialized).not.toContain('"path":"run"');
     expect(serialized).not.toMatch(/"contentRef"|"workflowSource"|"packageStore"|"credentialStore"|"nativeSession"|"checkpointIdentity"/);
-    expect(serialized).not.toContain('"schemaVersion":"agentops.workflow-dsl@1.1.0","package"');
   });
 
   it("binds the admitted entry input using only its declared JSON field formats", async () => {
-    const source = path.join(repositoryRoot, "system-contracts", "workflow-dsl", "examples", "minimal");
+    const source = path.join(repositoryRoot, "system-contracts", "workflow-dsl-2-candidate", "generated", "examples", "minimal");
     const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-formats-"));
     const definition = path.join(root, "definition");
     await cp(source, definition, { recursive: true });
@@ -117,7 +167,7 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
     await writeFile(actionsPath, `${JSON.stringify(actionsDocument, null, 2)}\n`, "utf8");
 
     const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
-    const workflowDocument = JSON.parse(await readFile(path.join(definition, "workflow.json"), "utf8"));
+    const snapshotDocument = JSON.parse(await readFile(path.join(definition, "snapshot.json"), "utf8"));
     const attachmentBytes = Buffer.from("ordered attachment");
     const attachmentDigest = `sha256:${createHash("sha256").update(attachmentBytes).digest("hex")}`;
     const promptSnapshot = await captureTaskPromptSnapshot({
@@ -129,21 +179,7 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
       })]) }),
       attachments: Object.freeze({ read: async () => attachmentBytes }),
     });
-    const manifest = createDeliveryManifest({
-      deliveryId: "delivery-formats",
-      taskId: "task-formats",
-      createdAt: 1,
-      canonicalWorktree: repositoryRoot,
-      resolvedPackage: Object.freeze({
-        name: packageDocument.package.name,
-        exactVersion: packageDocument.package.version,
-        packageDigest: packageDocument.package.digest,
-        localPath: definition,
-        workflowId: workflowDocument.workflow.id,
-      }),
-      promptSnapshot,
-      deliveryConfigProjection: projection(),
-    });
+    const manifest = await firstPartyManifest({ name: "formats", definition, packageDocument, snapshotDocument, promptSnapshot });
 
     const activation = await new DeliveryAdmissionProjector().project(manifest);
     expect(activation.initial.state.values.__deliveryTaskPrompt).toEqual({
@@ -164,6 +200,53 @@ describe("frozen Delivery Admission 1.0.0 production projection", () => {
       },
     });
     expect(compileRunnerActivation(activation).ok).toBe(true);
+  });
+
+  it("admits one immutable dirty managed-workspace snapshot without changing the user index or object database", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-dirty-"));
+    const workspace = path.join(root, "workspace");
+    await mkdir(path.join(workspace, "cache"), { recursive: true });
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: workspace, encoding: "utf8" }).trim();
+    git("init", "-q");
+    git("config", "user.email", "admission@example.invalid");
+    git("config", "user.name", "Admission Test");
+    await writeFile(path.join(workspace, ".gitignore"), "cache/\n");
+    await writeFile(path.join(workspace, "tracked.txt"), "committed\n");
+    git("add", ".");
+    git("commit", "-qm", "baseline");
+    await writeFile(path.join(workspace, "tracked.txt"), "dirty tracked\n");
+    await writeFile(path.join(workspace, "untracked.txt"), "dirty untracked\n");
+    await writeFile(path.join(workspace, "cache", "large.bin"), "ignored-v1\n");
+
+    const definition = path.join(repositoryRoot, "system-contracts", "workflow-dsl-2-candidate", "generated", "examples", "minimal");
+    const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
+    const snapshotDocument = JSON.parse(await readFile(path.join(definition, "snapshot.json"), "utf8"));
+    const promptSnapshot = await captureTaskPromptSnapshot({
+      root: path.join(root, "snapshots"),
+      deliveryId: "delivery-dirty",
+      prompt: Object.freeze({ text: "admit dirty workspace", attachments: Object.freeze([]) }),
+      attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }),
+    });
+    const manifest = await firstPartyManifest({ name: "dirty", definition, packageDocument, snapshotDocument, promptSnapshot });
+    const workspaceManifest = Object.freeze({ ...manifest, canonicalWorktree: workspace });
+    const indexBefore = await readFile(path.join(workspace, ".git", "index"));
+    const objectsBefore = git("count-objects", "-v");
+    const headTree = git("rev-parse", "HEAD^{tree}");
+
+    const first = await new DeliveryAdmissionProjector().project(workspaceManifest);
+    expect(first.initial.workspace.admittedGitTree).not.toBe(headTree);
+    expect(await readFile(path.join(workspace, ".git", "index"))).toEqual(indexBefore);
+    expect(git("count-objects", "-v")).toBe(objectsBefore);
+
+    await writeFile(path.join(workspace, "cache", "large.bin"), "ignored-v2\n");
+    const ignoredOnly = await new DeliveryAdmissionProjector().project(workspaceManifest);
+    expect(ignoredOnly.initial.workspace.admittedGitTree).toBe(first.initial.workspace.admittedGitTree);
+
+    await writeFile(path.join(workspace, "untracked.txt"), "dirty untracked changed\n");
+    const managedChange = await new DeliveryAdmissionProjector().project(workspaceManifest);
+    expect(managedChange.initial.workspace.admittedGitTree).not.toBe(first.initial.workspace.admittedGitTree);
+    expect(await readFile(path.join(workspace, ".git", "index"))).toEqual(indexBefore);
+    expect(git("count-objects", "-v")).toBe(objectsBefore);
   });
 });
 

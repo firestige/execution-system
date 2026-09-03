@@ -1,27 +1,20 @@
-schemaVersion: execution.config@1.0.0
+schemaVersion: execution.config@2.0.0
 paths:
   repositoryRoot: /srv/wsr/repository
   workspaceRoot: /srv/wsr/workspaces
   allowedWorktreeRoots:
     - /srv/wsr/workspaces
   stateRoot: /var/lib/wsr/execution
-  credentialStorePath: /var/lib/wsr/credentials.yml
 workflowSource:
   kind: github
   repository: firestige/wsr-workflow-package
   releasesBaseUrl: https://api.github.com/repos/firestige/wsr-workflow-package/releases
   assetPattern: workflow-package-{name}-{version}.tar.gz
 runner:
-  implementationKey: runner.v1
+  implementationKey: runner.v2
   host:
     engine: langgraph
-  provider:
-    key: dsh
-    route: deepseek
-    modelId: deepseek-chat
-    baseUrl: https://api.deepseek.com
-    credentialRef: DEEPSEEK_API_KEY
-    maxParallelToolCalls: 8
+  maxParallelToolCalls: 8
 observation:
   enabled: true
   endpoint: http://127.0.0.1:4318

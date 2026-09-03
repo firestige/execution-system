@@ -21,4 +21,9 @@ export interface CoordinatorHost {
 }
 export interface HostStopFact { readonly thread: ThreadRef; readonly state: Knowledge<"stopped" | "already-stable">; readonly checkpoint: Knowledge<CheckpointRef> }
 export interface HostInspection { readonly thread: ThreadRef; readonly checkpoint: Knowledge<CheckpointRef>; readonly pendingSite: Knowledge<ExecutionSiteRef | Absent>; readonly disposition: Knowledge<HostDisposition | Absent> }
-export type HostError = Readonly<{ code: "ACTIVATION_MISMATCH" | "ILLEGAL_SUCCESSOR" | "DATAFLOW_BINDING_INVALID" | "CHECKPOINT_ORDER_VIOLATION" | "CONTROL_MISMATCH" | "ACTION_INPUT_MISMATCH" | "RECOVERY_NOT_ADMITTED" | "RETIREMENT_NOT_AUTHORIZED" }>;
+export type HostError = Readonly<{ code:
+  | "ACTIVATION_MISMATCH" | "ILLEGAL_SUCCESSOR" | "DATAFLOW_BINDING_INVALID" | "CHECKPOINT_ORDER_VIOLATION"
+  | "CONTROL_MISMATCH" | "ACTION_INPUT_MISMATCH" | "RECOVERY_NOT_ADMITTED" | "RETIREMENT_NOT_AUTHORIZED"
+  | "CORRELATION_MISMATCH" | "BASELINE_MISSING" | "GIT_STATE_MISMATCH" | "WORKSPACE_SNAPSHOT_CAPACITY_EXCEEDED"
+  | "READ_VIEW_INVALID" | "PUBLICATION_GUARD_INVALID"
+}>;

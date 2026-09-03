@@ -9,7 +9,7 @@ const STABLE_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const COMPATIBILITY = Object.freeze({
   node: ">=24.12.0 <25",
   dsh: "0.1.1-rc.2",
-  workflowContract: "agentops.workflow-dsl@1.1.0 + agentops.workflow-dsl@2.0.0",
+  workflowContract: "agentops.workflow-dsl@2.0.0",
   observationContract: "agentops.observation@1.0.0",
 });
 

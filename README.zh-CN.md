@@ -100,7 +100,7 @@ dsh plugin --profile web add dsh-wsr-execution@0.1.0
 |---|---|
 | Node.js | `>=24.12.0 <25` |
 | DeepSeek Harness | `0.1.1-rc.2`（`@deepseek-ai/dsh`）|
-| Workflow Package 契约 | `agentops.workflow-dsl@1.1.0`（历史 runner）与 `agentops.workflow-dsl@2.0.0`（多 Provider runner） |
+| Workflow Package 契约 | `agentops.workflow-dsl@2.0.0` |
 | 观测契约 | `agentops.observation@1.0.0` |
 | 检查点存储 | `better-sqlite3`（原生构建，经 `allowBuilds` 批准）|
 

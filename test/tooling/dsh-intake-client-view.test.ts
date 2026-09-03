@@ -10,6 +10,7 @@ async function loadClient(sessionSnapshot?: unknown) {
   const source = await readFile(clientPath, "utf8");
   let definition: any;
   const copied: string[] = [];
+  let reactState: unknown;
   runInNewContext(source, {
     window: { __ModuleLoader__: { load(value: unknown) { definition = value; } } },
     navigator: { clipboard: { async writeText(value: string) { copied.push(value); } } },
@@ -17,7 +18,10 @@ async function loadClient(sessionSnapshot?: unknown) {
   const React = Object.freeze({
     createElement(type: unknown, props: unknown, ...children: unknown[]) { return { type, props, children }; },
     useSyncExternalStore(_subscribe: unknown, getSnapshot: () => unknown) { return getSnapshot(); },
-    useState(value: unknown) { return [value, () => undefined]; },
+    useState(value: unknown) {
+      reactState ??= value;
+      return [reactState, (next: unknown) => { reactState = next; }];
+    },
   });
   const primitives = Object.freeze({
     Tooltip: "Tooltip",
@@ -94,10 +98,12 @@ describe("DSH official WSR command view", () => {
     ["delivery-running", { deliveryId: "delivery-1" }, "Workflow delivery running · delivery-1"],
     ["delivery-status", { state: "RUNNING_CORRELATED" }, "Workflow delivery status · RUNNING_CORRELATED"],
     ["delivery-status", { state: "RESULT_UNRESOLVED", created: false, reason: "CURRENT_DELIVERY_EXISTS" }, "No new Workflow Delivery created · CURRENT_DELIVERY_EXISTS · RESULT_UNRESOLVED"],
+    ["delivery-status", { state: "RESULT_UNRESOLVED", diagnostic: { stage: "HOST_START", causeCode: "CHECKPOINT_ORDER_VIOLATION" } }, "Workflow delivery status · RESULT_UNRESOLVED\nFailure stage: HOST_START\nCause: CHECKPOINT_ORDER_VIOLATION"],
     ["action-output", { content: { text: "hello" } }, "Action output"],
     ["action-input-request", { prompt: { question: "Continue?" } }, "Action input requested"],
     ["terminal-result", { outcome: "SUCCEEDED" }, "Workflow finished · SUCCEEDED"],
   ])("renders the %s presentation", async (kind, data, expected) => {
+    const fields = data as any;
     const { components, definitions } = await loadClient();
     const definition = definitions.find((candidate) => candidate.kind === "wsr-interaction");
     expect(definition, "WSR chat conversation definition").toBeDefined();
@@ -123,6 +129,9 @@ describe("DSH official WSR command view", () => {
     expect(rendered.props["data-wsr-surface"]).toBe("chat");
     expect(rendered.props["data-wsr-chat-role"]).toBe("assistant");
     expect(rendered.props["data-wsr-kind"]).toBe(kind);
+    expect(rendered.props["data-wsr-state"]).toBe(typeof fields.state === "string" ? fields.state : undefined);
+    expect(rendered.props["data-wsr-failure-stage"]).toBe(typeof fields.diagnostic?.stage === "string" ? fields.diagnostic.stage : undefined);
+    expect(rendered.props["data-wsr-cause-code"]).toBe(typeof fields.diagnostic?.causeCode === "string" ? fields.diagnostic.causeCode : undefined);
     expect(rendered.type).toBe("article");
     expect(rendered.children[0].type).toBe("div");
     expect(rendered.children[0].props.style.fontFamily).toBe("inherit");
@@ -201,5 +210,36 @@ describe("DSH official WSR sidebar projection", () => {
     await buttons[0].props.onClick();
     await buttons[1].props.onClick();
     expect(commands).toEqual(["/wsr list", "/wsr status"]);
+  });
+
+  it("renders the same bounded unresolved diagnostic in the sidebar status and semantic tags", async () => {
+    const outcome = { text: JSON.stringify({
+      schemaVersion: "wsr.presentation@1.0.0", correlation: "presentation-unresolved", kind: "delivery-status", data: {
+        deliveryId: "delivery-1", state: "RESULT_UNRESOLVED",
+        diagnostic: { stage: "HOST_START", causeCode: "GIT_STATE_MISMATCH" },
+      },
+    }) };
+    const { components } = await loadClient({
+      composerPhase: "blank",
+      chat: { order: ["command-1"], nodes: new Map([["command-1", {
+        kind: "command", data: { commandId: "command-1", name: "wsr", outcome },
+      }]]) },
+    });
+    const rendered = components.get("sidebar.footer.action")!({
+      wide: true,
+      useSessions: (select: (value: unknown) => unknown) => select({ current: "session-1" }),
+    });
+    const statusButton = rendered.children.filter((child: any) => child?.type === "button")[1];
+    await statusButton.props.onClick();
+    const updated = components.get("sidebar.footer.action")!({
+      wide: true,
+      useSessions: (select: (value: unknown) => unknown) => select({ current: "session-1" }),
+    });
+    expect(textOf(updated)).toContain("Workflow delivery status · RESULT_UNRESOLVED\nFailure stage: HOST_START\nCause: GIT_STATE_MISMATCH");
+    expect(updated.props).toMatchObject({
+      "data-wsr-state": "RESULT_UNRESOLVED",
+      "data-wsr-failure-stage": "HOST_START",
+      "data-wsr-cause-code": "GIT_STATE_MISMATCH",
+    });
   });
 });

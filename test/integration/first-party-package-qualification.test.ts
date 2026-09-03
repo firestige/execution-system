@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
-const contractRoot = path.join(repositoryRoot, "system-contracts/workflow-dsl");
-const initialWorkflowPackageCommit = "ed2a0bddda1eeaba77f19c5e543fe0c82d55fefb";
+const contractRoot = path.join(repositoryRoot, "system-contracts/workflow-dsl-2-candidate/generated");
 
 function qualify(definition: string, root = repositoryRoot) {
   return spawnSync(process.execPath, [
@@ -19,11 +18,7 @@ describe("first-party Package qualification", () => {
   it.each([
     ["System Design", "workflow-package/system-design/definition", repositoryRoot],
     ["Implementation", "workflow-package/implementation/definition", repositoryRoot],
-  ])("qualifies the %s Package against the frozen 1.1 Contract before Runner projection", (_name, definition, root) => {
-    const packageName = definition.split("/")[1]!;
-    const currentTree = spawnSync("git", ["rev-parse", `HEAD:${packageName}`], { cwd: path.join(repositoryRoot, "workflow-package"), encoding: "utf8", shell: false });
-    const initialTree = spawnSync("git", ["rev-parse", `${initialWorkflowPackageCommit}:${packageName}`], { cwd: path.join(repositoryRoot, "workflow-package"), encoding: "utf8", shell: false });
-    expect(currentTree.stdout.trim()).toBe(initialTree.stdout.trim());
+  ])("qualifies the %s Package against the frozen 2.0 Contract before Runner projection", (_name, definition, root) => {
     const result = qualify(definition, root);
     expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toMatchObject({
       status: 0,

@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { prepareLocalE2E, resolveLocalE2EPreparationInput } from "../../scripts/prepare-local-e2e.js";
-import { validateExecutionInstallationConfig } from "../../src/configuration/index.js";
+import { validateExecutionInstallationConfigV2 } from "../../src/configuration/index.js";
 
 describe("local E2E preparation", () => {
   it("resolves the repository-owned default preparation layout", async () => {
@@ -16,7 +16,7 @@ describe("local E2E preparation", () => {
       executionRoot,
       worktree: path.resolve(executionRoot, ".."),
       packageVersion: coreManifest.version,
-      defaults: { schemaVersion: "execution.config@1.0.0" },
+      defaults: { schemaVersion: "execution.config@2.0.0" },
     });
     expect(input.releaseDirectory).toBe(path.join(input.worktree, "tmp/local-e2e/release"));
     expect(input.durableDirectory).toBe(path.resolve(input.worktree, "../wsr-local"));
@@ -39,10 +39,10 @@ describe("local E2E preparation", () => {
       durableDirectory,
       packageVersion: "0.1.1",
       defaults: {
-        schemaVersion: "execution.config@1.0.0",
+        schemaVersion: "execution.config@2.0.0",
         paths: {},
         workflowSource: { kind: "github" },
-        runner: { implementationKey: "runner.v1", host: { engine: "langgraph" }, provider: { key: "dsh", maxParallelToolCalls: 4 } },
+        runner: { implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 4 },
         observation: { enabled: false }, controls: {}, intake: {},
       },
     }, async (command, args) => {
@@ -53,7 +53,6 @@ describe("local E2E preparation", () => {
     expect(result).toMatchObject({
       version: "0.1.1",
       configFile: path.join(durableDirectory, "execution.json"),
-      credentialFile: path.join(durableDirectory, "credentials.yml"),
       coreArchive: path.join(releaseDirectory, "wsr-execution-0.1.1.tgz"),
       pluginArchive: path.join(releaseDirectory, "wsr-dsh-intake-0.1.1.tgz"),
     });
@@ -63,12 +62,8 @@ describe("local E2E preparation", () => {
       workspaceRoot: worktree,
       allowedWorktreeRoots: [worktree],
       stateRoot: path.join(durableDirectory, "state"),
-      credentialStorePath: result.credentialFile,
     });
-    expect(config.runner.provider).toMatchObject({
-      route: "deepseek", modelId: "deepseek-chat", baseUrl: "https://api.deepseek.com", credentialRef: "DEEPSEEK_API_KEY",
-    });
-    expect(await readFile(result.credentialFile, "utf8")).toContain("replace-with-the-provider-key");
+    expect(config.runner).toEqual({ implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 4 });
   });
 
   it("generates paths accepted by the frozen configuration boundary", async () => {
@@ -89,7 +84,7 @@ describe("local E2E preparation", () => {
     }, async () => undefined);
 
     const config = JSON.parse(await readFile(result.configFile, "utf8"));
-    expect(() => validateExecutionInstallationConfig(config)).not.toThrow();
+    expect(() => validateExecutionInstallationConfigV2(config)).not.toThrow();
   });
 
   it("repairs only legacy generated path scope while preserving user configuration", async () => {
@@ -100,15 +95,14 @@ describe("local E2E preparation", () => {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(durableDirectory, { recursive: true });
     await writeFile(configFile, `${JSON.stringify({
-      schemaVersion: "execution.config@1.0.0",
+      schemaVersion: "execution.config@2.0.0",
       paths: {
         repositoryRoot: worktree,
         workspaceRoot: path.dirname(worktree),
         allowedWorktreeRoots: [path.dirname(worktree)],
         stateRoot: path.join(durableDirectory, "state"),
-        credentialStorePath: path.join(durableDirectory, "credentials.yml"),
       },
-      runner: { provider: { modelId: "user-selected-model" } },
+      runner: { implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 8 },
     }, null, 2)}\n`);
 
     await prepareLocalE2E({
@@ -120,18 +114,16 @@ describe("local E2E preparation", () => {
     expect(repaired.paths.workspaceRoot).toBe(worktree);
     expect(repaired.paths.allowedWorktreeRoots).toEqual([worktree]);
     expect(repaired.paths.stateRoot).toBe(path.join(durableDirectory, "state"));
-    expect(repaired.runner.provider.modelId).toBe("user-selected-model");
+    expect(repaired.runner.maxParallelToolCalls).toBe(8);
   });
 
   it("preserves user-edited durable configuration on repeated preparation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "local-e2e-preserve-"));
     const durableDirectory = path.join(root, "durable");
     const configFile = path.join(durableDirectory, "execution.json");
-    const credentialFile = path.join(durableDirectory, "credentials.yml");
     const { mkdir } = await import("node:fs/promises");
     await mkdir(durableDirectory, { recursive: true });
     await writeFile(configFile, "user-config\n");
-    await writeFile(credentialFile, "user-secret\n");
 
     await prepareLocalE2E({
       executionRoot: path.join(root, "execution-system"), worktree: path.join(root, "worktree"),
@@ -139,7 +131,6 @@ describe("local E2E preparation", () => {
     }, async () => undefined);
 
     expect(await readFile(configFile, "utf8")).toBe("user-config\n");
-    expect(await readFile(credentialFile, "utf8")).toBe("user-secret\n");
   });
 
   it("does not rewrite a valid user-owned path layout that is not the legacy generated shape", async () => {
@@ -154,7 +145,6 @@ describe("local E2E preparation", () => {
         workspaceRoot: path.join(root, "custom-workspace"),
         allowedWorktreeRoots: [path.join(root, "custom-workspace/worktrees")],
         stateRoot: path.join(root, "state"),
-        credentialStorePath: path.join(root, "credentials.yml"),
       },
     }, null, 2)}\n`;
     await writeFile(configFile, userConfig);

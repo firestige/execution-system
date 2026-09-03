@@ -76,8 +76,8 @@ export function validateRunnerActivation(input: unknown): RunnerActivationContex
   if (!isDeeplyFrozen(input)) throw new ActivationContractError("NOT_DEEPLY_FROZEN", "Runner activation must be deeply frozen");
   if (input === null || typeof input !== "object") throw new ActivationContractError("INVALID_ACTIVATION", "Runner activation must be an object");
   const activation = input as Partial<RunnerActivationContext>;
-  const admissionPair = (activation.admission?.contractRevision === "agentops.workflow-dsl@1.1.0" && activation.admission.deliveryAdmissionContractIdentity === "agentops.delivery-admission@1.0.0")
-    || (activation.admission?.contractRevision === "agentops.workflow-dsl@2.0.0" && activation.admission.deliveryAdmissionContractIdentity === "agentops.delivery-admission@2.0.0");
+  const admissionPair = activation.admission?.contractRevision === "agentops.workflow-dsl@2.0.0"
+    && activation.admission.deliveryAdmissionContractIdentity === "agentops.delivery-admission@2.0.0";
   if (activation.schemaVersion !== "runner.activation@1.0.0" || !admissionPair || !isSha256(activation.bindingIdentity) || activation.program === undefined || activation.initial === undefined || activation.correlation === undefined) {
     throw new ActivationContractError("INVALID_ACTIVATION", "Runner activation does not match the admitted contract identity/shape");
   }

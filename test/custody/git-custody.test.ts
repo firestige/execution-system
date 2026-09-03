@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -28,6 +28,7 @@ import type {
   WorkspaceRelativePath,
 } from "../../src/contracts/index.js";
 import { createGitCustody } from "../../src/custody/git-custody.js";
+import { captureManagedWorkspaceTree } from "../../src/custody/managed-workspace-snapshot.js";
 
 const stable = <T extends string>(value: string): T => value as T;
 const sha = (value: string): Sha256 => `sha256:${value}` as Sha256;
@@ -73,6 +74,107 @@ function fixture() {
 }
 
 describe("Git custody", () => {
+  it("establishes a dirty managed baseline without indexing ignored data or mutating the user Git database", async () => {
+    const f = fixture();
+    writeFileSync(path.join(f.repository, "allowed", "value.txt"), "dirty tracked\n");
+    writeFileSync(path.join(f.repository, "untracked.txt"), "dirty untracked\n");
+    writeFileSync(path.join(f.repository, "ignored.log"), "ignored changed before baseline\n");
+    const admittedGitTree = captureManagedWorkspaceTree(f.repository);
+    const workspace = { ...f.workspace, admittedGitTree };
+    const indexBefore = readFileSync(path.join(f.repository, ".git", "index"));
+    const objectsBefore = git(f.repository, "count-objects", "-v");
+    const refsBefore = git(f.repository, "for-each-ref", "--format=%(refname)", "refs/agentops/custody");
+    const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
+
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace });
+
+    expect(baseline.ok).toBe(true);
+    if (!baseline.ok) throw new Error("dirty baseline was not established");
+    expect(baseline.value.gitTree).toBe(admittedGitTree);
+    expect(readFileSync(path.join(f.repository, ".git", "index"))).toEqual(indexBefore);
+    expect(git(f.repository, "count-objects", "-v")).toBe(objectsBefore);
+    expect(git(f.repository, "for-each-ref", "--format=%(refname)", "refs/agentops/custody")).toBe(refsBefore);
+
+    const handle = await custody.acquireWriteHandle({
+      episode: f.episode,
+      savepoint: baseline.value,
+      access: [{ mode: "write", path: "allowed" as WorkspaceRelativePath }],
+    });
+    if (!handle.ok) throw new Error("handle was not issued");
+    writeFileSync(path.join(f.repository, "ignored.log"), "ignored mutation during attempt\n");
+    const ignoredOnly = await custody.settleWorkspaceAttempt({
+      episode: f.episode,
+      workspace: { kind: "write", handle: handle.value },
+      hostDecision: "accept",
+    });
+    expect(ignoredOnly.ok && ignoredOnly.value.kind).toBe("accepted");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored mutation during attempt\n");
+    expect(readFileSync(path.join(f.repository, ".git", "index"))).toEqual(indexBefore);
+    expect(git(f.repository, "count-objects", "-v")).toBe(objectsBefore);
+  });
+
+  it("publishes a dirty managed tree intentionally while keeping the user index unchanged", async () => {
+    const f = fixture();
+    writeFileSync(path.join(f.repository, "allowed", "value.txt"), "dirty publishable\n");
+    writeFileSync(path.join(f.repository, "untracked.txt"), "included in publication\n");
+    writeFileSync(path.join(f.repository, "ignored.log"), "excluded from publication\n");
+    const workspace = { ...f.workspace, admittedGitTree: captureManagedWorkspaceTree(f.repository) };
+    const indexBefore = readFileSync(path.join(f.repository, ".git", "index"));
+    const targetIdentity = stable<PublicationTargetId>("dirty-release-target");
+    const custody = createGitCustody({
+      recordsDirectory: f.records as AbsolutePath,
+      publicationTargets: [{
+        target: { identity: targetIdentity },
+        repositoryPath: f.repository as AbsolutePath,
+        ref: "refs/heads/dirty-published",
+      }],
+    });
+    const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace });
+    if (!baseline.ok) throw new Error("dirty baseline was not established");
+    const preserved = await custody.preserveResult({
+      checkpoint: {
+        identity: stable<CheckpointId>("dirty-checkpoint"),
+        thread: f.episode.thread,
+        stateIdentity: sha("dirty-state"),
+        savepoint: { state: "known", value: baseline.value },
+      },
+      result: {
+        identity: stable<WorkflowResultId>("dirty-result"),
+        content: { outcome: "done" },
+        contentIdentity: sha("dirty-result-content"),
+        artifacts: {} as Record<ArtifactId, never>,
+      },
+    });
+    if (!preserved.ok) throw new Error("dirty result was not preserved");
+
+    const publication = await custody.publish({
+      result: preserved.value,
+      target: { identity: targetIdentity },
+      guard: {
+        identity: stable<PublicationGuardId>("dirty-guard"),
+        expectedGitTree: baseline.value.gitTree,
+      },
+    });
+
+    expect(publication.ok && publication.value.kind).toBe("published");
+    expect(git(f.repository, "rev-parse", "refs/heads/dirty-published^{tree}")).toBe(baseline.value.gitTree);
+    expect(readFileSync(path.join(f.repository, ".git", "index"))).toEqual(indexBefore);
+    expect(git(f.repository, "show", "refs/heads/dirty-published:untracked.txt")).toBe("included in publication");
+    expect(() => git(f.repository, "show", "refs/heads/dirty-published:ignored.log")).toThrow();
+  });
+
+  it("returns a stable capacity diagnostic and cleans failed WSR-owned snapshot objects", async () => {
+    const f = fixture();
+    const custody = createGitCustody({
+      recordsDirectory: f.records as AbsolutePath,
+      snapshotLimits: { maxFileCount: 1, maxFileBytes: 1_000, maxTotalBytes: 10_000 },
+    });
+
+    expect(await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace }))
+      .toEqual({ ok: false, error: { code: "WORKSPACE_SNAPSHOT_CAPACITY_EXCEEDED" } });
+    expect(readdirSync(path.join(f.records, "objects"))).toEqual([]);
+  });
+
   it("requires a durable baseline before issuing a scoped write handle", async () => {
     const f = fixture();
     const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
@@ -108,9 +210,11 @@ describe("Git custody", () => {
 
   it("accepts an in-scope mutation and advances to a durable Git-tree savepoint", async () => {
     const f = fixture();
+    const indexBefore = readFileSync(path.join(f.repository, ".git", "index"));
     const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
     const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
     if (!baseline.ok) throw new Error("baseline was not established");
+    expect(existsSync(path.join(f.records, "objects"))).toBe(true);
     const handle = await custody.acquireWriteHandle({
       episode: f.episode,
       savepoint: baseline.value,
@@ -131,9 +235,10 @@ describe("Git custody", () => {
     if (disposition.value.nextSavepoint.state !== "known" || "kind" in disposition.value.nextSavepoint.value) {
       throw new Error("next savepoint was absent");
     }
-    expect(disposition.value.nextSavepoint.value.gitTree).toBe(git(f.repository, "write-tree"));
-    expect(disposition.value.nextSavepoint.value.gitTree).not.toBe(baseline.value.gitTree);
-    expect(git(f.repository, "cat-file", "-t", disposition.value.nextSavepoint.value.gitTree)).toBe("tree");
+    const nextTree = disposition.value.nextSavepoint.value.gitTree;
+    expect(nextTree).not.toBe(baseline.value.gitTree);
+    expect(readFileSync(path.join(f.repository, ".git", "index"))).toEqual(indexBefore);
+    expect(() => git(f.repository, "cat-file", "-t", nextTree)).toThrow();
   });
 
   it("detects an out-of-scope mutation and restores the prior savepoint", async () => {
@@ -284,6 +389,7 @@ describe("Git custody", () => {
     expect(retirement.ok).toBe(true);
     if (!retirement.ok) throw new Error("retirement failed");
     expect(retirement.value).toEqual({ owner: "custody", authorization, state: "retired" });
+    expect(readdirSync(path.join(f.records, "objects"))).toEqual([]);
     expect("reference" in retirement.value).toBe(false);
     expect("identity" in retirement.value).toBe(false);
     expect(await custody.retire(authorization)).toEqual(retirement);
@@ -342,6 +448,7 @@ describe("Git custody", () => {
     const dirtyResult = await createGitCustody({ recordsDirectory: dirty.records as AbsolutePath })
       .establishBaseline({ delivery: dirty.delivery, workspace: dirty.workspace });
     expect(dirtyResult).toEqual({ ok: false, error: { code: "GIT_STATE_MISMATCH" } });
+    expect(readdirSync(path.join(dirty.records, "objects"))).toEqual([]);
 
     const nested = fixture();
     const nonCanonical = await createGitCustody({ recordsDirectory: nested.records as AbsolutePath })
@@ -628,7 +735,7 @@ describe("Git custody", () => {
     expect(await custody.inspect(f.delivery)).toEqual({ ok: false, error: { code: "BASELINE_MISSING" } });
   });
 
-  it("detects and restores ignored content that is outside a write capability", async () => {
+  it("leaves ignored content outside the managed snapshot and write capability", async () => {
     const f = fixture();
     const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
     const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
@@ -646,8 +753,8 @@ describe("Git custody", () => {
       workspace: { kind: "write", handle: handle.value },
       hostDecision: "accept",
     });
-    expect(disposition.ok && disposition.value.kind).toBe("scope-violation-restored");
-    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored baseline\n");
+    expect(disposition.ok && disposition.value.kind).toBe("accepted");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored mutation\n");
   });
 
   it("performs independent write-scope validation before classifying a Host rejection", async () => {
@@ -671,7 +778,7 @@ describe("Git custody", () => {
     });
     expect(disposition.ok && disposition.value.kind).toBe("scope-violation-restored");
     expect(readFileSync(path.join(f.repository, "blocked", "secret.txt"), "utf8")).toBe("baseline\n");
-    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored baseline\n");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored scope violation\n");
   });
 
   it("performs independent read-view mutation validation before classifying a Host rejection", async () => {
@@ -692,11 +799,11 @@ describe("Git custody", () => {
       workspace: { kind: "read", view: view.value },
       hostDecision: "reject",
     });
-    expect(disposition.ok && disposition.value.kind).toBe("scope-violation-restored");
-    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("ignored baseline\n");
+    expect(disposition.ok && disposition.value.kind).toBe("host-rejected-restored");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("read mutation\n");
   });
 
-  it("advances and durably restores an authorized ignored-only savepoint", async () => {
+  it("does not snapshot, anchor, or restore ignored-only changes", async () => {
     const f = fixture();
     const custody = createGitCustody({ recordsDirectory: f.records as AbsolutePath });
     const baseline = await custody.establishBaseline({ delivery: f.delivery, workspace: f.workspace });
@@ -717,8 +824,7 @@ describe("Git custody", () => {
       || "kind" in accepted.value.nextSavepoint.value) throw new Error("ignored savepoint was not accepted");
     expect(accepted.value.nextSavepoint.value.gitTree).toBe(baseline.value.gitTree);
     expect(accepted.value.nextSavepoint.value.savepointIdentity).not.toBe(baseline.value.savepointIdentity);
-    expect(git(f.repository, "for-each-ref", "--format=%(objecttype)", "refs/agentops/custody").split("\n"))
-      .toEqual(["tree", "tree", "tree", "tree"]);
+    expect(git(f.repository, "for-each-ref", "--format=%(objecttype)", "refs/agentops/custody")).toBe("");
 
     writeFileSync(path.join(f.repository, "ignored.log"), "later rejected value\n");
     const restored = await custody.recover({
@@ -727,6 +833,6 @@ describe("Git custody", () => {
       savepoint: { state: "known", value: accepted.value.nextSavepoint.value },
     });
     expect(restored.ok && restored.value.kind).toBe("restored");
-    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("authorized ignored value\n");
+    expect(readFileSync(path.join(f.repository, "ignored.log"), "utf8")).toBe("later rejected value\n");
   });
 });

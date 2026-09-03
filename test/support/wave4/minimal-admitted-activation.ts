@@ -55,7 +55,7 @@ export async function buildMinimalRunnerActivation(options: MinimalBuilderOption
     json(path.join(corpus, "package.json")), json(path.join(corpus, "snapshot.json")), json(path.join(corpus, "workflow.json")),
     json(path.join(corpus, "actions.json")), json(path.join(corpus, "routes.json")),
   ]);
-  if (packageDocument.schemaVersion !== "agentops.workflow-dsl@1.1.0"
+  if (packageDocument.schemaVersion !== "agentops.workflow-dsl@2.0.0"
     || snapshotDocument.schemaVersion !== packageDocument.schemaVersion
     || workflowDocument.schemaVersion !== packageDocument.schemaVersion
     || actionsDocument.schemaVersion !== packageDocument.schemaVersion
@@ -234,7 +234,7 @@ export async function buildMinimalRunnerActivation(options: MinimalBuilderOption
     },
     initial: {
       state: { identity: canonicalDigest({ state: "minimal-review-initial" }), values: {
-        status: "pending", context: { source: "minimal-corpus" }, request: "review the admitted candidate", candidate: "candidate-v1",
+        status: "pending", context: { source: "minimal-corpus" }, request: "review the admitted candidate", candidate: "candidate-v2",
         reviewIterations: 0, selectedReviewLenses: ["branch.blackbox", "branch.whitebox"],
       } },
       artifacts: { identity: canonicalDigest({ artifacts: "minimal-review-initial" }), versions: {
@@ -247,9 +247,9 @@ export async function buildMinimalRunnerActivation(options: MinimalBuilderOption
       },
     },
     admission: {
-      contractRevision: "agentops.workflow-dsl@1.1.0",
+      contractRevision: "agentops.workflow-dsl@2.0.0",
       authorityMergeIdentity: canonicalDigest({ authority: packageDocument.authority, snapshot: snapshotDocument.snapshot.authority }),
-      deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0",
+      deliveryAdmissionContractIdentity: "agentops.delivery-admission@2.0.0",
     },
   };
   draft.bindingIdentity = activationBindingDigest(draft);

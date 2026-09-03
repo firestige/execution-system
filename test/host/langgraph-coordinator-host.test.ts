@@ -449,10 +449,10 @@ describe("LangGraph CoordinatorHost", () => {
   });
 
   it.each([
-    ["baseline", (custody: FakeCustody) => { custody.baselineOk = false; }, (draft: any) => {}],
-    ["read view", (custody: FakeCustody) => { custody.readOk = false; }, (draft: any) => {}],
-    ["write handle", (custody: FakeCustody) => { custody.writeOk = false; }, (draft: any) => { draft.program.execution.agents["executor.fixture"].turn.access = [{ mode: "write", path: "src" }]; }],
-  ])("fails closed when Custody cannot authorize %s", async (_label, arrangeCustody, mutate) => {
+    ["baseline", (custody: FakeCustody) => { custody.baselineOk = false; }, (draft: any) => {}, "GIT_STATE_MISMATCH"],
+    ["read view", (custody: FakeCustody) => { custody.readOk = false; }, (draft: any) => {}, "CHECKPOINT_ORDER_VIOLATION"],
+    ["write handle", (custody: FakeCustody) => { custody.writeOk = false; }, (draft: any) => { draft.program.execution.agents["executor.fixture"].turn.access = [{ mode: "write", path: "src" }]; }, "CHECKPOINT_ORDER_VIOLATION"],
+  ])("fails closed when Custody cannot authorize %s", async (_label, arrangeCustody, mutate, code) => {
     const custody = new FakeCustody();
     arrangeCustody(custody);
     const host = createLangGraphCoordinatorHost({
@@ -462,7 +462,7 @@ describe("LangGraph CoordinatorHost", () => {
     });
     expect(await host.start(compiledActivation(mutate), { publish: async () => ({ ok: true, value: undefined }) })).toEqual({
       ok: false,
-      error: { code: "CHECKPOINT_ORDER_VIOLATION" },
+      error: { code },
     });
   });
 

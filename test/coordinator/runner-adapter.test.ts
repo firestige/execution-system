@@ -173,6 +173,25 @@ describe("formal G05 Execution Runtime Adapter", () => {
     expect(f.host.start).not.toHaveBeenCalled();
   });
 
+  it("preserves a bounded typed Host start cause for both negative results and exceptions", async () => {
+    const negative = fixture([]);
+    (negative.host.start as any).mockResolvedValueOnce({ ok: false, error: { code: "GIT_STATE_MISMATCH" } });
+    expect(await negative.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: negative.value }))
+      .toMatchObject({ ok: true, value: { kind: "unknown", detail: {
+        reason: "HOST_START_DISPOSITION_UNRESOLVED", stage: "HOST_START", causeCode: "GIT_STATE_MISMATCH",
+      } } });
+
+    const exceptional = fixture([]);
+    (exceptional.host.start as any).mockRejectedValueOnce(Object.assign(new Error("must not escape /private/worktree"), {
+      code: "ACTIVATION_MISMATCH",
+    }));
+    const result = await exceptional.adapter.execute({ interfaceVersion: EXECUTION_RUNTIME_ADAPTER_VERSION, activation: exceptional.value });
+    expect(result).toMatchObject({ ok: true, value: { kind: "unknown", detail: {
+      reason: "HOST_START_UNRESOLVED", stage: "HOST_START", causeCode: "ACTIVATION_MISMATCH",
+    } } });
+    expect(JSON.stringify(result)).not.toContain("/private/worktree");
+  });
+
   it("uses the Action bridge and resumes the exact same episode without creating Workflow control", async () => {
     const value = activation();
     const proposal = terminal(value);

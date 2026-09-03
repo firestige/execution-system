@@ -15,7 +15,7 @@ export async function runExecutionConfigCli(args: readonly string[]): Promise<st
     const selected = format ?? (configFile.endsWith(".json") ? "json" : "yaml");
     if (selected !== "yaml" && selected !== "json") throw new TypeError("format must be yaml or json");
     await initializeExecutionConfiguration(configFile, selected);
-    return "initialized from execution.default@execution.config@1.0.0\n";
+    return "initialized from execution.default@execution.config@2.0.0\n";
   }
   if (args.length !== 2) throw new TypeError("execution-config does not accept nested overrides");
   if (command === "validate") {

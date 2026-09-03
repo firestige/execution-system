@@ -118,10 +118,6 @@ function validateDispatch(dispatch: InvocationDispatch): InvocationCallError | u
   if (dispatch.workspace.kind === "read" && dispatch.executor.turn.access.some((access) => access.mode === "write")) return { code: "CAPABILITY_MISMATCH" };
   if (!dispatch.executor.session.providedCapabilities.includes("structured-completion")) return { code: "CAPABILITY_MISMATCH" };
   if (dispatch.executor.session.model.providerModelIdentity.length === 0) return { code: "MODEL_BINDING_MISMATCH" };
-  if (dispatch.executor.session.driver.providerIdentity === "dsh-headless") {
-    const providerRoute = (dispatch.executor.session.driver.configuration as Record<string, unknown>).providerRoute;
-    if (typeof providerRoute !== "string" || providerRoute.length === 0) return { code: "MODEL_BINDING_MISMATCH" };
-  }
   return undefined;
 }
 
