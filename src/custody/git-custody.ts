@@ -142,8 +142,15 @@ function validRelativePath(value: string): value is WorkspaceRelativePath {
 }
 
 function pathAllowed(changedPath: string, access: readonly ResolvedAccessRule[]): boolean {
-  return access.some((rule) => rule.mode === "write" && validRelativePath(rule.path)
-    && (changedPath === rule.path || changedPath.startsWith(`${rule.path}/`)));
+  return access.some((rule) => {
+    if (rule.mode !== "write" || !validRelativePath(rule.path)) return false;
+    if (rule.path === "**") return true;
+    if (rule.path.endsWith("/**")) {
+      const prefix = rule.path.slice(0, -3).replace(/\/$/u, "");
+      return changedPath === prefix || changedPath.startsWith(`${prefix}/`);
+    }
+    return changedPath === rule.path || changedPath.startsWith(`${rule.path}/`);
+  });
 }
 
 export class GitCustody implements HostCustody, CoordinatorCustody {

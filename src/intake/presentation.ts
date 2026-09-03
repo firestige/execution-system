@@ -138,10 +138,13 @@ export function presentationForIntakeResult(
   let event: IntakePresentation;
   if (result.kind === "LIST") event = createIntakePresentation(correlation, "delivery-list", { items: result.deliveries as unknown as FrozenJsonValue });
   else if (result.kind === "START_UNCERTAIN") event = createIntakePresentation(correlation, "delivery-running", statusData(value));
-  else if (result.kind === "TERMINAL") event = createIntakePresentation(correlation, "terminal-result", {
-    worktree: result.worktree, deliveryId: result.deliveryId, outcome: result.outcome,
-    ...(result.summary === undefined ? {} : { summary: result.summary }),
-  });
+  else if (result.kind === "TERMINAL") {
+    const summary = result.summary ?? (result.outcome === "SUCCEEDED" ? undefined : `Workflow finished · ${result.outcome}`);
+    event = createIntakePresentation(correlation, "terminal-result", {
+      worktree: result.worktree, deliveryId: result.deliveryId, outcome: result.outcome,
+      ...(summary === undefined ? {} : { summary }),
+    });
+  }
   else if (result.kind === "ERROR") event = createIntakePresentation(correlation, "error", { code: result.code, message: result.message });
   else event = createIntakePresentation(correlation, "delivery-status", statusData(value));
   return Buffer.byteLength(JSON.stringify(event), "utf8") <= maxBytes ? event : truncated(correlation);

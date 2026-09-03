@@ -49,6 +49,10 @@ describe("WSR host-neutral presentation contract", () => {
     });
     expect(presentationForIntakeResult("correlation-1", { kind: "TERMINAL", worktree: "/workspace", deliveryId: "delivery-1", outcome: "SUCCEEDED", summary: "done", credential: "secret" } as never, 4096))
       .toMatchObject({ kind: "terminal-result", data: { worktree: "/workspace", deliveryId: "delivery-1", outcome: "SUCCEEDED", summary: "done" } });
+    expect(presentationForIntakeResult("correlation-1", { kind: "TERMINAL", worktree: "/workspace", deliveryId: "delivery-2", outcome: "FAILED" }, 4096))
+      .toMatchObject({ kind: "terminal-result", data: { worktree: "/workspace", deliveryId: "delivery-2", outcome: "FAILED", summary: "Workflow finished · FAILED" } });
+    expect(presentationForIntakeResult("correlation-1", { kind: "TERMINAL", worktree: "/workspace", deliveryId: "delivery-3", outcome: "SUCCEEDED" }, 4096))
+      .toMatchObject({ kind: "terminal-result", data: { worktree: "/workspace", deliveryId: "delivery-3", outcome: "SUCCEEDED" } });
     expect(serializeIntakePresentation(
       presentationForIntakeResult("correlation-1", { kind: "ERROR", code: "DELIVERY_UNKNOWN", message: "DELIVERY_UNKNOWN", nativePayload: "secret" } as never, 4096),
       4096,
