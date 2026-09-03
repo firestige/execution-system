@@ -671,7 +671,7 @@ export async function qualifyDshProductE2e(options: DshProductQualificationOptio
       return undefined;
     }, "PRODUCT_IMPLEMENTATION_MANIFEST_NOT_CREATED", 120_000);
     const implementationPackage = manifestWorkflowPackage(implementationManifest);
-    if (implementationPackage?.exactVersion !== "0.4.0"
+    if (implementationPackage?.exactVersion !== "0.4.1"
       || implementationManifest.canonicalWorktree !== canonicalImplementationWorktree) {
       throw new Error(`PRODUCT_IMPLEMENTATION_BARE_SELECTOR_NOT_FROZEN:${JSON.stringify({
         package: implementationPackage,

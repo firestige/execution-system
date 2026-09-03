@@ -59,16 +59,20 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
     const material = path.join(root, "release-material");
     await mkdir(material);
     await cp(path.join(repositoryRoot, "workflow-package", "implementation"), path.join(material, "package"), { recursive: true });
-    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string } };
-    const archivePath = path.join(root, "workflow-package-implementation-workflow-0.4.0.tar.gz");
+    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string; version: string } };
+    const implementationVersion = packageDocument.package.version;
+    const archiveName = `workflow-package-implementation-workflow-${implementationVersion}.tar.gz`;
+    const archivePath = path.join(root, archiveName);
     const packed = spawnSync("tar", ["-czf", archivePath, "-C", material, "."], { encoding: "utf8", shell: false });
     if (packed.status !== 0) throw new Error(packed.stderr);
     const archive = await readFile(archivePath);
     const sourceCalls: string[] = [];
-    const assetUrl = "https://github.example.test/releases/download/0.4.0/workflow-package-implementation-workflow-0.4.0.tar.gz";
-    const descriptorUrl = "https://github.example.test/releases/download/scoped/workflow-package-implementation-workflow-0.4.0.json";
+    const assetUrl = `https://github.example.test/releases/download/${implementationVersion}/${archiveName}`;
+    const descriptorName = `workflow-package-implementation-workflow-${implementationVersion}.json`;
+    const descriptorUrl = `https://github.example.test/releases/download/scoped/${descriptorName}`;
     const checksumUrl = `${assetUrl}.sha256`;
-    const provenanceUrl = "https://github.example.test/releases/download/scoped/workflow-package-implementation-workflow-0.4.0.provenance.json";
+    const provenanceName = `workflow-package-implementation-workflow-${implementationVersion}.provenance.json`;
+    const provenanceUrl = `https://github.example.test/releases/download/scoped/${provenanceName}`;
     const archiveDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
     const provenance = Buffer.from(`${JSON.stringify({
       schemaVersion: "workflow-package.provenance@1.0.0",
@@ -86,24 +90,24 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
     }, Object.freeze({ request: async (url: string) => {
       sourceCalls.push(url);
       if (url.includes("/releases?per_page=100&page=1")) return { status: 200, body: Buffer.from(JSON.stringify([{
-        tag_name: "workflow-package/implementation-workflow/v0.4.0", draft: false, prerelease: false,
+        tag_name: `workflow-package/implementation-workflow/v${implementationVersion}`, draft: false, prerelease: false,
         assets: [
           { name: path.basename(archivePath), browser_download_url: assetUrl },
-          { name: "workflow-package-implementation-workflow-0.4.0.json", browser_download_url: descriptorUrl },
-          { name: "workflow-package-implementation-workflow-0.4.0.tar.gz.sha256", browser_download_url: checksumUrl },
-          { name: "workflow-package-implementation-workflow-0.4.0.provenance.json", browser_download_url: provenanceUrl },
+          { name: descriptorName, browser_download_url: descriptorUrl },
+          { name: `${archiveName}.sha256`, browser_download_url: checksumUrl },
+          { name: provenanceName, browser_download_url: provenanceUrl },
         ],
       }])) };
       if (url === descriptorUrl) return { status: 200, body: Buffer.from(JSON.stringify({
         schemaVersion: "workflow-package.package-release@2.0.0",
-        tag: "workflow-package/implementation-workflow/v0.4.0",
-        package: { name: "implementation-workflow", version: "0.4.0", digest: packageDocument.package.digest },
+        tag: `workflow-package/implementation-workflow/v${implementationVersion}`,
+        package: { name: "implementation-workflow", version: implementationVersion, digest: packageDocument.package.digest },
         archive: { name: path.basename(archivePath), sha256: archiveDigest, bytes: archive.byteLength },
-        checksum: { name: "workflow-package-implementation-workflow-0.4.0.tar.gz.sha256" },
-        provenance: { name: "workflow-package-implementation-workflow-0.4.0.provenance.json", sha256: provenanceDigest },
+        checksum: { name: `${archiveName}.sha256` },
+        provenance: { name: provenanceName, sha256: provenanceDigest },
         contract: { repository: "firestige/wsr-contracts", revision: "c".repeat(40), minVersion: "2.0.0", maxVersion: "2.0.0" },
       })) };
-      if (url === checksumUrl) return { status: 200, body: Buffer.from(`${archiveDigest.slice(7)}  workflow-package-implementation-workflow-0.4.0.tar.gz\n`) };
+      if (url === checksumUrl) return { status: 200, body: Buffer.from(`${archiveDigest.slice(7)}  ${archiveName}\n`) };
       if (url === provenanceUrl) return { status: 200, body: provenance };
       return url === assetUrl ? { status: 200, body: Uint8Array.from(archive) } : { status: 404, body: new Uint8Array() };
     } }));
@@ -137,7 +141,7 @@ describe("Wave 4 production M01 to pinned M02 first-party walking skeleton", () 
       maxCorrelationBytes: 256,
       deliveryConfigProjection: deliveryProjection,
     }), admission);
-    const ready = await core.begin({ worktree: workspace, selector: "implementation-workflow@0.4.0", prompt: { text: "exercise the first-party path", attachments: [] } });
+    const ready = await core.begin({ worktree: workspace, selector: `implementation-workflow@${implementationVersion}`, prompt: { text: "exercise the first-party path", attachments: [] } });
     if (ready.kind !== "NEW") throw new Error(`expected NEW, got ${ready.kind}`);
 
     const runnerFactory = new AgentProviderRunnerFactory();
