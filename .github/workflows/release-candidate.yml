@@ -116,7 +116,7 @@ jobs:
 
       - name: Install frozen contract checker dependencies
         run: |
-          npm --prefix system-contracts/workflow-dsl ci
+          npm --prefix system-contracts/workflow-dsl-2-candidate ci
           npm --prefix system-contracts/observation ci
 
       - name: Validate coordinates and resolve resumable RC state
