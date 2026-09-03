@@ -614,15 +614,16 @@ describe("Wave 6 production bootstrap", () => {
     const material = path.join(materialRoot, "material");
     await mkdir(material);
     await cp(path.join(repositoryRoot, "workflow-package", "implementation"), path.join(material, "package"), { recursive: true });
-    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string } };
-    const archivePath = path.join(materialRoot, "workflow-package-implementation-workflow-0.4.0.tar.gz");
+    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string; version: string } };
+    const implementationVersion = packageDocument.package.version;
+    const archivePath = path.join(materialRoot, `workflow-package-implementation-workflow-${implementationVersion}.tar.gz`);
     const packed = spawnSync("tar", ["-czf", archivePath, "-C", material, "."], { encoding: "utf8", shell: false });
     if (packed.status !== 0) throw new Error(packed.stderr);
     const archive = Uint8Array.from(await readFile(archivePath));
     const { configFile, dependencies, worktree } = await fixtureV2({
       deliveryId: "delivery-production-smoke",
       observationEndpoint: `http://127.0.0.1:${observationAddress.port}`,
-      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest, "implementation-workflow", "0.4.0"),
+      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest, "implementation-workflow", implementationVersion),
     });
     await writeImplementationRoleBindings(worktree);
     await writeFile(path.join(worktree, "README.md"), "production bootstrap\n", "utf8");
@@ -635,7 +636,7 @@ describe("Wave 6 production bootstrap", () => {
     await application.start();
     const smokeResult = await application.execute({
       worktree,
-      selector: "implementation-workflow@0.4.0",
+      selector: `implementation-workflow@${implementationVersion}`,
       prompt: { text: "exercise production composition", attachments: [] },
     });
     expect(smokeResult, JSON.stringify(smokeResult)).toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-production-smoke", outcome: "FAILED" });
@@ -667,14 +668,15 @@ describe("Wave 6 production bootstrap", () => {
     const material = path.join(materialRoot, "material");
     await mkdir(material);
     await cp(path.join(repositoryRoot, "workflow-package", "implementation"), path.join(material, "package"), { recursive: true });
-    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string } };
-    const archivePath = path.join(materialRoot, "workflow-package-implementation-workflow-0.4.0.tar.gz");
+    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string; version: string } };
+    const implementationVersion = packageDocument.package.version;
+    const archivePath = path.join(materialRoot, `workflow-package-implementation-workflow-${implementationVersion}.tar.gz`);
     const packed = spawnSync("tar", ["-czf", archivePath, "-C", material, "."], { encoding: "utf8", shell: false });
     if (packed.status !== 0) throw new Error(packed.stderr);
     const archive = Uint8Array.from(await readFile(archivePath));
     const { configFile, dependencies, worktree } = await fixtureV2({
       deliveryIds: ["delivery-production-interaction", "delivery-production-parallel"],
-      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest, "implementation-workflow", "0.4.0"),
+      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest, "implementation-workflow", implementationVersion),
     });
     await writeImplementationRoleBindings(worktree);
     await writeFile(path.join(worktree, "README.md"), "production interaction\n", "utf8");
@@ -688,7 +690,7 @@ describe("Wave 6 production bootstrap", () => {
     await application.start();
     const execution = application.execute({
       worktree,
-      selector: "implementation-workflow@0.4.0",
+      selector: `implementation-workflow@${implementationVersion}`,
       prompt: { text: "begin grilling", attachments: [] },
       intakeCorrelation: "intake-correlation-1",
     });
@@ -707,7 +709,7 @@ describe("Wave 6 production bootstrap", () => {
     execFileSync("git", ["commit", "-qm", "baseline"], { cwd: secondWorktree });
     const parallel = application.execute({
       worktree: secondWorktree,
-      selector: "implementation-workflow@0.4.0",
+      selector: `implementation-workflow@${implementationVersion}`,
       prompt: { text: "parallel grilling", attachments: [] },
       intakeCorrelation: "intake-correlation-2",
     });
