@@ -13,7 +13,10 @@ export default defineConfig({
         "scripts/generate-changelog.ts",
         "scripts/build-release-artifacts.ts",
         "scripts/build-workflow-release-assets.ts",
+        "scripts/benchmark-managed-workspace-snapshot.ts",
+        "scripts/qualify-current-source-browser.ts",
         "scripts/qualify-dsh-product-e2e.ts",
+        "scripts/serve-workflow-assets.ts",
         "scripts/verify-iteration-3-documentation.ts",
       ],
       thresholds: {
