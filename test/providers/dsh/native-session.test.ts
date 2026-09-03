@@ -15,7 +15,7 @@ function nativeAgent(id: string) {
 }
 
 const instructionIdentity = `sha256:${createHash("sha256").update("exact instructions").digest("hex")}`;
-const sessionBinding = { tools: [], providedCapabilities: ["structured-completion", "action-interaction"], instructions: { localReadOnlyPath: "/admitted/instructions.md", contentIdentity: instructionIdentity }, model: { providerModelIdentity: "deepseek-chat" }, driver: { providerIdentity: "dsh-headless", configuration: { providerRoute: "deepseek", credentialRef: "DEEPSEEK_API_KEY" } } };
+const sessionBinding = { agent: { resourceIdentity: "role.test", localReadOnlyPath: "/admitted/instructions.md", contentIdentity: instructionIdentity }, skills: [], tools: [], providedCapabilities: ["structured-completion", "action-interaction"], instructions: { resourceIdentity: "role.test", localReadOnlyPath: "/admitted/instructions.md", contentIdentity: instructionIdentity }, model: { providerModelIdentity: "deepseek-chat" }, driver: { providerIdentity: "dsh-headless", configuration: { providerRoute: "deepseek", credentialRef: "DEEPSEEK_API_KEY" } } };
 
 describe("DSH native session adapter", () => {
   it("uses AgentRegistry.resume with the exact opaque session id and has no create fallback", async () => {
@@ -79,7 +79,7 @@ describe("DSH native session adapter", () => {
     const completion = definitions.find((definition) => definition.name === "workflow_complete");
     expect(completion).toBeDefined();
     expect(restrictions).toEqual([{ deny: ["ambient-bash"] }]);
-    expect(sections).toEqual([{ name: "workflow:admitted-instructions", order: 10, text: "exact instructions" }]);
+    expect(sections).toEqual([{ name: "workflow:admitted-instructions", order: 10, text: '<wsr-role-prompt resource="role.test">\nexact instructions\n</wsr-role-prompt>' }]);
     expect(completion!.output.render({}, {})).toEqual([{ type: "text", text: "structured completion accepted" }]);
     let concluded = false;
     agent.whenIdle = async () => {

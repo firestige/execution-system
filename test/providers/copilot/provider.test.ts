@@ -93,10 +93,11 @@ function dispatch(input: { workspace: string; instructionsPath: string; roleId?:
     action: { identity: "action.review", purpose: "Return the typed review decision", inputSchema: { type: "object" }, resultSchema: { type: "object", properties: { accepted: { type: "boolean" } }, required: ["accepted"], additionalProperties: false }, gate: { kind: "none" } },
     executor: { identity: "executor.review", bindingIdentity: `sha256:${"d".repeat(64)}`, sessionCompatibilityIdentity: `sha256:${"e".repeat(64)}`, session: {
       roleIdentity: input.roleId ?? "role.reviewer", routeIdentity: "route.review",
-      agent: { resourceIdentity: "agent.review", contentIdentity: `sha256:${"1".repeat(64)}`, projectionIdentity: `sha256:${"2".repeat(64)}`, localReadOnlyPath: input.instructionsPath },
+      agent: { resourceIdentity: "agent.review", contentIdentity: `sha256:${createHash("sha256").update(instructions).digest("hex")}`, projectionIdentity: `sha256:${"2".repeat(64)}`, localReadOnlyPath: input.instructionsPath },
       model: { resourceIdentity: "model.review", contentIdentity: `sha256:${"3".repeat(64)}`, projectionIdentity: `sha256:${"4".repeat(64)}`, providerModelIdentity: input.modelId ?? "gpt-5.3-codex", configuration: {} },
       driver: { resourceIdentity: "driver.copilot", projectionIdentity: `sha256:${"5".repeat(64)}`, providerIdentity: "copilot-sdk", configuration: {} },
       instructions: { resourceIdentity: "instruction.review", contentIdentity: `sha256:${createHash("sha256").update(instructions).digest("hex")}`, localReadOnlyPath: input.instructionsPath },
+      skills: [],
       tools: [{ resourceIdentity: "tool.workspace", contentIdentity: `sha256:${"6".repeat(64)}`, localReadOnlyPath: { kind: "ABSENT" }, configuration: { toolName: "workspace_files", workspaceAccess: true } }],
       providedCapabilities: ["structured-completion", "action-interaction"], policy: { identity: "session.review", scope: { kind: "episode" }, isolation: "isolated" },
     }, turn: { access } }, input: { review: "current change" },
@@ -254,7 +255,7 @@ describe("Copilot SDK Agent Provider", () => {
   it("fails closed on instruction/tool scope drift and proves runtime cleanup fallback", async () => {
     const instructionsDrift = await fixture();
     await writeFile(instructionsDrift.instructionsPath, "changed after admission", "utf8");
-    await expect(instructionsDrift.lease.adapter.sessions.open({ dispatch: dispatch(instructionsDrift), signal: new AbortController().signal })).rejects.toThrow("instruction identity");
+    await expect(instructionsDrift.lease.adapter.sessions.open({ dispatch: dispatch(instructionsDrift), signal: new AbortController().signal })).rejects.toThrow("identity mismatch");
     instructionsDrift.client.stop.mockResolvedValueOnce([new Error("graceful stop failed")]);
     await instructionsDrift.lease.dispose();
     expect(instructionsDrift.client.forceStop).toHaveBeenCalledOnce();

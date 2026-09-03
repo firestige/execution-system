@@ -219,7 +219,10 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
         const rolePromptRef = route.resources.rolePrompt?.id as string | undefined;
         const promptIdentity = promptRef ?? rolePromptRef;
         const promptResource = promptIdentity === undefined ? undefined : resources.get(promptIdentity);
+        const rolePromptResource = rolePromptRef === undefined ? undefined : resources.get(rolePromptRef);
         const promptPath = promptResource?.owner === "owned" ? await realpath(path.join(definition, promptResource.path)) : workflowPath;
+        const rolePromptPath = rolePromptResource?.owner === "owned" ? await realpath(path.join(definition, rolePromptResource.path)) : undefined;
+        if (rolePromptPath === undefined) throw new TypeError(`Role prompt '${String(rolePromptRef)}' is not materialized in the admitted Package`);
         const promptBytes = await readFile(promptPath);
         const resolvedRole: ResolvedRoleModelBinding | undefined = manifest.resolvedRoles.find((binding) => binding.roleId === route.role);
         if (resolvedRole === undefined) throw new TypeError(`Role '${String(route.role)}' has no frozen Provider binding`);
@@ -231,7 +234,7 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
             resourceIdentity: rolePromptRef,
             contentIdentity: resolvedRole.rolePromptDigest,
             projectionIdentity: canonicalDigest({ package: pkg.package.digest, route: route.id, projection: "agent" }),
-            localReadOnlyPath: promptPath,
+            localReadOnlyPath: rolePromptPath,
           },
           model: {
             resourceIdentity: `model.${String(route.role).replace(/^role\./u, "")}`,
@@ -253,6 +256,25 @@ export class DeliveryAdmissionProjector implements DeliveryActivationProjector {
             contentIdentity: rawDigest(promptBytes),
             localReadOnlyPath: promptPath,
           },
+          skills: await Promise.all((route.resources.skills ?? []).map(async (skill: Document) => {
+            const resource = resources.get(skill.id);
+            if (resource?.kind !== "skill") throw new TypeError(`Skill '${String(skill.id)}' is not declared by the admitted Package`);
+            if (resource.owner !== "owned") return {
+              resourceIdentity: skill.id,
+              contentIdentity: resource.contentIdentity,
+              localReadOnlyPath: { kind: "ABSENT" },
+              configuration: { kind: "skill" },
+            };
+            const localReadOnlyPath = await realpath(path.join(definition, resource.path));
+            const bytes = await readFile(localReadOnlyPath);
+            if (rawDigest(bytes) !== resource.contentIdentity) throw new TypeError(`Skill '${String(skill.id)}' identity mismatch`);
+            return {
+              resourceIdentity: skill.id,
+              contentIdentity: resource.contentIdentity,
+              localReadOnlyPath,
+              configuration: { kind: "skill" },
+            };
+          })),
           tools: (route.resources.tools ?? []).map((tool: Document) => ({
             resourceIdentity: tool.id,
             contentIdentity: canonicalDigest({ package: pkg.package.digest, tool: tool.id }),

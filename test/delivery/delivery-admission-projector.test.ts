@@ -281,8 +281,10 @@ describe("frozen Delivery Admission 2.0.0 production projection", () => {
     const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-v2-"));
     const definition = path.join(root, "definition");
     await mkdir(path.join(definition, "prompts"), { recursive: true });
+    await mkdir(path.join(definition, "skills"), { recursive: true });
     await writeFile(path.join(definition, "prompts", "copilot.md"), "Copilot Role instructions.\n");
     await writeFile(path.join(definition, "prompts", "codex.md"), "Codex Role instructions.\n");
+    await writeFile(path.join(definition, "skills", "review.md"), "Review Skill instructions.\n");
     const sha = (character: string) => `sha256:${character.repeat(64)}`;
     const pkg = {
       schemaVersion: "agentops.workflow-dsl@2.0.0",
@@ -291,6 +293,7 @@ describe("frozen Delivery Admission 2.0.0 production projection", () => {
       resources: { owned: [
         { id: "role.prompt.copilot", kind: "role-prompt", owner: "owned", path: "prompts/copilot.md", contentIdentity: sha("3") },
         { id: "role.prompt.codex", kind: "role-prompt", owner: "owned", path: "prompts/codex.md", contentIdentity: sha("4") },
+        { id: "skill.review", kind: "skill", owner: "owned", path: "skills/review.md", contentIdentity: `sha256:${createHash("sha256").update("Review Skill instructions.\n").digest("hex")}` },
       ], referenced: [] },
       authority: { order: ["workflow_action", "role_prompt", "action_prompt", "skill", "artifact_user"], conflictMode: "fail-closed" },
     };
@@ -318,7 +321,7 @@ describe("frozen Delivery Admission 2.0.0 production projection", () => {
       { id: "action.codex", purpose: "second", inputSchema: { type: "object" }, resultSchema: { type: "object" }, responsibleAuthority: { kind: "role", role: "role.codex" }, allowedRoutes: ["route.codex"], gate: { freeTextBypass: "prohibited" } },
     ] };
     const routes = { schemaVersion: "agentops.workflow-dsl@2.0.0", routes: [
-      { id: "route.copilot", role: "role.copilot", resources: { rolePrompt: { id: "role.prompt.copilot" }, actionPrompts: [], tools: [], capabilities: ["structured-completion"], sessionPolicy: { scope: { kind: "episode" }, isolation: "isolated" } }, access: [{ target: "workspace", mode: "read" }] },
+      { id: "route.copilot", role: "role.copilot", resources: { rolePrompt: { id: "role.prompt.copilot" }, actionPrompts: [], skills: [{ id: "skill.review" }], tools: [], capabilities: ["structured-completion"], sessionPolicy: { scope: { kind: "episode" }, isolation: "isolated" } }, access: [{ target: "workspace", mode: "read" }] },
       { id: "route.codex", role: "role.codex", resources: { rolePrompt: { id: "role.prompt.codex" }, actionPrompts: [], tools: [], capabilities: ["structured-completion"], sessionPolicy: { scope: { kind: "episode" }, isolation: "isolated" } }, access: [{ target: "workspace", mode: "read" }] },
     ] };
     const snapshotDocument = { schemaVersion: "agentops.workflow-dsl@2.0.0", snapshot: { id: "snapshot.dual-role.1", digest: sha("5"), package: { name: "dual-role", version: "1.0.0", digest: sha("1") }, definition: { id: "workflow.dual-role", version: "1.0.0", contentIdentity: sha("2") }, authority: { mergeProof: sha("6") } } };
@@ -368,6 +371,9 @@ describe("frozen Delivery Admission 2.0.0 production projection", () => {
     expect(Object.values(activation.program.execution.agents).map((agent) => ({ role: agent.session.roleIdentity, driver: agent.session.driver.providerIdentity, model: agent.session.model.providerModelIdentity }))).toEqual([
       { role: "role.copilot", driver: "copilot-sdk", model: "gpt-5.3-codex" },
       { role: "role.codex", driver: "codex-cli", model: "gpt-5.6-sol" },
+    ]);
+    expect(Object.values(activation.program.execution.agents)[0]?.session.skills).toEqual([
+      expect.objectContaining({ resourceIdentity: "skill.review", configuration: { kind: "skill" } }),
     ]);
     expect(compileRunnerActivation(activation).ok).toBe(true);
   });
