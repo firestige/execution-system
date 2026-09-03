@@ -16,7 +16,7 @@ import {
 } from "../configuration/index.js";
 
 export interface ExecutionEnvironment {
-  readonly schemaVersion: "execution.environment@1.0.0";
+  readonly schemaVersion: "execution.environment@2.0.0";
   readonly allowedWorktreeRoots: readonly string[];
   readonly allowExplicitRefresh: boolean;
   readonly maxCorrelationBytes: number;
@@ -155,7 +155,7 @@ export function createExecutionEnvironment(
     ? createDeliveryConfigProjectionV2(config)
     : createDeliveryConfigProjection(config);
   return deepFreeze({
-    schemaVersion: "execution.environment@1.0.0",
+    schemaVersion: "execution.environment@2.0.0",
     allowedWorktreeRoots: [...config.paths.allowedWorktreeRoots],
     allowExplicitRefresh: config.controls.allowExplicitRefresh,
     maxCorrelationBytes: config.intake.maxCorrelationBytes,

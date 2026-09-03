@@ -7,14 +7,6 @@ import type { ValidatedWorkflowPackage, WorkflowPackageStaging } from "./workflo
 import { WorkflowPackageStoreError } from "./workflow-package-store.js";
 import { extractWorkflowV2RoleSnapshot, type ExtractedWorkflowV2RoleSnapshot } from "./workflow-v2-role-snapshot.js";
 
-export interface WorkflowPackageCompatibilityTarget {
-  readonly contractVersion: "1.1.0";
-  readonly providerKey: "dsh";
-  readonly providerCapabilities: readonly ContractProviderCapability[];
-  readonly hostCapabilities: readonly ContractHostCapability[];
-}
-
-const CHECKER = fileURLToPath(new URL("../../config/workflow-dsl/tools/check-example.cjs", import.meta.url));
 const CHECKER_V2 = fileURLToPath(new URL("../../config/workflow-dsl-v2-candidate/tools/check-example.cjs", import.meta.url));
 
 function versionParts(value: string): readonly number[] | undefined {
@@ -39,57 +31,6 @@ async function json(path: string): Promise<Record<string, any>> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid JSON object");
     return value as Record<string, any>;
   } catch { throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID"); }
-}
-
-export class FrozenWorkflowPackageValidator {
-  constructor(readonly compatibility: WorkflowPackageCompatibilityTarget) {}
-
-  async validate(staging: WorkflowPackageStaging): Promise<ValidatedWorkflowPackage> {
-    const pkg = await json(`${staging.definitionPath}/package.json`);
-    if (pkg.package?.name !== staging.candidate.name || pkg.package?.version !== staging.candidate.exactVersion) {
-      throw new WorkflowPackageStoreError("WORKFLOW_VERSION_MISMATCH");
-    }
-    const checked = spawnSync(process.execPath, [CHECKER, staging.definitionPath], {
-      encoding: "utf8",
-      shell: false,
-      timeout: 30_000,
-      maxBuffer: 1_048_576,
-    });
-    if (checked.status !== 0) {
-      const diagnostic = `${checked.stderr}\n${checked.stdout}`;
-      if (/digest mismatch|digest must|contentIdentity must|owned digest mismatch|Snapshot .*binding mismatch/iu.test(diagnostic)) {
-        throw new WorkflowPackageStoreError("WORKFLOW_DIGEST_MISMATCH");
-      }
-      throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
-    }
-    const minimum = pkg.compatibility?.minContractVersion;
-    const maximum = pkg.compatibility?.maxContractVersion;
-    const fromMinimum = typeof minimum === "string" ? compareVersion(this.compatibility.contractVersion, minimum) : undefined;
-    const toMaximum = typeof maximum === "string" ? compareVersion(this.compatibility.contractVersion, maximum) : undefined;
-    const routes = await json(`${staging.definitionPath}/${String(pkg.documents?.routes)}`);
-    const workflow = await json(`${staging.definitionPath}/${String(pkg.documents?.workflow)}`);
-    const providerCapabilities = new Set(this.compatibility.providerCapabilities);
-    const hostCapabilities = new Set(this.compatibility.hostCapabilities);
-    const compatibleRoutes = Array.isArray(routes.routes) && routes.routes.every((route: any) =>
-      Array.isArray(route?.resources?.capabilities)
-      && route.resources.capabilities.every((capability: unknown) => typeof capability === "string" && providerCapabilities.has(capability as ContractProviderCapability)));
-    const compatibleHost = Array.isArray(workflow.hostOperations ?? [])
-      && (workflow.hostOperations ?? []).every((operation: any) => Array.isArray(operation?.requiredCapabilities)
-        && operation.requiredCapabilities.every((capability: unknown) => typeof capability === "string" && hostCapabilities.has(capability as ContractHostCapability)));
-    if (this.compatibility.providerKey !== "dsh" || fromMinimum === undefined || toMaximum === undefined
-      || fromMinimum < 0 || toMaximum > 0 || !compatibleRoutes || !compatibleHost) {
-      throw new WorkflowPackageStoreError("WORKFLOW_DSH_INCOMPATIBLE");
-    }
-    if (typeof pkg.package.digest !== "string" || typeof workflow.workflow?.id !== "string") {
-      throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
-    }
-    return Object.freeze({
-      name: pkg.package.name,
-      exactVersion: pkg.package.version,
-      packageDigest: pkg.package.digest,
-      workflowId: workflow.workflow.id,
-    });
-  }
 }
 
 export interface WorkflowPackageCompatibilityTargetV2 {

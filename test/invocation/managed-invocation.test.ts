@@ -393,15 +393,21 @@ describe("managed Invocation", () => {
     const emptyModel = structuredClone(base) as InvocationDispatch;
     (emptyModel.executor.session.model as { providerModelIdentity: string }).providerModelIdentity = "";
     cases.push(bindDispatch(emptyModel));
-    const missingRoute = structuredClone(base) as InvocationDispatch;
-    (missingRoute.executor.session.driver as { configuration: unknown }).configuration = { credentialRef: "DEEPSEEK_API_KEY" };
-    cases.push(bindDispatch(missingRoute));
-
     for (const candidate of cases) {
       const fixture = await harness([[{ kind: "structured-completion", result: { accepted: true } }]]);
       expect(await fixture.manager.host.start(candidate, sink().value)).toMatchObject({ ok: false });
       expect(fixture.provider.openCount).toBe(0);
     }
+  });
+
+  it("accepts an empty generic Driver configuration owned by the Provider realm", async () => {
+    const fixture = await harness([[{ kind: "structured-completion", result: { accepted: true } }]]);
+    const candidate = structuredClone(dispatch()) as InvocationDispatch;
+    (candidate.executor.session.driver as { configuration: unknown }).configuration = {};
+
+    expect(await fixture.manager.host.start(bindDispatch(candidate), sink().value))
+      .toMatchObject({ ok: true, value: { kind: "completed", result: { accepted: true } } });
+    expect(fixture.provider.openCount).toBe(1);
   });
 
   it("fails start for missing provider, credential acquisition, duplicate episode, and provider open errors", async () => {

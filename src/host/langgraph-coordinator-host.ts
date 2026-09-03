@@ -399,7 +399,7 @@ export class LangGraphCoordinatorHost implements CoordinatorHost {
       return existing.disposition === undefined ? failure("CHECKPOINT_ORDER_VIOLATION") : success(existing.disposition);
     }
     const baseline = await this.#custody.establishBaseline({ delivery, workspace: compiled.initial.workspace });
-    if (!baseline.ok) return failure("CHECKPOINT_ORDER_VIOLATION");
+    if (!baseline.ok) return failure(baseline.error.code);
     const record: HostThreadRecord = {
       compiled,
       thread,

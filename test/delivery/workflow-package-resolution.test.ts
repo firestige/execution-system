@@ -14,21 +14,20 @@ import type {
   WorkflowPackageSourceResult,
 } from "../../src/bootstrap/index.js";
 import {
-  FrozenWorkflowPackageValidator,
+  FrozenWorkflowPackageValidatorV2,
   WorkflowPackageResolver,
   WorkflowPackageStore,
   WorkflowPackageStoreError,
-  type WorkflowPackageCompatibilityTarget,
 } from "../../src/delivery/index.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const contributedDefinition = join(repositoryRoot, "system-contracts/workflow-dsl/examples/minimal");
+const minimalDefinition = join(repositoryRoot, "system-contracts/workflow-dsl-2-candidate/generated/examples/minimal");
 const implementationPackage = join(repositoryRoot, "workflow-package/implementation");
 const systemDesignPackage = join(repositoryRoot, "workflow-package/system-design");
 
-const compatibility: WorkflowPackageCompatibilityTarget = Object.freeze({
-  contractVersion: "1.1.0",
-  providerKey: "dsh",
+const compatibilityV2 = Object.freeze({
+  contractVersion: "2.0.0" as const,
+  providerIdentity: "provider.dsh",
   providerCapabilities: Object.freeze(["structured-completion", "action-interaction"] as const),
   hostCapabilities: Object.freeze(["deterministic-validation", "deterministic-selection", "deterministic-transformation"] as const),
 });
@@ -70,7 +69,7 @@ async function resolverFixture(source: WorkflowPackageSource) {
     readyRoot: join(root, "store"),
     stagingRoot: join(root, "staging"),
   });
-  const validator = new FrozenWorkflowPackageValidator(compatibility);
+  const validator = new FrozenWorkflowPackageValidatorV2(compatibilityV2);
   return { root, store, resolver: new WorkflowPackageResolver(store, source, validator) };
 }
 
@@ -133,7 +132,7 @@ describe("Workflow Package Store and frozen validation", () => {
       .toThrow("roots must be absolute");
     const source = new QueuedSource([]);
     const f = await resolverFixture(source);
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     await expect(f.store.publish({
       id: "fabricated",
       path: "/tmp/fabricated",
@@ -150,7 +149,7 @@ describe("Workflow Package Store and frozen validation", () => {
   });
 
   it.each([
-    ["contributed", contributedDefinition, "definition"],
+    ["contract minimal", minimalDefinition, "definition"],
     ["protected implementation", implementationPackage, "package"],
     ["protected system design", systemDesignPackage, "package"],
   ] as const)("admits %s Package content through the same checker and compatibility path", async (_kind, sourcePath, layout) => {
@@ -174,7 +173,7 @@ describe("Workflow Package Store and frozen validation", () => {
   });
 
   it("keeps STAGING private, publishes READY atomically, and serves exact hits without Source access", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const source = new QueuedSource([{ kind: "FOUND", candidate }]);
     const f = await resolverFixture(source);
     const staging = await f.store.stage(candidate);
@@ -189,18 +188,58 @@ describe("Workflow Package Store and frozen validation", () => {
     expect(source.calls).toHaveLength(1);
   });
 
-  it("rejects bare/latest selectors before cache or Source access", async () => {
-    const source = new QueuedSource([]);
+  it("pins bare/latest to a sticky READY alias and serves later hits without Source access", async () => {
+    const candidate = await candidateFrom(minimalDefinition);
+    const source = new QueuedSource([{ kind: "FOUND", candidate }]);
     const f = await resolverFixture(source);
-    expect(await f.resolver.resolve("contributed")).toEqual({ ok: false, error: { code: "INVALID_WORKFLOW_SELECTOR" } });
-    expect(await f.resolver.resolve("contributed@latest", true)).toEqual({ ok: false, error: { code: "INVALID_WORKFLOW_SELECTOR" } });
-    expect(source.calls).toHaveLength(0);
+    const first = await f.resolver.resolve(candidate.name);
+    const second = await f.resolver.resolve(`${candidate.name}@latest`);
+    expect(first).toMatchObject({ ok: true, value: { exactVersion: candidate.exactVersion } });
+    expect(second).toEqual(first);
+    expect(source.calls).toEqual([{ name: candidate.name, version: { kind: "LATEST" } }]);
+  });
+
+  it("keeps the previous sticky alias when an explicit latest refresh fails", async () => {
+    const candidate = await candidateFrom(minimalDefinition);
+    const source = new QueuedSource([{ kind: "FOUND", candidate }, { kind: "UNAVAILABLE" }]);
+    const f = await resolverFixture(source);
+    const first = await f.resolver.resolve(candidate.name);
+    expect(await f.resolver.resolve(`${candidate.name}@latest`, true))
+      .toEqual({ ok: false, error: { code: "WORKFLOW_FETCH_FAILED" } });
+    expect(await f.resolver.resolve(candidate.name)).toEqual(first);
+    expect(source.calls).toHaveLength(2);
+  });
+
+  it("does not change an already resolved immutable binding when the sticky alias later moves", async () => {
+    const firstCandidate = await candidateFrom(minimalDefinition);
+    const secondCandidate = Object.freeze({ ...firstCandidate, exactVersion: "2.0.0" });
+    const source = new QueuedSource([
+      { kind: "FOUND", candidate: firstCandidate },
+      { kind: "FOUND", candidate: secondCandidate },
+    ]);
+    const root = await mkdtemp(join(tmpdir(), "workflow-package-sticky-binding-"));
+    const store = new WorkflowPackageStore({ readyRoot: join(root, "store"), stagingRoot: join(root, "staging") });
+    const validator = Object.freeze({ validate: async (staging: { candidate: WorkflowPackageCandidate }) => Object.freeze({
+      name: staging.candidate.name,
+      exactVersion: staging.candidate.exactVersion,
+      packageDigest: staging.candidate.archiveDigest,
+      workflowId: `workflow.${staging.candidate.exactVersion}`,
+    }) });
+    const resolver = new WorkflowPackageResolver(store, source, validator);
+
+    const first = await resolver.resolve(firstCandidate.name);
+    const refreshed = await resolver.resolve(`${firstCandidate.name}@latest`, true);
+    const current = await resolver.resolve(firstCandidate.name);
+    expect(first).toMatchObject({ ok: true, value: { exactVersion: "1.0.0" } });
+    expect(refreshed).toMatchObject({ ok: true, value: { exactVersion: "2.0.0" } });
+    expect(current).toEqual(refreshed);
+    expect(first).toMatchObject({ ok: true, value: { exactVersion: "1.0.0", workflowId: "workflow.1.0.0" } });
   });
 
   it("rejects a conflicting digest for an already READY exact version", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const f = await resolverFixture(new QueuedSource([]));
-    const validator = new FrozenWorkflowPackageValidator(compatibility);
+    const validator = new FrozenWorkflowPackageValidatorV2(compatibilityV2);
     const firstStaging = await f.store.stage(candidate);
     const validated = await validator.validate(firstStaging);
     await f.store.publish(firstStaging, validated);
@@ -213,9 +252,9 @@ describe("Workflow Package Store and frozen validation", () => {
   });
 
   it("reuses an identical READY publication and consumes the duplicate staging directory", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const f = await resolverFixture(new QueuedSource([]));
-    const validator = new FrozenWorkflowPackageValidator(compatibility);
+    const validator = new FrozenWorkflowPackageValidatorV2(compatibilityV2);
     const firstStaging = await f.store.stage(candidate);
     const validated = await validator.validate(firstStaging);
     const first = await f.store.publish(firstStaging, validated);
@@ -228,10 +267,10 @@ describe("Workflow Package Store and frozen validation", () => {
   });
 
   it("maps an atomic publication collision to a cache publication failure", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const f = await resolverFixture(new QueuedSource([]));
     const staging = await f.store.stage(candidate);
-    const validated = await new FrozenWorkflowPackageValidator(compatibility).validate(staging);
+    const validated = await new FrozenWorkflowPackageValidatorV2(compatibilityV2).validate(staging);
     await mkdir(join(f.root, "store", "packages", validated.name, validated.exactVersion, "occupied"), { recursive: true });
 
     await expect(f.store.publish(staging, validated))
@@ -260,7 +299,7 @@ describe("Workflow Package resolution failures", () => {
   });
 
   it("rejects candidate/request version mismatch before READY publication", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const f = await resolverFixture(new QueuedSource([{ kind: "FOUND", candidate: { ...candidate, exactVersion: "2.0.0" } }]));
     expect(await f.resolver.resolve(`${candidate.name}@${candidate.exactVersion}`))
       .toEqual({ ok: false, error: { code: "WORKFLOW_VERSION_MISMATCH" } });
@@ -268,7 +307,7 @@ describe("Workflow Package resolution failures", () => {
   });
 
   it("rejects Package-declared version mismatch after staging", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const mismatched = { ...candidate, exactVersion: "2.0.0" };
     const f = await resolverFixture(new QueuedSource([{ kind: "FOUND", candidate: mismatched }]));
     expect(await f.resolver.resolve(`${candidate.name}@2.0.0`))
@@ -276,11 +315,11 @@ describe("Workflow Package resolution failures", () => {
   });
 
   it("returns DSH incompatible when declared capabilities exceed the production target", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const root = await mkdtemp(join(tmpdir(), "workflow-package-incompatible-"));
     const store = new WorkflowPackageStore({ readyRoot: join(root, "store"), stagingRoot: join(root, "staging") });
-    const validator = new FrozenWorkflowPackageValidator(Object.freeze({
-      ...compatibility,
+    const validator = new FrozenWorkflowPackageValidatorV2(Object.freeze({
+      ...compatibilityV2,
       providerCapabilities: Object.freeze(["structured-completion"] as const),
     }));
     const resolver = new WorkflowPackageResolver(store, new QueuedSource([{ kind: "FOUND", candidate }]), validator);
@@ -289,7 +328,7 @@ describe("Workflow Package resolution failures", () => {
   });
 
   it("maps READY publication failure without exposing STAGING", async () => {
-    const candidate = await candidateFrom(contributedDefinition);
+    const candidate = await candidateFrom(minimalDefinition);
     const root = await mkdtemp(join(tmpdir(), "workflow-package-publish-failure-"));
     class FailingPublishStore extends WorkflowPackageStore {
       override async publish(): Promise<never> { throw new WorkflowPackageStoreError("WORKFLOW_CACHE_PUBLISH_FAILED"); }
@@ -298,7 +337,7 @@ describe("Workflow Package resolution failures", () => {
     const resolver = new WorkflowPackageResolver(
       store,
       new QueuedSource([{ kind: "FOUND", candidate }]),
-      new FrozenWorkflowPackageValidator(compatibility),
+      new FrozenWorkflowPackageValidatorV2(compatibilityV2),
     );
     expect(await resolver.resolve(`${candidate.name}@${candidate.exactVersion}`))
       .toEqual({ ok: false, error: { code: "WORKFLOW_CACHE_PUBLISH_FAILED" } });
@@ -308,7 +347,7 @@ describe("Workflow Package resolution failures", () => {
   it("distinguishes package digest and schema/closure failures", async () => {
     const root = await mkdtemp(join(tmpdir(), "workflow-package-invalid-"));
     const definition = join(root, "definition");
-    await cp(contributedDefinition, definition, { recursive: true });
+    await cp(minimalDefinition, definition, { recursive: true });
     const packagePath = join(definition, "package.json");
     const pkg = JSON.parse(await readFile(packagePath, "utf8"));
     pkg.package.digest = `sha256:${"0".repeat(64)}`;
@@ -330,7 +369,7 @@ describe("Workflow Package resolution failures", () => {
 
     const schemaRoot = await mkdtemp(join(tmpdir(), "workflow-package-schema-invalid-"));
     const schemaDefinition = join(schemaRoot, "definition");
-    await cp(contributedDefinition, schemaDefinition, { recursive: true });
+    await cp(minimalDefinition, schemaDefinition, { recursive: true });
     const schemaPackagePath = join(schemaDefinition, "package.json");
     const schemaPackage = JSON.parse(await readFile(schemaPackagePath, "utf8"));
     schemaPackage.kind = "invalid.package.kind";

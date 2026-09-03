@@ -2,7 +2,7 @@ export type StableId<K extends string> = string & { readonly __stableIdKind: K }
 export type Sha256 = `sha256:${string}`;
 export type AbsolutePath = string & { readonly __pathKind: "absolute" };
 export type WorkspaceRelativePath = string & { readonly __pathKind: "workspace-relative" };
-export type ContractRevision = "agentops.workflow-dsl@1.1.0" | "agentops.workflow-dsl@2.0.0";
+export type ContractRevision = "agentops.workflow-dsl@2.0.0";
 export type Absent = Readonly<{ kind: "ABSENT" }>;
 
 export type JsonPrimitive = null | boolean | number | string;

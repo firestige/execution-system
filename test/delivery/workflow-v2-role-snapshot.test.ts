@@ -72,7 +72,7 @@ describe("Workflow DSL 2.0 Role Snapshot extraction", () => {
       (() => { const value = structuredClone(documents()); (value.routesDocument.routes[0] as Record<string, unknown>).agent = { definition: { id: "agent.old" } }; return value; })(),
       (() => { const value = structuredClone(documents()); (value.routesDocument.routes[0]!.resources as Record<string, unknown>).model = { id: "model.old" }; return value; })(),
       (() => { const value = structuredClone(documents()); value.packageDocument.resources.referenced.push({ id: "model.old", kind: "model", owner: "referenced", contentIdentity: sha("c"), sourceLocator: { repository: "x/y", path: "model" }, use: "old" } as never); return value; })(),
-      (() => { const value = structuredClone(documents()); value.packageDocument.schemaVersion = "agentops.workflow-dsl@1.1.0"; return value; })(),
+      (() => { const value = structuredClone(documents()); value.packageDocument.schemaVersion = "agentops.workflow-dsl@9.0.0"; return value; })(),
     ];
     for (const value of cases) expect(() => extractWorkflowV2RoleSnapshot(value)).toThrowError(expect.objectContaining({ code: "WORKFLOW_PACKAGE_INVALID" }));
   });

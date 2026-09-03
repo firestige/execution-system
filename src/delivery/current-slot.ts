@@ -11,13 +11,14 @@ export type CurrentSlotState =
   | "TERMINAL_HANDLING";
 
 export interface OccupiedCurrentSlot {
-  readonly schemaVersion: "execution.current-slot@1.0.0";
+  readonly schemaVersion: "execution.current-slot@2.0.0";
   readonly state: CurrentSlotState;
   readonly worktree: string;
   readonly deliveryId: string;
   readonly manifestPath: string;
   readonly deliveryBindingIdentity: string;
   readonly updatedAt: number;
+  readonly diagnostic: Readonly<{ readonly stage: string; readonly causeCode: string }> | null;
 }
 
 export interface EmptyCurrentSlot { readonly state: "EMPTY"; readonly worktree: string }
@@ -55,7 +56,11 @@ export const CURRENT_SLOT_TRANSITIONS: Readonly<Record<CurrentSlotTransition, Tr
   M02_RECONCILED_TERMINAL: freezeTransition({ owner: "M02_FACT", from: ["RESULT_UNRESOLVED"], to: "TERMINAL_HANDLING" }),
   M01_START_FAILURE_HANDLED: freezeTransition({ owner: "M01", from: ["START_FAILED"], to: "EMPTY" }),
   M01_TERMINAL_HANDLING_COMPLETE: freezeTransition({ owner: "M01", from: ["TERMINAL_HANDLING"], to: "EMPTY" }),
-  ADMINISTRATIVE_CLOSE: freezeTransition({ owner: "ADMINISTRATION", from: ["BOUND", "START_UNCERTAIN", "RESULT_UNRESOLVED"], to: "EMPTY" }),
+  ADMINISTRATIVE_CLOSE: freezeTransition({
+    owner: "ADMINISTRATION",
+    from: ["BOUND", "START_UNCERTAIN", "RUNNING_CORRELATED", "START_FAILED", "RESULT_UNRESOLVED", "TERMINAL_HANDLING"],
+    to: "EMPTY",
+  }),
 });
 
 export type CurrentSlotErrorCode =
@@ -86,29 +91,38 @@ function sha256(value: string): string {
 
 function exactRecord(value: unknown, expectedFile: string): OccupiedCurrentSlot {
   if (value === null || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).sort().join(",") !== "deliveryBindingIdentity,deliveryId,manifestPath,schemaVersion,state,updatedAt,worktree") {
+    || Object.keys(value).sort().join(",") !== "deliveryBindingIdentity,deliveryId,diagnostic,manifestPath,schemaVersion,state,updatedAt,worktree") {
     throw new CurrentSlotTransitionError("CURRENT_SLOT_CORRUPT", "unknown");
   }
   const candidate = value as Record<string, unknown>;
   const states: readonly string[] = ["BOUND", "START_UNCERTAIN", "RUNNING_CORRELATED", "START_FAILED", "RESULT_UNRESOLVED", "TERMINAL_HANDLING"];
-  if (candidate.schemaVersion !== "execution.current-slot@1.0.0"
+  const diagnostic = candidate.diagnostic;
+  const diagnosticValid = diagnostic === null || (typeof diagnostic === "object" && !Array.isArray(diagnostic)
+    && Object.keys(diagnostic).sort().join(",") === "causeCode,stage"
+    && typeof (diagnostic as Record<string, unknown>).stage === "string"
+    && /^[A-Z][A-Z0-9_]{0,63}$/u.test((diagnostic as Record<string, unknown>).stage as string)
+    && typeof (diagnostic as Record<string, unknown>).causeCode === "string"
+    && /^[A-Z][A-Z0-9_]{0,127}$/u.test((diagnostic as Record<string, unknown>).causeCode as string));
+  if (candidate.schemaVersion !== "execution.current-slot@2.0.0"
     || typeof candidate.worktree !== "string" || !isAbsolute(candidate.worktree)
     || typeof candidate.deliveryId !== "string" || candidate.deliveryId.length === 0 || candidate.deliveryId.length > 256
     || typeof candidate.manifestPath !== "string" || !isAbsolute(candidate.manifestPath)
     || typeof candidate.deliveryBindingIdentity !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(candidate.deliveryBindingIdentity)
     || typeof candidate.state !== "string" || !states.includes(candidate.state)
+    || !diagnosticValid || (candidate.state !== "RESULT_UNRESOLVED" && diagnostic !== null)
     || !Number.isSafeInteger(candidate.updatedAt) || (candidate.updatedAt as number) < 0
     || `${sha256(candidate.worktree)}.json` !== expectedFile) {
     throw new CurrentSlotTransitionError("CURRENT_SLOT_CORRUPT", typeof candidate.worktree === "string" ? candidate.worktree : "unknown");
   }
   return Object.freeze({
-    schemaVersion: "execution.current-slot@1.0.0",
+    schemaVersion: "execution.current-slot@2.0.0",
     state: candidate.state as CurrentSlotState,
     worktree: candidate.worktree,
     deliveryId: candidate.deliveryId,
     manifestPath: candidate.manifestPath,
     deliveryBindingIdentity: candidate.deliveryBindingIdentity,
     updatedAt: candidate.updatedAt as number,
+    diagnostic: diagnostic as OccupiedCurrentSlot["diagnostic"],
   });
 }
 
@@ -153,7 +167,7 @@ export class CurrentSlotRepository {
     if ((await this.read(input.worktree)).state !== "EMPTY") {
       throw new CurrentSlotTransitionError("CURRENT_SLOT_ALREADY_OCCUPIED", input.worktree);
     }
-    const record = exactRecord({ schemaVersion: "execution.current-slot@1.0.0", state: "BOUND", ...input }, this.#filename(input.worktree));
+    const record = exactRecord({ schemaVersion: "execution.current-slot@2.0.0", state: "BOUND", ...input, diagnostic: null }, this.#filename(input.worktree));
     await this.#write(record);
     return record;
   }
@@ -162,7 +176,10 @@ export class CurrentSlotRepository {
     worktree: string,
     event: CurrentSlotTransition,
     updatedAt: number,
-    options: Readonly<{ authorization?: string }> = {},
+    options: Readonly<{
+      authorization?: string;
+      diagnostic?: Readonly<{ readonly stage: string; readonly causeCode: string }>;
+    }> = {},
   ): Promise<CurrentSlotView> {
     const current = await this.read(worktree);
     if (current.state === "EMPTY") throw new CurrentSlotTransitionError("CURRENT_SLOT_MISSING", worktree);
@@ -171,12 +188,24 @@ export class CurrentSlotRepository {
     if (transition.owner === "ADMINISTRATION" && options.authorization !== current.deliveryId) {
       throw new CurrentSlotTransitionError("CURRENT_SLOT_AUTHORIZATION_INVALID", worktree);
     }
+    if (options.diagnostic !== undefined && event !== "M02_RESULT_UNRESOLVED") {
+      throw new CurrentSlotTransitionError("CURRENT_SLOT_TRANSITION_INVALID", worktree);
+    }
+    if (options.diagnostic !== undefined && (!/^[A-Z][A-Z0-9_]{0,63}$/u.test(options.diagnostic.stage)
+      || !/^[A-Z][A-Z0-9_]{0,127}$/u.test(options.diagnostic.causeCode))) {
+      throw new CurrentSlotTransitionError("CURRENT_SLOT_TRANSITION_INVALID", worktree);
+    }
     if (transition.to === "EMPTY") {
       try { await unlink(join(this.#root, this.#filename(worktree))); }
       catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
       return Object.freeze({ state: "EMPTY", worktree });
     }
-    const next = exactRecord({ ...current, state: transition.to, updatedAt }, this.#filename(worktree));
+    const next = exactRecord({
+      ...current,
+      state: transition.to,
+      updatedAt,
+      diagnostic: transition.to === "RESULT_UNRESOLVED" ? options.diagnostic ?? null : null,
+    }, this.#filename(worktree));
     await this.#write(next);
     return next;
   }
@@ -199,4 +228,3 @@ export class CurrentSlotRepository {
     }
   }
 }
-

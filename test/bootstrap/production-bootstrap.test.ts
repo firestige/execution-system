@@ -17,6 +17,7 @@ import {
   type AgentProviderDeliveryRealmRequest,
   type AgentProviderRealmFactory,
   type AgentProviderSessionOpenRequest,
+  type AgentProviderSessionRestoreRequest,
   type NativeProviderSession,
 } from "../../src/index.js";
 import { ProductionInteractionBroker } from "../../src/bootstrap/interaction-broker.js";
@@ -25,114 +26,16 @@ const roots: string[] = [];
 const servers: Server[] = [];
 const repositoryRoot = path.dirname(fileURLToPath(new URL("../..", import.meta.url)));
 
-function scopedReleaseNetwork(archive: Uint8Array, archiveUrl: string) {
-  const archiveName = "workflow-package-implementation-workflow-0.3.0.tar.gz";
-  const descriptorUrl = "https://github.example.test/releases/download/scoped/implementation.json";
-  const checksumUrl = `${archiveUrl}.sha256`;
-  const archiveDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
-  return async (url: string) => {
-    if (url.includes("/releases?per_page=100&page=1")) return Object.freeze({ status: 200, body: Buffer.from(JSON.stringify([{
-      tag_name: "workflow-package/implementation-workflow/v0.3.0", draft: false, prerelease: false,
-      assets: [
-        { name: archiveName, browser_download_url: archiveUrl },
-        { name: "workflow-package-implementation-workflow-0.3.0.json", browser_download_url: descriptorUrl },
-        { name: `${archiveName}.sha256`, browser_download_url: checksumUrl },
-      ],
-    }])) });
-    if (url === descriptorUrl) return Object.freeze({ status: 200, body: Buffer.from(JSON.stringify({
-      schemaVersion: "workflow-package.package-release@1.0.0", revision: "a".repeat(40),
-      tag: "workflow-package/implementation-workflow/v0.3.0",
-      package: { name: "implementation-workflow", version: "0.3.0", digest: `sha256:${"b".repeat(64)}` },
-      archive: { name: archiveName, sha256: archiveDigest, bytes: archive.byteLength },
-      checksum: { name: `${archiveName}.sha256` },
-    })) });
-    if (url === checksumUrl) return Object.freeze({ status: 200, body: Buffer.from(`${archiveDigest.slice(7)}  ${archiveName}\n`) });
-    return url === archiveUrl
-      ? Object.freeze({ status: 200, body: archive })
-      : Object.freeze({ status: 404, body: new Uint8Array() });
-  };
-}
-
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(options: Readonly<{
-  baseUrl?: string;
-  deliveryId?: string;
-  deliveryIds?: readonly string[];
-  observationEndpoint?: string;
-  network?: (url: string) => Promise<Readonly<{ status: number; body: Uint8Array }>>;
-}> = {}) {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), "execution-bootstrap-")));
-  roots.push(root);
-  const workspaceRoot = path.join(root, "workspace");
-  const worktree = path.join(workspaceRoot, "worktree");
-  await mkdir(worktree, { recursive: true });
-  await mkdir(path.join(root, "state"));
-  execFileSync("git", ["init", "-q"], { cwd: worktree });
-  const configFile = path.join(root, "execution.json");
-  await writeFile(configFile, `${JSON.stringify({
-    schemaVersion: "execution.config@1.0.0",
-    paths: {
-      repositoryRoot: worktree,
-      workspaceRoot,
-      allowedWorktreeRoots: [workspaceRoot],
-      stateRoot: path.join(root, "state"),
-      credentialStorePath: path.join(root, "credentials.yml"),
-    },
-    workflowSource: {
-      kind: "github",
-      repository: "firestige/wsr-workflow-package",
-      releasesBaseUrl: "https://api.github.example.test/repos/firestige/wsr-workflow-package/releases",
-      assetPattern: "workflow-package-{name}-{version}.tar.gz",
-    },
-    runner: {
-      implementationKey: "runner.v1",
-      host: { engine: "langgraph" },
-      provider: {
-        key: "dsh", route: "deepseek", modelId: "fixture-model",
-        baseUrl: options.baseUrl ?? "http://127.0.0.1:9", credentialRef: "PROVIDER_KEY", maxParallelToolCalls: 1,
-      },
-    },
-    observation: {
-      enabled: options.observationEndpoint !== undefined,
-      ...(options.observationEndpoint === undefined ? {} : { endpoint: options.observationEndpoint }),
-      timeoutMs: 100, maxBatchRecords: 512, maxBatchBytes: 4_194_304,
-      flushIntervalMs: 1_000, shutdownFlushMs: 1_000, serviceName: "execution-fixture",
-    },
-    controls: {
-      startupTimeoutMs: 10_000, executionTimeoutMs: 10_000, shutdownTimeoutMs: 10_000,
-      maxConcurrentDeliveries: 2, allowExplicitRefresh: false, diagnosticMaxBytes: 512,
-    },
-    intake: { maxCorrelationBytes: 256, maxOutputBytes: 1_024 },
-  })}\n`, "utf8");
-  await writeFile(path.join(root, "credentials.yml"), "version: 1\nrefs:\n  PROVIDER_KEY: fixture\n", { mode: 0o600 });
-  const requested: string[] = [];
-  let deliverySequence = 0;
-  const dependencies: ExecutionBootstrapDependencies = Object.freeze({
-    clock: Object.freeze({ now: () => 1 }),
-    ids: Object.freeze({ create: () => options.deliveryIds?.[deliverySequence++] ?? options.deliveryId ?? "delivery-production" }),
-    filesystem: Object.freeze({
-      read: async () => new Uint8Array(), writeImmutable: async () => undefined,
-      list: async () => [], inspect: async () => Object.freeze({ kind: "missing" as const }),
-    }),
-    network: Object.freeze({ request: async (url: string) => {
-      requested.push(url);
-      return options.network?.(url) ?? (url.includes("/releases?per_page=100&page=1")
-        ? Object.freeze({ status: 200, body: Buffer.from("[]") })
-        : Object.freeze({ status: 404, body: new Uint8Array() }));
-    } }),
-    intake: Object.freeze({ publish: async () => undefined }),
-    attachments: Object.freeze({ read: async () => { throw new Error("not requested"); } }),
-  });
-  return { configFile, dependencies, requested, worktree };
-}
-
 async function fixtureV2(options: Readonly<{
   network?: (url: string) => Promise<Readonly<{ status: number; body: Uint8Array }>>;
   observationEndpoint?: string;
+  deliveryId?: string;
+  deliveryIds?: readonly string[];
 }> = {}) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "execution-bootstrap-v2-")));
   roots.push(root);
@@ -152,25 +55,28 @@ async function fixtureV2(options: Readonly<{
     controls: { startupTimeoutMs: 10_000, executionTimeoutMs: 10_000, shutdownTimeoutMs: 10_000, maxConcurrentDeliveries: 2, allowExplicitRefresh: false, diagnosticMaxBytes: 512 },
     intake: { maxCorrelationBytes: 256, maxOutputBytes: 1_024 },
   })}\n`);
+  let deliverySequence = 0;
+  const requested: string[] = [];
   const dependencies: ExecutionBootstrapDependencies = Object.freeze({
-    clock: Object.freeze({ now: () => 1 }), ids: Object.freeze({ create: () => "delivery-production-v2" }),
+    clock: Object.freeze({ now: () => 1 }), ids: Object.freeze({ create: () => options.deliveryIds?.[deliverySequence++] ?? options.deliveryId ?? "delivery-production-v2" }),
     filesystem: Object.freeze({ read: async () => new Uint8Array(), writeImmutable: async () => undefined, list: async () => [], inspect: async () => Object.freeze({ kind: "missing" as const }) }),
-    network: Object.freeze({ request: async (url: string) => options.network?.(url) ?? Object.freeze({ status: 200, body: Buffer.from("[]") }) }),
+    network: Object.freeze({ request: async (url: string) => {
+      requested.push(url);
+      return options.network?.(url) ?? Object.freeze({ status: 200, body: Buffer.from("[]") });
+    } }),
     intake: Object.freeze({ publish: async () => undefined }), attachments: Object.freeze({ read: async () => { throw new Error("not requested"); } }),
   });
   const provider = (identity: string, version: string, adapterKey: "copilot-sdk" | "codex-cli", capabilities: readonly string[]): AgentProviderRealmFactory => Object.freeze({
     descriptor: Object.freeze({ schemaVersion: "execution.agent-provider-factory@1.0.0", identity, version, adapterKey, capabilities: Object.freeze([...capabilities]) }),
     async acquire() { throw new Error("missing Workflow must not acquire a Provider realm"); },
   });
-  return { configFile, dependencies, root, worktree, providers: [
+  return { configFile, dependencies, requested, root, worktree, providers: [
     provider("provider.copilot", "1.0.78", "copilot-sdk", ["action-interaction", "structured-completion"]),
     provider("provider.codex", "0.144.5", "codex-cli", ["structured-completion"]),
   ] };
 }
 
-function scopedReleaseNetworkV2(archive: Uint8Array, packageDigest: string) {
-  const version = "0.2.0";
-  const name = "hello-world-workflow";
+function scopedReleaseNetworkV2(archive: Uint8Array, packageDigest: string, name = "hello-world-workflow", version = "0.2.0") {
   const archiveName = `workflow-package-${name}-${version}.tar.gz`;
   const descriptorName = `workflow-package-${name}-${version}.json`;
   const provenanceName = `workflow-package-${name}-${version}.provenance.json`;
@@ -255,6 +161,63 @@ function recordingProvider(
       });
     },
   });
+}
+
+function implementationProvider(requestInput: Readonly<{ next(): number }>): AgentProviderRealmFactory {
+  const result = Object.freeze({ authorityBound: false, designIdentityExact: false, obligationRegisterBound: false, derivableFactMissing: true, routing: "unmatched" });
+  let openedSessions = 0;
+  return Object.freeze({
+    descriptor: Object.freeze({
+      schemaVersion: "execution.agent-provider-factory@1.0.0" as const,
+      identity: "provider.dsh",
+      version: "0.1.1-rc.2",
+      adapterKey: "dsh-headless" as const,
+      capabilities: Object.freeze(["action-interaction", "structured-completion"]),
+    }),
+    async acquire(request: AgentProviderDeliveryRealmRequest) {
+      const session = (opaqueIdentity: string): NativeProviderSession => Object.freeze({
+        opaqueIdentity,
+        async run() {
+          const sequence = requestInput.next();
+          return sequence <= 3
+            ? Object.freeze([{ kind: "input-request" as const, requestIdentity: `grilling-${sequence}`, prompt: Object.freeze({ question: `Question ${sequence}?` }), responseSchema: Object.freeze({ type: "object" as const }) }])
+            : Object.freeze([{ kind: "structured-completion" as const, result }]);
+        },
+        async persist() {}, async cancel() {}, async dispose() {},
+      });
+      return Object.freeze({
+        schemaVersion: "execution.agent-provider-delivery-realm-lease@2.0.0" as const,
+        providerIdentity: "provider.dsh",
+        providerVersion: "0.1.1-rc.2",
+        descriptorDigest: request.providerDescriptorDigest,
+        deliveryId: request.deliveryId,
+        manifestBindingIdentity: request.manifestBindingIdentity,
+        adapter: Object.freeze({
+          key: "dsh-headless" as const,
+          sessions: Object.freeze({
+            async open({ dispatch }: AgentProviderSessionOpenRequest) {
+              return session(`provider.dsh:${dispatch.executor.session.roleIdentity}:${++openedSessions}`);
+            },
+            async restore({ opaqueIdentity }: AgentProviderSessionRestoreRequest) { return session(opaqueIdentity); },
+          }),
+          async dispose() {},
+        }),
+        async dispose() {},
+      });
+    },
+  });
+}
+
+async function writeImplementationRoleBindings(worktree: string): Promise<void> {
+  const roles = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/roles.json"), "utf8")) as { roles: Array<{ id: string }> };
+  await mkdir(path.join(worktree, ".wsr"), { recursive: true });
+  await writeFile(path.join(worktree, ".wsr/role-provider-bindings.json"), `${JSON.stringify({
+    schemaVersion: "execution.repository-role-provider-bindings@1.0.0",
+    bindings: Object.fromEntries(roles.roles.map(({ id }) => [id, {
+      agentProvider: { identity: "provider.dsh", version: "0.1.1-rc.2" },
+      model: { provider: "deepseek", model: "fixture-model" },
+    }])),
+  })}\n`);
 }
 
 describe("Wave 6 production bootstrap", () => {
@@ -510,7 +473,7 @@ describe("Wave 6 production bootstrap", () => {
   });
 
   it("fails closed across pre-ready, unknown-control, and close-before-start paths", async () => {
-    const { configFile, dependencies, worktree } = await fixture();
+    const { configFile, dependencies, worktree } = await fixtureV2();
     expect(() => getExecutionApplicationControl(Object.freeze({}) as never)).toThrow("EXECUTION_APPLICATION_CONTROL_UNKNOWN");
     const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
     const control = getExecutionApplicationControl(application);
@@ -533,7 +496,7 @@ describe("Wave 6 production bootstrap", () => {
   });
 
   it("owns the public lifecycle and exact configured Source without a second assembly path", async () => {
-    const { configFile, dependencies, requested, worktree } = await fixture();
+    const { configFile, dependencies, requested, worktree } = await fixtureV2();
     const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
 
     expect(application.status()).toEqual({ state: "CREATED" });
@@ -560,8 +523,36 @@ describe("Wave 6 production bootstrap", () => {
     })).resolves.toMatchObject({ kind: "ERROR", code: "APPLICATION_CLOSING" });
   });
 
+  it("preserves persisted unresolved diagnostics through intake status and recover", async () => {
+    const { configFile, dependencies, root, worktree } = await fixtureV2();
+    const slots = path.join(root, "state", "current-slots");
+    await mkdir(slots, { recursive: true });
+    await writeFile(path.join(slots, `${createHash("sha256").update(worktree, "utf8").digest("hex")}.json`), JSON.stringify({
+      schemaVersion: "execution.current-slot@2.0.0",
+      state: "RESULT_UNRESOLVED",
+      worktree,
+      deliveryId: "delivery-unresolved",
+      manifestPath: path.join(root, "state", "manifests", "delivery-unresolved.json"),
+      deliveryBindingIdentity: `sha256:${"a".repeat(64)}`,
+      updatedAt: 1,
+      diagnostic: { stage: "HOST_START", causeCode: "DATAFLOW_BINDING_INVALID" },
+    }), "utf8");
+    const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+    const control = getExecutionApplicationControl(application);
+
+    await expect(control.status({ worktree, correlation: "status" })).resolves.toMatchObject({
+      kind: "RECOVERY", state: "RESULT_UNRESOLVED",
+      diagnostic: { stage: "HOST_START", causeCode: "DATAFLOW_BINDING_INVALID" },
+    });
+    await expect(control.recover({ worktree, correlation: "recover" })).resolves.toMatchObject({
+      kind: "RECOVERY", state: "RESULT_UNRESOLVED",
+      diagnostic: { stage: "HOST_START", causeCode: "DATAFLOW_BINDING_INVALID" },
+    });
+    await application.close();
+  });
+
   it("keeps registered-conversation admission on the private Intake control and exact path", async () => {
-    const { configFile, dependencies, worktree } = await fixture();
+    const { configFile, dependencies, worktree } = await fixtureV2();
     const conversationWorkspace = path.join(path.dirname(path.dirname(worktree)), "registered-conversation");
     await mkdir(conversationWorkspace);
     execFileSync("git", ["init", "-q"], { cwd: conversationWorkspace });
@@ -623,30 +614,31 @@ describe("Wave 6 production bootstrap", () => {
     const material = path.join(materialRoot, "material");
     await mkdir(material);
     await cp(path.join(repositoryRoot, "workflow-package", "implementation"), path.join(material, "package"), { recursive: true });
-    const archivePath = path.join(materialRoot, "workflow-package-implementation-workflow-0.3.0.tar.gz");
+    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string } };
+    const archivePath = path.join(materialRoot, "workflow-package-implementation-workflow-0.4.0.tar.gz");
     const packed = spawnSync("tar", ["-czf", archivePath, "-C", material, "."], { encoding: "utf8", shell: false });
     if (packed.status !== 0) throw new Error(packed.stderr);
     const archive = Uint8Array.from(await readFile(archivePath));
-    const assetUrl = "https://github.example.test/releases/download/0.3.0/workflow-package-implementation-workflow-0.3.0.tar.gz";
-    const { configFile, dependencies, worktree } = await fixture({
-      baseUrl: `http://127.0.0.1:${address.port}`,
+    const { configFile, dependencies, worktree } = await fixtureV2({
       deliveryId: "delivery-production-smoke",
       observationEndpoint: `http://127.0.0.1:${observationAddress.port}`,
-      network: scopedReleaseNetwork(archive, assetUrl),
+      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest, "implementation-workflow", "0.4.0"),
     });
+    await writeImplementationRoleBindings(worktree);
     await writeFile(path.join(worktree, "README.md"), "production bootstrap\n", "utf8");
     execFileSync("git", ["config", "user.email", "runner@example.invalid"], { cwd: worktree });
     execFileSync("git", ["config", "user.name", "Runner Fixture"], { cwd: worktree });
-    execFileSync("git", ["add", "README.md"], { cwd: worktree });
+    execFileSync("git", ["add", "."], { cwd: worktree });
     execFileSync("git", ["commit", "-qm", "baseline"], { cwd: worktree });
 
-    const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+    const application = await new DefaultExecutionApplicationFactory({ agentProviderFactories: [implementationProvider({ next: () => 4 })] }).create(configFile, dependencies);
     await application.start();
-    await expect(application.execute({
+    const smokeResult = await application.execute({
       worktree,
-      selector: "implementation-workflow@0.3.0",
+      selector: "implementation-workflow@0.4.0",
       prompt: { text: "exercise production composition", attachments: [] },
-    })).resolves.toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-production-smoke", outcome: "FAILED" });
+    });
+    expect(smokeResult, JSON.stringify(smokeResult)).toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-production-smoke", outcome: "FAILED" });
     await application.close();
     expect(application.status()).toEqual({ state: "CLOSED" });
     expect(observedPaths).toEqual(expect.arrayContaining(["/v1/traces", "/v1/logs"]));
@@ -675,28 +667,28 @@ describe("Wave 6 production bootstrap", () => {
     const material = path.join(materialRoot, "material");
     await mkdir(material);
     await cp(path.join(repositoryRoot, "workflow-package", "implementation"), path.join(material, "package"), { recursive: true });
-    const archivePath = path.join(materialRoot, "workflow-package-implementation-workflow-0.3.0.tar.gz");
+    const packageDocument = JSON.parse(await readFile(path.join(repositoryRoot, "workflow-package/implementation/definition/package.json"), "utf8")) as { package: { digest: string } };
+    const archivePath = path.join(materialRoot, "workflow-package-implementation-workflow-0.4.0.tar.gz");
     const packed = spawnSync("tar", ["-czf", archivePath, "-C", material, "."], { encoding: "utf8", shell: false });
     if (packed.status !== 0) throw new Error(packed.stderr);
     const archive = Uint8Array.from(await readFile(archivePath));
-    const assetUrl = "https://github.example.test/releases/download/0.3.0/workflow-package-implementation-workflow-0.3.0.tar.gz";
-    const { configFile, dependencies, worktree } = await fixture({
-      baseUrl: `http://127.0.0.1:${address.port}`,
+    const { configFile, dependencies, worktree } = await fixtureV2({
       deliveryIds: ["delivery-production-interaction", "delivery-production-parallel"],
-      network: scopedReleaseNetwork(archive, assetUrl),
+      network: scopedReleaseNetworkV2(archive, packageDocument.package.digest, "implementation-workflow", "0.4.0"),
     });
+    await writeImplementationRoleBindings(worktree);
     await writeFile(path.join(worktree, "README.md"), "production interaction\n", "utf8");
     execFileSync("git", ["config", "user.email", "runner@example.invalid"], { cwd: worktree });
     execFileSync("git", ["config", "user.name", "Runner Fixture"], { cwd: worktree });
-    execFileSync("git", ["add", "README.md"], { cwd: worktree });
+    execFileSync("git", ["add", "."], { cwd: worktree });
     execFileSync("git", ["commit", "-qm", "baseline"], { cwd: worktree });
 
-    const application = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+    const application = await new DefaultExecutionApplicationFactory({ agentProviderFactories: [implementationProvider({ next: () => ++requestCount })] }).create(configFile, dependencies);
     const control = getExecutionApplicationControl(application);
     await application.start();
     const execution = application.execute({
       worktree,
-      selector: "implementation-workflow@0.3.0",
+      selector: "implementation-workflow@0.4.0",
       prompt: { text: "begin grilling", attachments: [] },
       intakeCorrelation: "intake-correlation-1",
     });
@@ -707,6 +699,7 @@ describe("Wave 6 production bootstrap", () => {
     const secondWorktree = path.join(path.dirname(worktree), "worktree-parallel");
     await mkdir(secondWorktree);
     execFileSync("git", ["init", "-q"], { cwd: secondWorktree });
+    await writeImplementationRoleBindings(secondWorktree);
     await writeFile(path.join(secondWorktree, "README.md"), "parallel production interaction\n", "utf8");
     execFileSync("git", ["config", "user.email", "runner@example.invalid"], { cwd: secondWorktree });
     execFileSync("git", ["config", "user.name", "Runner Fixture"], { cwd: secondWorktree });
@@ -714,7 +707,7 @@ describe("Wave 6 production bootstrap", () => {
     execFileSync("git", ["commit", "-qm", "baseline"], { cwd: secondWorktree });
     const parallel = application.execute({
       worktree: secondWorktree,
-      selector: "implementation-workflow@0.3.0",
+      selector: "implementation-workflow@0.4.0",
       prompt: { text: "parallel grilling", attachments: [] },
       intakeCorrelation: "intake-correlation-2",
     });
@@ -731,7 +724,7 @@ describe("Wave 6 production bootstrap", () => {
     await application.close();
     void parallel.catch(() => undefined);
 
-    const restarted = await new DefaultExecutionApplicationFactory().create(configFile, dependencies);
+    const restarted = await new DefaultExecutionApplicationFactory({ agentProviderFactories: [implementationProvider({ next: () => ++requestCount })] }).create(configFile, dependencies);
     const restartedControl = getExecutionApplicationControl(restarted);
     expect(await restartedControl.list()).toHaveLength(1);
     restartedControl.attach("delivery-production-parallel", "intake-correlation-2");
@@ -748,7 +741,7 @@ describe("Wave 6 production bootstrap", () => {
   }, 30_000);
 
   it("fails startup closed with one bounded redacted diagnostic", async () => {
-    const { configFile, dependencies } = await fixture();
+    const { configFile, dependencies } = await fixtureV2();
     const config = JSON.parse(await readFile(configFile, "utf8")) as { paths: { stateRoot: string } };
     const slots = path.join(config.paths.stateRoot, "current-slots");
     await mkdir(slots, { recursive: true });

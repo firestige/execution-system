@@ -21,6 +21,7 @@ import { loadRepositoryModelBindings } from "./repository-model-bindings.js";
 import { resolveRoleModelBindings, type AgentProviderAdmissionRegistry } from "./resolved-role-model-bindings.js";
 import { extractWorkflowV2RoleSnapshot } from "./workflow-v2-role-snapshot.js";
 import type { WorkflowPackageResolver, WorkflowPackageResolutionResult } from "./workflow-package-resolver.js";
+import { ManagedWorkspaceSnapshotError } from "../custody/managed-workspace-snapshot.js";
 
 export type ProductionDeliveryManifest = DeliveryManifest | DeliveryManifestV2;
 
@@ -208,6 +209,13 @@ function resultCarriesExactDelivery(value: unknown, activation: RunnerActivation
     && delivery.activationBindingIdentity === expected.activationBindingIdentity;
 }
 
+function publicDiagnostic(detail: Readonly<Record<string, unknown>>): Readonly<{ stage: string; causeCode: string }> | undefined {
+  return typeof detail.stage === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(detail.stage)
+    && typeof detail.causeCode === "string" && /^[A-Z][A-Z0-9_]{0,127}$/u.test(detail.causeCode)
+    ? Object.freeze({ stage: detail.stage, causeCode: detail.causeCode })
+    : undefined;
+}
+
 export class DeliveryLifecycleService {
   readonly #options: DeliveryLifecycleOptions | DeliveryLifecycleOptionsV2;
   readonly #ownerFacts: OwnerFactIngress;
@@ -349,7 +357,11 @@ export class DeliveryLifecycleService {
   async #start(manifest: ProductionDeliveryManifest, initialState: OccupiedCurrentSlot["state"]): Promise<ExecutionResult> {
     let activation: RunnerActivationContext;
     try { activation = await this.#options.projector.project(manifest); }
-    catch { return failure("DELIVERY_BINDING_FAILED"); }
+    catch (cause) {
+      return failure(cause instanceof ManagedWorkspaceSnapshotError
+        ? cause.code
+        : "DELIVERY_BINDING_FAILED");
+    }
     if (!Object.isFrozen(activation) || activation.correlation.manifestBindingIdentity !== manifest.deliveryBindingIdentity
       || activation.correlation.deliveryIdentity !== manifest.deliveryId
       || activation.correlation.packageDigest !== packageBinding(manifest).packageDigest) return failure("DELIVERY_BINDING_FAILED");
@@ -435,12 +447,18 @@ export class DeliveryLifecycleService {
         this.#publishChange();
         state = "RUNNING_CORRELATED";
       }
+      const diagnostic = publicDiagnostic(result.detail);
       if (state === "RUNNING_CORRELATED") {
         ownerFacts.emit({ owner: "M02", name: "result-unresolved", occurredAt: this.#options.clock.now() });
-        await this.#options.slots.transition(manifest.canonicalWorktree, "M02_RESULT_UNRESOLVED", this.#options.clock.now());
+        await this.#options.slots.transition(manifest.canonicalWorktree, "M02_RESULT_UNRESOLVED", this.#options.clock.now(), {
+          ...(diagnostic === undefined ? {} : { diagnostic }),
+        });
         this.#publishChange();
       }
-      return Object.freeze({ kind: "UNKNOWN", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, state: "RESULT_UNRESOLVED" });
+      return Object.freeze({
+        kind: "UNKNOWN", worktree: manifest.canonicalWorktree, deliveryId: manifest.deliveryId, state: "RESULT_UNRESOLVED",
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+      });
     }
     if (!terminalCorrelated(result, activation)) return failure("RUNNER_RESULT_INVALID");
     if (state === "START_UNCERTAIN") {

@@ -143,8 +143,21 @@ function unknown(owner: UnknownState["owner"], reason: UnknownState["reason"]): 
   return { state: "unknown", owner, reason };
 }
 
-function detail(reason: string): FrozenJsonObject {
-  return Object.freeze({ reason });
+function detail(reason: string, diagnostic?: Readonly<{ stage: string; causeCode: string }>): FrozenJsonObject {
+  return Object.freeze(diagnostic === undefined ? { reason } : { reason, ...diagnostic });
+}
+
+const HOST_ERROR_CODES = new Set([
+  "ACTIVATION_MISMATCH", "ILLEGAL_SUCCESSOR", "DATAFLOW_BINDING_INVALID", "CHECKPOINT_ORDER_VIOLATION",
+  "CONTROL_MISMATCH", "ACTION_INPUT_MISMATCH", "RECOVERY_NOT_ADMITTED", "RETIREMENT_NOT_AUTHORIZED",
+  "CORRELATION_MISMATCH", "BASELINE_MISSING", "GIT_STATE_MISMATCH", "WORKSPACE_SNAPSHOT_CAPACITY_EXCEEDED",
+  "READ_VIEW_INVALID", "PUBLICATION_GUARD_INVALID",
+]);
+
+function typedHostCause(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const code = (value as Record<string, unknown>).code;
+  return typeof code === "string" && HOST_ERROR_CODES.has(code) ? code : undefined;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -205,16 +218,22 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
       record.phase = "start-acknowledged";
       try { record = this.#save(record); } catch { return failure("ADAPTER_UNAVAILABLE"); }
     }
-    const started = await this.#options.host.start(compiled, this.#options.interaction).catch(() => undefined);
+    let started: Awaited<ReturnType<CoordinatorHost["start"]>> | undefined;
+    let thrownCause: string | undefined;
+    try { started = await this.#options.host.start(compiled, this.#options.interaction); }
+    catch (cause) { thrownCause = typedHostCause(cause); }
     if (started === undefined) {
       record.phase = "running";
-      record.result = this.#unknownResult(record.delivery, "HOST_START_UNRESOLVED");
+      record.result = this.#unknownResult(record.delivery, "HOST_START_UNRESOLVED",
+        thrownCause === undefined ? undefined : { stage: "HOST_START", causeCode: thrownCause });
       record = this.#save(record);
       return success(record.result!);
     }
     if (!started.ok) {
       record.phase = "running";
-      record.result = this.#unknownResult(record.delivery, "HOST_START_DISPOSITION_UNRESOLVED");
+      record.result = this.#unknownResult(record.delivery, "HOST_START_DISPOSITION_UNRESOLVED", {
+        stage: "HOST_START", causeCode: started.error.code,
+      });
       record = this.#save(record);
       return success(record.result!);
     }
@@ -479,8 +498,8 @@ export class RunnerCoordinator implements ExecutionRuntimeAdapter {
     return `${path.resolve(this.#options.stateDirectory)}\0${delivery.deliveryIdentity}`;
   }
 
-  #unknownResult(delivery: DeliveryRef, reason: string): ExecutionRuntimeResult {
-    return deepFreeze({ kind: "unknown", delivery, detail: detail(reason) });
+  #unknownResult(delivery: DeliveryRef, reason: string, diagnostic?: Readonly<{ stage: string; causeCode: string }>): ExecutionRuntimeResult {
+    return deepFreeze({ kind: "unknown", delivery, detail: detail(reason, diagnostic) });
   }
 
   #file(delivery: DeliveryRef): string {

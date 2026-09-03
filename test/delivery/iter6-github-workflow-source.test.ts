@@ -75,11 +75,13 @@ function fixture(overrides: Readonly<{
 }
 
 describe("Iter6 official GitHub Workflow Package source", () => {
-  it("admits only an exact name@version through the four-asset provenance layout", async () => {
+  it("admits exact and latest through the same four-asset provenance layout", async () => {
     await expect(fixture().fetch({ name: "demo", version: { kind: "EXACT", value: "1.2.3" } })).resolves.toMatchObject({
       kind: "FOUND", candidate: { name: "demo", exactVersion: "1.2.3" },
     });
-    await expect(fixture().fetch({ name: "demo", version: { kind: "LATEST" } })).resolves.toEqual({ kind: "INVALID" });
+    await expect(fixture().fetch({ name: "demo", version: { kind: "LATEST" } })).resolves.toMatchObject({
+      kind: "FOUND", candidate: { name: "demo", exactVersion: "1.2.3" },
+    });
   });
 
   it("distinguishes digest mismatch from structurally invalid provenance", async () => {
@@ -115,6 +117,46 @@ describe("Iter6 official GitHub Workflow Package source", () => {
       .resolves.toEqual({ kind: "INVALID" });
     await expect(fixture({ descriptorChecksumName: "other.sha256" }).fetch(request))
       .resolves.toEqual({ kind: "INVALID" });
+  });
+
+  it("does not admit unpublished v1 scoped or aggregate release layouts", async () => {
+    const configuration = {
+      kind: "github", repository: "firestige/wsr-workflow-package",
+      releasesBaseUrl: "https://api.github.com/repos/firestige/wsr-workflow-package/releases",
+      assetPattern: "workflow-package-{name}-{version}.tar.gz",
+    } as const;
+    const request = { name: "demo", version: { kind: "EXACT", value: "1.2.3" } } as const;
+    const v1Scoped = new GitHubWorkflowPackageSource(configuration, Object.freeze({
+      request: async (url: string) => url.includes("?per_page=")
+        ? { status: 200, body: body([{
+          tag_name: "workflow-package/demo/v1.2.3", draft: false, prerelease: false,
+          assets: [
+            { name: "workflow-package-demo-1.2.3.tar.gz", browser_download_url: "https://example.test/archive" },
+            { name: "workflow-package-demo-1.2.3.json", browser_download_url: "https://example.test/descriptor" },
+            { name: "workflow-package-demo-1.2.3.tar.gz.sha256", browser_download_url: "https://example.test/checksum" },
+          ],
+        }]) }
+        : { status: 200, body: body({
+          schemaVersion: "workflow-package.package-release@1.0.0", revision: "a".repeat(40),
+          tag: "workflow-package/demo/v1.2.3",
+          package: { name: "demo", version: "1.2.3", digest: `sha256:${"b".repeat(64)}` },
+          archive: { name: "workflow-package-demo-1.2.3.tar.gz", sha256: `sha256:${"c".repeat(64)}`, bytes: 7 },
+          checksum: { name: "workflow-package-demo-1.2.3.tar.gz.sha256" },
+        }) },
+    }));
+    const v1Aggregate = new GitHubWorkflowPackageSource(configuration, Object.freeze({
+      request: async (url: string) => url.includes("?per_page=")
+        ? { status: 200, body: body([{
+          tag_name: "1.2.3", draft: false, prerelease: false,
+          assets: [{ name: "workflow-package-release-1.2.3.json", browser_download_url: "https://example.test/aggregate" }],
+        }]) }
+        : { status: 200, body: body({
+          schemaVersion: "workflow-package.release@1.0.0", revision: "a".repeat(40), tag: "1.2.3", assets: [],
+        }) },
+    }));
+
+    await expect(v1Scoped.fetch(request)).resolves.toEqual({ kind: "INVALID" });
+    await expect(v1Aggregate.fetch(request)).resolves.toEqual({ kind: "NOT_FOUND" });
   });
 
   it("distinguishes an absent repository coordinate from GitHub unavailability", async () => {

@@ -92,11 +92,12 @@ describe("Wave 6 DSH Intake plugin", () => {
     await fs.mkdir(workspaceSpelling);
     const workspace = await fs.realpath(workspaceSpelling);
     const requests: unknown[] = [];
+    const cancelled: string[] = [];
     const application = Object.freeze({
       async start() {},
       async execute(request: unknown) { requests.push(request); return { kind: "ERROR", code: "WORKFLOW_NOT_FOUND", message: "WORKFLOW_NOT_FOUND" }; },
       async inspect() { throw new Error("not used"); },
-      async cancel(deliveryId: string) { return { kind: "TERMINAL", deliveryId, worktree: workspace, outcome: "CANCELLED" }; },
+      async cancel(deliveryId: string) { cancelled.push(deliveryId); return { kind: "TERMINAL", deliveryId, worktree: workspace, outcome: "CANCELLED" }; },
       status() { return { state: "READY" }; },
       async close() {},
     });
@@ -115,6 +116,23 @@ describe("Wave 6 DSH Intake plugin", () => {
       moduleLoader: async () => coreApi,
       factory: Object.freeze({ async create() { return application; } }),
       control,
+      ownerProjection: Object.freeze({ async snapshot() {
+        return {
+          schemaVersion: "execution.delivery-control-plane@1.0.0",
+          generation: 1,
+          deliveries: [{
+            deliveryId: "delivery-bound",
+            deliveryBindingIdentity: bindingIdentity("delivery-bound"),
+            worktree: workspace,
+            lifecycle: "TERMINAL",
+            recoverable: false,
+            current: null,
+            navigation: { sessionCorrelation: "correlation-bound" },
+            timing: { updatedAt: 100 },
+            terminal: { outcome: "CANCELLED", finishedAt: 100 },
+          }],
+        };
+      } }),
       async resolveConversationWorkspace(agent: { id: string }) {
         const sessionKey = String(agent.id);
         resolved.push(sessionKey);
@@ -131,6 +149,16 @@ describe("Wave 6 DSH Intake plugin", () => {
       .resolves.toMatchObject({ kind: "ERROR", code: "DSH_INTAKE_WORKSPACE_UNAUTHORIZED" });
     await expect(runtime.invokeForSession({ sessionKey: "rejected-session", operation: parseWsrCommand("abandon delivery-1"), images: [] }))
       .resolves.toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-1" });
+    await runtime.bindings.claim({
+      sessionKey: "bound-session",
+      correlation: "correlation-bound",
+      deliveryId: "delivery-bound",
+      worktree: workspace,
+      deliveryBindingIdentity: bindingIdentity("delivery-bound"),
+    });
+    await expect(runtime.invokeForSession({ sessionKey: "bound-session", operation: parseWsrCommand("abandon"), images: [] }))
+      .resolves.toMatchObject({ kind: "TERMINAL", deliveryId: "delivery-bound" });
+    expect(cancelled).toEqual(["delivery-1", "delivery-bound"]);
     expect(resolved).toEqual(["rejected-session"]);
 
     await expect(runtime.invokeForSession({
@@ -488,7 +516,12 @@ describe("Wave 6 DSH Intake plugin", () => {
     expect(parseWsrCommand("recover delivery-1")).toEqual({ operation: "recover", deliveryId: "delivery-1" });
     expect(parseWsrCommand("status delivery-1")).toEqual({ operation: "status", deliveryId: "delivery-1" });
     expect(parseWsrCommand("action finish\nfinal answer")).toEqual({ operation: "action-finish", remainder: "final answer" });
+    expect(parseWsrCommand("abandon")).toEqual({ operation: "abandon" });
     expect(parseWsrCommand("abandon delivery-1")).toEqual({ operation: "abandon", deliveryId: "delivery-1" });
+    expect(() => parseWsrCommand("abandon\nunexpected")).toThrowError(expect.objectContaining({
+      code: "WSR_COMMAND_INVALID",
+      message: expect.stringContaining("Usage: /wsr abandon [delivery-id]"),
+    }));
     expect(() => parseWsrCommand("create implementation-workflow --intent hidden prompt")).toThrowError("WSR_COMMAND_INVALID");
     expect(() => parseWsrCommand("recover latest")).not.toThrow();
     expect(() => parseWsrCommand("recover by-name extra")).toThrowError("WSR_COMMAND_INVALID");

@@ -50,6 +50,7 @@ export type ExecutionErrorCode =
   | "WORKFLOW_DIGEST_MISMATCH"
   | "WORKFLOW_DSH_INCOMPATIBLE"
   | "WORKFLOW_CACHE_PUBLISH_FAILED"
+  | "WORKSPACE_SNAPSHOT_CAPACITY_EXCEEDED"
   | "DELIVERY_BINDING_FAILED"
   | "DELIVERY_CREATE_FAILED"
   | "RUNNER_START_FAILED"
@@ -74,6 +75,7 @@ export interface ExecutionRecovery {
   readonly worktree: string;
   readonly deliveryId: string;
   readonly state: "BOUND" | "START_UNCERTAIN" | "RUNNING_CORRELATED" | "START_FAILED" | "RESULT_UNRESOLVED" | "TERMINAL_HANDLING";
+  readonly diagnostic?: Readonly<{ readonly stage: string; readonly causeCode: string }>;
 }
 
 export interface ExecutionPreDeliveryCancelled {
@@ -101,6 +103,7 @@ export interface ExecutionUnknown {
   readonly worktree: string;
   readonly deliveryId: string;
   readonly state: "START_UNCERTAIN" | "RESULT_UNRESOLVED";
+  readonly diagnostic?: Readonly<{ readonly stage: string; readonly causeCode: string }>;
 }
 
 export type ExecutionResult =

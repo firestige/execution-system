@@ -124,6 +124,27 @@ export class WorkflowPackageStore {
     }
   }
 
+  async lookupLatest(name: string): Promise<ResolvedWorkflowPackage | undefined> {
+    try {
+      const alias = JSON.parse(await readFile(this.#aliasPath(name), "utf8")) as Record<string, unknown>;
+      if (Object.keys(alias).sort().join(",") !== "exactVersion,name,packageDigest,schemaVersion"
+        || alias.schemaVersion !== "execution.workflow-package-alias@1.0.0" || alias.name !== name
+        || typeof alias.exactVersion !== "string" || typeof alias.packageDigest !== "string"
+        || !/^sha256:[0-9a-f]{64}$/u.test(alias.packageDigest)) {
+        throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
+      }
+      const resolved = await this.lookupExact(name, alias.exactVersion);
+      if (resolved === undefined || resolved.packageDigest !== alias.packageDigest) {
+        throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
+      }
+      return resolved;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      if (cause instanceof WorkflowPackageStoreError) throw cause;
+      throw new WorkflowPackageStoreError("WORKFLOW_PACKAGE_INVALID");
+    }
+  }
+
   async stage(candidate: WorkflowPackageCandidate): Promise<WorkflowPackageStaging> {
     if (sha256(candidate.archive) !== candidate.archiveDigest) throw new WorkflowPackageStoreError("WORKFLOW_DIGEST_MISMATCH");
     const id = `staging-${randomUUID()}`;
@@ -146,7 +167,7 @@ export class WorkflowPackageStore {
     }
   }
 
-  async publish(staging: WorkflowPackageStaging, validated: ValidatedWorkflowPackage): Promise<ResolvedWorkflowPackage> {
+  async publish(staging: WorkflowPackageStaging, validated: ValidatedWorkflowPackage, updateAlias = false): Promise<ResolvedWorkflowPackage> {
     if (this.#live.get(staging.id) !== staging) throw new WorkflowPackageStoreError("WORKFLOW_CACHE_PUBLISH_FAILED");
     const destination = this.#exactRoot(validated.name, validated.exactVersion);
     const relativePackagePath = relative(staging.materialPath, staging.packagePath);
@@ -167,6 +188,7 @@ export class WorkflowPackageStore {
           throw new WorkflowPackageStoreError("WORKFLOW_CACHE_PUBLISH_FAILED");
         }
         await this.discard(staging);
+        if (updateAlias) await this.#writeAlias(existing);
         return existing;
       }
       await writeFile(join(staging.path, "publication", "ready.json"), `${JSON.stringify(ready)}\n`, { flag: "wx", mode: 0o600 });
@@ -175,6 +197,13 @@ export class WorkflowPackageStore {
       this.#live.delete(staging.id);
       await rm(staging.path, { recursive: true, force: true }).catch(() => undefined);
       const resolved = recordFrom(ready, destination);
+      if (updateAlias) {
+        try { await this.#writeAlias(resolved); }
+        catch (cause) {
+          await rm(destination, { recursive: true, force: true }).catch(() => undefined);
+          throw cause;
+        }
+      }
       return resolved;
     } catch (cause) {
       if (cause instanceof WorkflowPackageStoreError) throw cause;
@@ -190,6 +219,29 @@ export class WorkflowPackageStore {
 
   #exactRoot(name: string, exactVersion: string): string {
     return join(this.#readyRoot, "packages", name, exactVersion);
+  }
+
+  #aliasPath(name: string): string {
+    return join(this.#readyRoot, "aliases", `${createHash("sha256").update(name).digest("hex")}.json`);
+  }
+
+  async #writeAlias(resolved: ResolvedWorkflowPackage): Promise<void> {
+    const path = this.#aliasPath(resolved.name);
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const alias = Object.freeze({
+      schemaVersion: "execution.workflow-package-alias@1.0.0",
+      name: resolved.name,
+      exactVersion: resolved.exactVersion,
+      packageDigest: resolved.packageDigest,
+    });
+    try {
+      await mkdir(resolve(path, ".."), { recursive: true });
+      await writeFile(temporary, `${JSON.stringify(alias)}\n`, { flag: "wx", mode: 0o600 });
+      await rename(temporary, path);
+    } catch {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw new WorkflowPackageStoreError("WORKFLOW_CACHE_PUBLISH_FAILED");
+    }
   }
 
 }

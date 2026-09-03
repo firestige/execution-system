@@ -75,7 +75,7 @@ Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. The independently versioned DS
 2. Start DSH Web from the target worktree and create a Delivery from chat:
 
    ```text
-   /wsr create implementation-workflow@0.3.0
+   /wsr create implementation-workflow
    Implement the requested change and preserve existing user edits.
    ```
 
@@ -85,11 +85,11 @@ Requires Node `>=24.12 <25` and DSH `0.1.1-rc.2`. The independently versioned DS
 
 ```text
 /wsr list                         # privacy-safe Delivery and worktree state
-/wsr create <name@version>
+/wsr create <name|name@latest|name@version>
 /wsr recover [delivery-id]
 /wsr status [delivery-id]
 /wsr action finish
-/wsr abandon <delivery-id>
+/wsr abandon [delivery-id]
 ```
 
 The explicit first-party skill `/workflow-execution` performs exactly one closed operation through the DSH-I-only `workflow_execution_intake` tool.
@@ -100,7 +100,7 @@ The explicit first-party skill `/workflow-execution` performs exactly one closed
 |---|---|
 | Node.js | `>=24.12.0 <25` |
 | DeepSeek Harness | `0.1.1-rc.2` (`@deepseek-ai/dsh`) |
-| Workflow Package contract | `agentops.workflow-dsl@1.1.0` (historical runner) and `agentops.workflow-dsl@2.0.0` (multi-Provider runner) |
+| Workflow Package contract | `agentops.workflow-dsl@2.0.0` |
 | Observation contract | `agentops.observation@1.0.0` |
 | Checkpoint store | `better-sqlite3` (native build, approved via `allowBuilds`) |
 

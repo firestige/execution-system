@@ -14,13 +14,14 @@ const sha = (character: string) => `sha256:${character.repeat(64)}`;
 
 function slot(overrides: Partial<OccupiedCurrentSlot> = {}): OccupiedCurrentSlot {
   return Object.freeze({
-    schemaVersion: "execution.current-slot@1.0.0",
+    schemaVersion: "execution.current-slot@2.0.0",
     state: "RUNNING_CORRELATED",
     worktree: "/workspace/zeta",
     deliveryId: "delivery-zeta",
     manifestPath: "/state/manifests/zeta.json",
     deliveryBindingIdentity: sha("a"),
     updatedAt: 120,
+    diagnostic: null,
     ...overrides,
   });
 }

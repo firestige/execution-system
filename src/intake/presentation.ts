@@ -73,6 +73,14 @@ function statusData(result: Record<string, unknown>): Readonly<Record<string, Fr
   for (const key of ["worktree", "deliveryId", "state", "admissionId"] as const) {
     if (typeof result[key] === "string") data[key] = result[key];
   }
+  const diagnostic = result.diagnostic;
+  if (diagnostic !== null && typeof diagnostic === "object" && !Array.isArray(diagnostic)) {
+    const value = diagnostic as Record<string, unknown>;
+    if (typeof value.stage === "string" && /^[A-Z][A-Z0-9_]{0,63}$/u.test(value.stage)
+      && typeof value.causeCode === "string" && /^[A-Z][A-Z0-9_]{0,127}$/u.test(value.causeCode)) {
+      data.diagnostic = { stage: value.stage, causeCode: value.causeCode };
+    }
+  }
   return data;
 }
 

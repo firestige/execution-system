@@ -12,7 +12,7 @@ import { buildMinimalRunnerActivation } from "../support/wave4/minimal-admitted-
 const roots: string[] = [];
 const minimalCorpus = path.join(
   path.dirname(fileURLToPath(new URL("../..", import.meta.url))),
-  "system-contracts/workflow-dsl/examples/minimal",
+  "system-contracts/workflow-dsl-2-candidate/generated/examples/minimal",
 );
 
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));

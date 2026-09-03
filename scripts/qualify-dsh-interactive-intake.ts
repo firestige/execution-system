@@ -179,10 +179,14 @@ export async function submitBrowserCommand(cdp: CdpConnection, line: string): Pr
   /* v8 ignore next -- real Chrome qualification covers asynchronous onboarding dismissal before submission. */
   await dismissBlockingPrompts(cdp);
   await waitFor(async () => await evaluate(cdp, `(() => {
-    const input = document.querySelector('textarea,[contenteditable="true"]');
+    const input = [...document.querySelectorAll('textarea,[contenteditable="true"]')].findLast((candidate) => {
+      if (!(candidate instanceof HTMLElement) || candidate.getClientRects().length === 0) return false;
+      const style = window.getComputedStyle(candidate);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (candidate instanceof HTMLTextAreaElement && (candidate.disabled || candidate.readOnly)) return false;
+      return candidate.getAttribute('aria-disabled') !== 'true';
+    });
     if (!input) return false;
-    if (input instanceof HTMLTextAreaElement && (input.disabled || input.readOnly)) return false;
-    if (input instanceof HTMLElement && input.getAttribute('aria-disabled') === 'true') return false;
     input.focus();
     return true;
   })()`) === true ? true : undefined, "DSH_BROWSER_COMPOSER_UNAVAILABLE", 120_000);
@@ -216,25 +220,26 @@ export async function qualifyDshInteractiveIntake(input: Readonly<{
   let cdp: CdpConnection | undefined;
   try {
     await mkdir(path.join(durable, "state"), { recursive: true });
-    const defaults = JSON.parse(await readFile(path.join(repository, "config/defaults/execution.default.json"), "utf8"));
-    defaults.paths = {
+    const defaults = {
+      schemaVersion: "execution.config@2.0.0",
+      paths: {
       repositoryRoot: worktree,
       workspaceRoot: path.dirname(worktree),
       allowedWorktreeRoots: [path.dirname(worktree)],
       stateRoot: path.join(durable, "state"),
-      credentialStorePath: path.join(durable, "credentials.yml"),
+      },
+      workflowSource: {
+        kind: "github",
+        repository: "firestige/wsr-workflow-package",
+        releasesBaseUrl: "https://api.github.com/repos/firestige/wsr-workflow-package/releases",
+        assetPattern: "workflow-package-{name}-{version}.tar.gz",
+      },
+      runner: { implementationKey: "runner.v2", host: { engine: "langgraph" }, maxParallelToolCalls: 4 },
+      observation: { enabled: false, timeoutMs: 1000, maxBatchRecords: 512, maxBatchBytes: 4_194_304, flushIntervalMs: 1000, shutdownFlushMs: 3000, serviceName: "workflow-self-recursive-execution" },
+      controls: { startupTimeoutMs: 30_000, executionTimeoutMs: 3_600_000, shutdownTimeoutMs: 10_000, maxConcurrentDeliveries: 4, allowExplicitRefresh: false, diagnosticMaxBytes: 4096 },
+      intake: { maxCorrelationBytes: 256, maxOutputBytes: 8192 },
     };
-    defaults.runner.provider = {
-      ...defaults.runner.provider,
-      route: "qualification",
-      modelId: "qualification-model",
-      baseUrl: "https://example.invalid",
-      credentialRef: "QUALIFICATION_KEY",
-    };
-    await Promise.all([
-      writeFile(configFile, `${JSON.stringify(defaults, null, 2)}\n`, "utf8"),
-      writeFile(defaults.paths.credentialStorePath, "version: 1\nrefs:\n  QUALIFICATION_KEY: unused-for-list\n", "utf8"),
-    ]);
+    await writeFile(configFile, `${JSON.stringify(defaults, null, 2)}\n`, "utf8");
     await ensureDshProfileInstallationPolicy("web", (args) => runDsh(dshHome, worktree, args));
     await bindLocalPackageCandidate(
       path.join(dshHome, "profiles/web"),

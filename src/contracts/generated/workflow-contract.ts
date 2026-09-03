@@ -1,4 +1,4 @@
-// GENERATED from agentops.workflow-dsl@1.1.0. Do not edit by hand.
+// GENERATED from agentops.workflow-dsl@2.0.0. Do not edit by hand.
 import type { ArtifactId, BranchId, ControlId, DeepReadonly, ExecutionSiteRef, FrozenJsonObject, FrozenJsonSchema, HostOperationContractId, HostOperationId, NodeId, Sha256, StableId, TerminalId } from "../primitives.js";
 
 export type ContractDeliveryContextField = "deliveryIdentity" | "taskIdentity" | "workflowIdentity" | "snapshotIdentity";

@@ -53,7 +53,7 @@ export function validRunnerActivation(overrides: Partial<RunnerActivationContext
       artifacts: { identity: `sha256:${"d".repeat(64)}`, versions: {} },
       workspace: { identity: "workspace.fixture", canonicalWorktreePath: "/admitted/worktree", admittedGitTree: "tree.fixture" },
     },
-    admission: { contractRevision: "agentops.workflow-dsl@1.1.0", authorityMergeIdentity: `sha256:${"e".repeat(64)}`, deliveryAdmissionContractIdentity: "agentops.delivery-admission@1.0.0" },
+    admission: { contractRevision: "agentops.workflow-dsl@2.0.0", authorityMergeIdentity: `sha256:${"e".repeat(64)}`, deliveryAdmissionContractIdentity: "agentops.delivery-admission@2.0.0" },
     ...overrides,
   } as unknown as RunnerActivationContext;
   if (overrides.bindingIdentity === undefined) {

@@ -49,6 +49,15 @@ window.__ModuleLoader__.load({
       return typeof data[name] === "string" ? data[name] : undefined;
     }
 
+    function diagnosticFields(data) {
+      const value = data?.diagnostic;
+      return value !== null && typeof value === "object" && !Array.isArray(value)
+        && typeof value.stage === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(value.stage)
+        && typeof value.causeCode === "string" && /^[A-Z][A-Z0-9_]{0,127}$/.test(value.causeCode)
+        ? { stage: value.stage, causeCode: value.causeCode }
+        : {};
+    }
+
     function contentText(value) {
       if (typeof value === "string") return value;
       if (value !== null && typeof value === "object" && !Array.isArray(value)) {
@@ -113,8 +122,11 @@ window.__ModuleLoader__.load({
       }
       if (event.kind === "delivery-running") return `Workflow delivery running${stringField(data, "deliveryId") === undefined ? "" : ` · ${stringField(data, "deliveryId")}`}`;
       if (event.kind === "delivery-status") {
-        if (data.created === false) return ["No new Workflow Delivery created", stringField(data, "reason"), stringField(data, "state")].filter(Boolean).join(" · ");
-        return `Workflow delivery status${stringField(data, "state") === undefined ? "" : ` · ${stringField(data, "state")}`}`;
+        const diagnostic = diagnosticFields(data);
+        const status = data.created === false
+          ? ["No new Workflow Delivery created", stringField(data, "reason"), stringField(data, "state")].filter(Boolean).join(" · ")
+          : `Workflow delivery status${stringField(data, "state") === undefined ? "" : ` · ${stringField(data, "state")}`}`;
+        return diagnostic.stage === undefined ? status : `${status}\nFailure stage: ${diagnostic.stage}\nCause: ${diagnostic.causeCode}`;
       }
       if (event.kind === "action-output") return `Action output\n${actionOutputText(data.content)}`;
       if (event.kind === "action-input-request") return `Action input requested\n${contentText(data.prompt)}`;
@@ -126,12 +138,16 @@ window.__ModuleLoader__.load({
       const chat = surface === "chat";
       const renderedText = presentationText(event);
       const copyText = event.kind === "action-output" ? actionOutputText(event.data.content) : undefined;
+      const diagnostic = diagnosticFields(event.data);
       return React.createElement(chat ? "article" : "section", {
         "data-wsr-presentation": "true",
         "data-wsr-version": event.schemaVersion,
         "data-wsr-kind": event.kind,
         "data-wsr-correlation": event.correlation,
         "data-wsr-surface": surface,
+        "data-wsr-state": stringField(event.data, "state"),
+        "data-wsr-failure-stage": diagnostic.stage,
+        "data-wsr-cause-code": diagnostic.causeCode,
         ...(chat ? { "data-wsr-chat-role": "assistant" } : {}),
         ...(surface === "sidebar" ? { "data-wsr-sidebar": "true" } : {}),
         role: event.kind === "error" ? "alert" : "status",
@@ -216,6 +232,7 @@ window.__ModuleLoader__.load({
           readEmptySession,
         );
         const event = latestWsrQuery(snapshot, active);
+        const diagnostic = event === undefined ? {} : diagnosticFields(event.data);
         const query = (kind, line) => async () => {
           setActive(kind);
           if (session !== undefined) await session.command(line);
@@ -227,6 +244,9 @@ window.__ModuleLoader__.load({
           "data-wsr-version": event?.schemaVersion,
           "data-wsr-kind": event?.kind ?? "idle",
           "data-wsr-correlation": event?.correlation,
+          "data-wsr-state": event === undefined ? undefined : stringField(event.data, "state"),
+          "data-wsr-failure-stage": diagnostic.stage,
+          "data-wsr-cause-code": diagnostic.causeCode,
           role: event?.kind === "error" ? "alert" : "status",
         },
         React.createElement("button", { type: "button", onClick: query("delivery-list", "/wsr list") }, "Deliveries"),

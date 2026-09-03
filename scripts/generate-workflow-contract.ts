@@ -4,8 +4,7 @@ import { fileURLToPath } from "node:url";
 
 interface Schema { readonly $defs?: Record<string, unknown>; readonly properties: Record<string, any> }
 const root = fileURLToPath(new URL("..", import.meta.url));
-const contractRoot = path.resolve(root, "../system-contracts/workflow-dsl/schemas");
-const candidateV2Root = path.resolve(root, "../system-contracts/workflow-dsl-2-candidate/generated");
+const contractRoot = path.resolve(root, "../system-contracts/workflow-dsl-2-candidate/generated/schemas");
 const meta = JSON.parse(readFileSync(path.join(contractRoot, "agentops.meta.schema.json"), "utf8")) as { $defs: { contractVersion: { const: string } } };
 const routes = JSON.parse(readFileSync(path.join(contractRoot, "routes.schema.json"), "utf8")) as Schema;
 const workflow = JSON.parse(readFileSync(path.join(contractRoot, "workflow-definition.schema.json"), "utf8")) as Schema;
@@ -32,10 +31,9 @@ const frozenWorkflowDslFiles = [
   "tools/canonicalize.cjs",
   "tools/check-example.cjs",
 ] as const;
-const generatedWorkflowDslRoot = path.join(root, "config/workflow-dsl");
 const generatedWorkflowDslV2Root = path.join(root, "config/workflow-dsl-v2-candidate");
 
-function synchronizeFrozenWorkflowDsl(check: boolean, sourceRoot = path.resolve(contractRoot, ".."), destinationRoot = generatedWorkflowDslRoot): void {
+function synchronizeFrozenWorkflowDsl(check: boolean, sourceRoot = path.resolve(contractRoot, ".."), destinationRoot = generatedWorkflowDslV2Root): void {
   for (const relative of frozenWorkflowDslFiles) {
     const source = path.resolve(sourceRoot, relative);
     const destination = path.join(destinationRoot, relative);
@@ -52,9 +50,7 @@ function synchronizeFrozenWorkflowDsl(check: boolean, sourceRoot = path.resolve(
 if (process.argv.includes("--check")) {
   if (readFileSync(output, "utf8") !== rendered) throw new Error("generated Workflow Contract projection is stale");
   synchronizeFrozenWorkflowDsl(true);
-  synchronizeFrozenWorkflowDsl(true, candidateV2Root, generatedWorkflowDslV2Root);
 } else {
   writeFileSync(output, rendered);
   synchronizeFrozenWorkflowDsl(false);
-  synchronizeFrozenWorkflowDsl(false, candidateV2Root, generatedWorkflowDslV2Root);
 }

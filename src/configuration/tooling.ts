@@ -4,10 +4,9 @@ import { isAbsolute } from "node:path";
 
 import { canonicalJsonBytes } from "./canonical.js";
 import { ConfigurationError } from "./errors.js";
-import { loadExecutionInstallationConfig } from "./loader.js";
-import type { ExecutionInstallationConfig } from "./types.js";
+import { loadExecutionInstallationConfigV2, type ExecutionInstallationConfigV2 } from "./v2.js";
 
-export function redactEffectiveConfiguration(config: ExecutionInstallationConfig): unknown {
+export function redactEffectiveConfiguration(config: ExecutionInstallationConfigV2): unknown {
   return {
     ...config,
     paths: {
@@ -15,7 +14,6 @@ export function redactEffectiveConfiguration(config: ExecutionInstallationConfig
       workspaceRoot: "[sensitive-path]",
       allowedWorktreeRoots: config.paths.allowedWorktreeRoots.map(() => "[sensitive-path]"),
       stateRoot: "[sensitive-path]",
-      credentialStorePath: "[sensitive-path]",
       packageStoreRoot: "[sensitive-path]",
       intakeBindingStoreRoot: "[sensitive-path]",
       manifestRoot: "[sensitive-path]",
@@ -26,14 +24,7 @@ export function redactEffectiveConfiguration(config: ExecutionInstallationConfig
     workflowSource: config.workflowSource.kind === "adapter"
       ? { ...config.workflowSource, adapterConfigFile: "[sensitive-path]" }
       : config.workflowSource,
-    runner: {
-      ...config.runner,
-      provider: {
-        ...config.runner.provider,
-        baseUrl: "[sensitive-endpoint]",
-        credentialRef: "[credential-reference]",
-      },
-    },
+    runner: config.runner,
     observation: config.observation.endpoint === undefined
       ? config.observation
       : { ...config.observation, endpoint: "[sensitive-endpoint]" },
@@ -50,13 +41,13 @@ export async function initializeExecutionConfiguration(destination: string, form
 export const copyExecutionConfiguration = initializeExecutionConfiguration;
 
 export async function validateExecutionConfigurationFile(configFile: string) {
-  return loadExecutionInstallationConfig(configFile);
+  return loadExecutionInstallationConfigV2(configFile);
 }
 
 export async function dumpEffectiveExecutionConfiguration(configFile: string): Promise<string> {
-  const loaded = await loadExecutionInstallationConfig(configFile);
+  const loaded = await loadExecutionInstallationConfigV2(configFile);
   const output = {
-    defaultsSource: "execution.default@execution.config@1.0.0",
+    defaultsSource: "execution.default@execution.config@2.0.0",
     requiredComplete: true,
     installationConfigIdentity: loaded.installationConfigIdentity,
     effective: redactEffectiveConfiguration(loaded.config),
