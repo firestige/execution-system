@@ -200,10 +200,20 @@ function deliveryOwnerFactIngress(
   });
 }
 
+export function createFormatHostOperationHandler(): HostOperationHandler {
+  return Object.freeze({
+    async execute(input: FrozenJsonValue, configuration: Readonly<Record<string, FrozenJsonValue>>) {
+      const accepted = configuration.accepted;
+      if (accepted !== undefined && typeof accepted !== "boolean") {
+        return Object.freeze({ accepted: false, value: input });
+      }
+      return Object.freeze({ accepted: accepted ?? true, value: configuration.result ?? input });
+    },
+  });
+}
+
 const FORMAT_OPERATION_FACTORY: ProductionHostOperationFactory = Object.freeze({
-  create() {
-    return Object.freeze({ async execute(input: FrozenJsonValue) { return Object.freeze({ accepted: true, value: input }); } });
-  },
+  create: createFormatHostOperationHandler,
 });
 
 const STANDARD_HOST_OPERATION_FACTORIES: Readonly<Record<string, ProductionHostOperationFactory>> = Object.freeze({
