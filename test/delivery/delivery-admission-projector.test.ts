@@ -202,6 +202,32 @@ describe("frozen Delivery Admission production projection", () => {
     expect(compileRunnerActivation(activation).ok).toBe(true);
   });
 
+  it("normalizes an omitted Action input schema to the explicit ABSENT sentinel", async () => {
+    const source = path.join(repositoryRoot, "system-contracts", "workflow-dsl-2-candidate", "generated", "examples", "minimal");
+    const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-absent-input-"));
+    const definition = path.join(root, "definition");
+    await cp(source, definition, { recursive: true });
+    const actionsPath = path.join(definition, "actions.json");
+    const actionsDocument = JSON.parse(await readFile(actionsPath, "utf8"));
+    delete actionsDocument.actions[0].inputSchema;
+    await writeFile(actionsPath, `${JSON.stringify(actionsDocument, null, 2)}\n`, "utf8");
+
+    const packageDocument = JSON.parse(await readFile(path.join(definition, "package.json"), "utf8"));
+    const snapshotDocument = JSON.parse(await readFile(path.join(definition, "snapshot.json"), "utf8"));
+    const promptSnapshot = await captureTaskPromptSnapshot({
+      root: path.join(root, "snapshots"),
+      deliveryId: "delivery-absent-input",
+      prompt: Object.freeze({ text: "admit an Action without input", attachments: Object.freeze([]) }),
+      attachments: Object.freeze({ read: async () => { throw new Error("not called"); } }),
+    });
+    const manifest = await firstPartyManifest({ name: "absent-input", definition, packageDocument, snapshotDocument, promptSnapshot });
+
+    const activation = await new DeliveryAdmissionProjector().project(manifest);
+
+    expect(activation.program.execution.actions[actionsDocument.actions[0].id]?.inputSchema).toEqual({ kind: "ABSENT" });
+    expect(compileRunnerActivation(activation).ok).toBe(true);
+  });
+
   it("admits one immutable dirty managed-workspace snapshot without changing the user index or object database", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "delivery-projector-dirty-"));
     const workspace = path.join(root, "workspace");
