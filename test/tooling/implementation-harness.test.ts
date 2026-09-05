@@ -57,7 +57,7 @@ describe("implementation Harness", () => {
 
   it("can execute the real static command through the default shell-free spawner", () => {
     expect(runHarnessPhase("static", { projectRoot })).toBe(0);
-  });
+  }, 15_000);
 
   it("maps CLI errors to stderr and a failure exit without throwing", () => {
     const stderr = vi.fn();

@@ -89,9 +89,9 @@ jobs:
 
       - name: Mint short-lived release App token for final publish only
         id: release-app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.WSR_RELEASE_APP_ID }}
+          client-id: ${{ vars.WSR_RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.WSR_RELEASE_APP_PRIVATE_KEY }}
           owner: firestige
           repositories: wsr-execution

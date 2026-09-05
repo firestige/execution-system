@@ -173,7 +173,8 @@ describe("Iteration 4 release automation", () => {
 
     expect(candidate).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(candidate).toContain('test "$GITHUB_REF_NAME" = "release/next"');
-    expect(candidate).toContain("WSR_RELEASE_APP_ID");
+    expect(candidate).toContain("WSR_RELEASE_CLIENT_ID");
+    expect(candidate).not.toContain("WSR_RELEASE_APP_ID");
     expect(candidate).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
     expect(candidate).toContain("repositories: wsr-execution");
     expect(candidate).toContain("permission-contents: write");
@@ -192,7 +193,8 @@ describe("Iteration 4 release automation", () => {
     expect(candidate).toContain("materialize-unified-release-candidate.ts");
     expect(candidate).not.toContain('pnpm release:artifacts "$RUNNER_TEMP/local-release"');
     expect(promote).toContain("actions/create-github-app-token@");
-    expect(promote).toContain("WSR_RELEASE_APP_ID");
+    expect(promote).toContain("WSR_RELEASE_CLIENT_ID");
+    expect(promote).not.toContain("WSR_RELEASE_APP_ID");
     expect(promote).toContain("WSR_RELEASE_APP_PRIVATE_KEY");
     expect(promote).toContain("repositories: wsr-execution");
     expect(promote).toContain("permission-contents: write");
