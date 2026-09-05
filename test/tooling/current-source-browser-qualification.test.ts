@@ -24,6 +24,16 @@ describe("current-source browser qualification authority", () => {
         scenario: "diagnostic", evidenceKind: "diagnostic-non-composition",
         diagnosticSelector: "hello-world-workflow@0.2.0",
       });
+    expect(() => parseCurrentSourceBrowserQualificationArguments(base))
+      .toThrowError("usage: qualify-current-source-browser");
+    expect(() => parseCurrentSourceBrowserQualificationArguments([...base, "diagnostic", "hello-world-workflow@0.2.0", "extra"]))
+      .toThrowError("usage: qualify-current-source-browser");
+    expect(() => parseCurrentSourceBrowserQualificationArguments([...base, "unsupported"]))
+      .toThrowError("CURRENT_SOURCE_SCENARIO_INVALID:unsupported");
+    expect(() => parseCurrentSourceBrowserQualificationArguments([...base, "diagnostic", "hello-world-workflow@latest"]))
+      .toThrowError("CURRENT_SOURCE_DIAGNOSTIC_SELECTOR_INVALID");
+    expect(() => parseCurrentSourceBrowserQualificationArguments([...base, "diagnostic", "not a selector"]))
+      .toThrowError("CURRENT_SOURCE_DIAGNOSTIC_SELECTOR_INVALID");
   });
 
   it("uses the parsed caller selector in evidence-studio instead of a hardcoded workflow", async () => {
