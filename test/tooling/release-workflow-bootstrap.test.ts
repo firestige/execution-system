@@ -6,19 +6,18 @@ import { describe, expect, it } from "vitest";
 const repository = path.resolve(import.meta.dirname, "../..");
 
 describe("release workflow bootstrap", () => {
-  it("dispatches the candidate publisher through the default-branch-registered CI workflow", async () => {
+  it("keeps candidate publication exclusive to release/next push", async () => {
     const [ci, candidate] = await Promise.all([
       readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8"),
       readFile(path.join(repository, ".github/workflows/release-candidate.yml"), "utf8"),
     ]);
 
-    expect(ci).toContain("release_candidate:");
-    expect(ci).toContain("uses: ./.github/workflows/release-candidate.yml");
-    expect(ci).toContain("secrets: inherit");
-    expect(ci).toContain("permissions:\n      contents: read");
-    expect(ci).not.toContain("permissions:\n      contents: write");
-    expect(candidate).toContain("workflow_call:");
-    expect(candidate).toContain("candidate_tag:");
+    expect(ci).not.toContain("release_candidate:");
+    expect(ci).not.toContain("uses: ./.github/workflows/release-candidate.yml");
+    expect(candidate).toContain("branches:\n      - release/next");
+    expect(candidate).not.toContain("workflow_dispatch:");
+    expect(candidate).not.toContain("workflow_call:");
+    expect(candidate).toContain("release/request.json");
     expect(candidate).not.toContain("local_manual_e2e_evidence:");
   });
 
@@ -44,11 +43,11 @@ describe("release workflow bootstrap", () => {
     expect(candidate).toContain("remoteArtifactVerification");
   });
 
-  it("passes the unified authority manifest through the registered CI bootstrap", async () => {
+  it("does not expose release inputs through ordinary CI", async () => {
     const ci = await readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8");
 
-    expect(ci).toContain("authority_manifest:");
-    expect(ci).toContain("authority_manifest: ${{ inputs.authority_manifest }}");
+    expect(ci).not.toContain("authority_manifest:");
+    expect(ci).not.toContain("candidate_tag:");
   });
 
   it("scopes every GitHub Release operation to the component repository", async () => {
@@ -62,11 +61,8 @@ describe("release workflow bootstrap", () => {
   it("keeps ordinary component PR qualification on the stable super-project authority", async () => {
     const ci = await readFile(path.join(repository, ".github/workflows/ci.yml"), "utf8");
 
-    expect(ci).toContain(
-      "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.authority_ref || 'main' }}",
-    );
-    expect(ci).toContain("Verify dispatched authority pins the exact Execution candidate");
-    expect(ci).toContain('test "$(git ls-tree HEAD execution-system | awk \'{print $3}\')" = "$GITHUB_SHA"');
+    expect(ci).toContain("ref: main");
+    expect(ci).not.toContain("Verify dispatched authority pins the exact Execution candidate");
     expect(ci).not.toContain("fix/iter3-interactive-intake-e2e");
     expect(ci).toContain("submodules: recursive");
     expect(ci).toContain("fetch-depth: 0");
