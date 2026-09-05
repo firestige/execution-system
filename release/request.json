@@ -1,5 +1,5 @@
 {
   "candidate_tag": "0.2.7-rc.1",
-  "authority_ref": "2baf1ee60ce5a600af94750d6639f3c9bf2c73bc",
+  "authority_ref": "bfe759ac8fd10e27661843df260ee959a58746ea",
   "authority_manifest": "release/candidates/issues-221-225-execution-0.2.7.json"
 }
