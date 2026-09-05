@@ -3,26 +3,6 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
-    inputs:
-      release_candidate:
-        description: Run the release-candidate publisher from the selected ref
-        required: false
-        default: false
-        type: boolean
-      candidate_tag:
-        description: RC tag matching the stable package version
-        required: false
-        type: string
-      authority_ref:
-        description: Superproject release authority ref pinned to this component candidate
-        required: false
-        default: release/next
-        type: string
-      authority_manifest:
-        description: Superproject-relative immutable unified candidate manifest
-        required: false
-        default: release/candidates/iter4-wave11.json
-        type: string
 
 concurrency:
   group: execution-system-${{ github.workflow }}-${{ github.ref }}
@@ -30,7 +10,6 @@ concurrency:
 
 jobs:
   verify:
-    if: ${{ github.event_name == 'pull_request' || inputs.release_candidate != true }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -39,13 +18,9 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: firestige/workflow-self-recursive
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.authority_ref || 'main' }}
+          ref: main
           fetch-depth: 0
           submodules: recursive
-
-      - name: Verify dispatched authority pins the exact Execution candidate
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: test "$(git ls-tree HEAD execution-system | awk '{print $3}')" = "$GITHUB_SHA"
 
       - name: Checkout execution-system
         uses: actions/checkout@v6
@@ -101,14 +76,3 @@ jobs:
           pnpm check:generated
           pnpm harness static
           pnpm harness feasibility
-
-  release-candidate:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate == true }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/release-candidate.yml
-    secrets: inherit
-    with:
-      candidate_tag: ${{ inputs.candidate_tag }}
-      authority_ref: ${{ inputs.authority_ref }}
-      authority_manifest: ${{ inputs.authority_manifest }}
