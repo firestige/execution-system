@@ -13,6 +13,7 @@ import {
   waitFor,
   type CdpConnection,
 } from "./qualify-dsh-interactive-intake.js";
+import { parseCurrentSourceBrowserQualificationArguments } from "./current-source-browser-qualification.js";
 
 async function selectWorkspace(cdp: CdpConnection, origin: URL, workspace: string): Promise<string> {
   const created = await rpc(origin, "workspace.create", { path: workspace });
@@ -66,10 +67,12 @@ async function tasks(evidence: URL): Promise<any[]> {
 }
 
 async function main(): Promise<void> {
-  const [originValue, workspaceValue, evidenceValue, scenario = "evidence-studio"] = process.argv.slice(2);
+  const arguments_ = process.argv.slice(2);
+  const [originValue, workspaceValue, evidenceValue] = arguments_;
   if (originValue === undefined || workspaceValue === undefined || evidenceValue === undefined) {
-    throw new Error("usage: qualify-current-source-browser ORIGIN WORKSPACE EVIDENCE_ORIGIN");
+    throw new Error("usage: qualify-current-source-browser ORIGIN WORKSPACE EVIDENCE_ORIGIN evidence-studio EXACT_SELECTOR | ORIGIN WORKSPACE EVIDENCE_ORIGIN diagnostic");
   }
+  const qualification = parseCurrentSourceBrowserQualificationArguments(process.argv.slice(2));
   const origin = new URL(originValue);
   const evidence = new URL(evidenceValue);
   const workspace = await realpath(workspaceValue);
@@ -82,7 +85,7 @@ async function main(): Promise<void> {
     chrome = browser.child;
     cdp = browser.cdp;
     const workspaceId = await selectWorkspace(cdp, origin, workspace);
-    if (scenario === "diagnostic") {
+    if (qualification.scenario === "diagnostic") {
       await submitBrowserCommand(cdp, "/wsr create system-design-workflow\nDesign a local health endpoint and preserve a controlled lower-layer failure diagnostic.");
       const first = await waitFor(async () => await evaluate(cdp!, `(() => {
         const nodes = [...document.querySelectorAll('[data-wsr-presentation="true"][data-wsr-surface="chat"][data-wsr-state="unresolved"]')];
@@ -116,14 +119,15 @@ async function main(): Promise<void> {
         return row ? { label: row.getAttribute('aria-label') } : undefined;
       })()`), "CURRENT_SOURCE_SIDEBAR_UNRESOLVED_UNAVAILABLE", 40_000);
       process.stdout.write(`${JSON.stringify({
-        result: "PASS", oracle: "browser-dom-controlled-failure", workspaceId,
+        result: "PASS", evidenceKind: qualification.evidenceKind,
+        diagnosticSelector: qualification.diagnosticSelector ?? null,
+        oracle: "browser-dom-controlled-failure", workspaceId,
         diagnostic: { stage: "HOST_START", causeCode: "DATAFLOW_BINDING_INVALID", initial: first.text, status: status.text },
         convergence: { chat: "unresolved", sidebar: sidebar.label, tag: "unresolved" },
       })}\n`);
       return;
     }
-    if (scenario !== "evidence-studio") throw new Error(`CURRENT_SOURCE_SCENARIO_INVALID:${scenario}`);
-    await submitBrowserCommand(cdp, "/wsr create hello-world-workflow@0.2.0\nGreet the current-source Product qualification and return a concise final answer.");
+    await submitBrowserCommand(cdp, `/wsr create ${qualification.workflowSelector}\nGreet the current-source Product qualification and return a concise final answer.`);
     const terminal = await waitFor(async () => await evaluate(cdp!, `(() => {
       const candidates = [...document.querySelectorAll('[data-wsr-presentation="true"][data-wsr-surface="chat"]')];
       const error = candidates.findLast((node) => node.getAttribute('data-wsr-kind') === 'error');
@@ -173,6 +177,8 @@ async function main(): Promise<void> {
     await waitFor(async () => await evaluate(cdp!, `(document.body?.innerText ?? '').includes('/v1/evidence/facts') ? true : undefined`), "CURRENT_SOURCE_STUDIO_RECEIPT_UNAVAILABLE", 40_000);
     process.stdout.write(`${JSON.stringify({
       result: "PASS",
+      evidenceKind: qualification.evidenceKind,
+      workflowSelector: qualification.workflowSelector,
       oracle: "browser-dom-and-real-services",
       workspaceId,
       task: { taskId: task.task_id, displayName: task.display_name ?? null },
