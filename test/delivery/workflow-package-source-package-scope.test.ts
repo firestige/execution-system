@@ -75,6 +75,14 @@ function source(specs: readonly PackageSpec[], calls: string[] = []) {
   return new GitHubWorkflowPackageSource(configuration, network);
 }
 
+function sourceFromReleases(releases: readonly unknown[], responses: ReadonlyMap<string, Readonly<{ status: number; body: Uint8Array }>>) {
+  const network: NetworkPort = Object.freeze({ request: async (url: string) => {
+    if (url.includes("?per_page=")) return { status: 200, body: bytes(releases) };
+    return responses.get(url) ?? { status: 404, body: bytes("missing") };
+  } });
+  return new GitHubWorkflowPackageSource(configuration, network);
+}
+
 describe("package-scoped GitHub Workflow Source", () => {
   it("selects an exact package through the package-scoped V2 release", async () => {
     const calls: string[] = [];
@@ -95,6 +103,48 @@ describe("package-scoped GitHub Workflow Source", () => {
     await expect(candidate.fetch({ name: "demo", version: { kind: "EXACT", value: "2.0.0-rc.2" } })).resolves.toMatchObject({
       kind: "FOUND", candidate: { exactVersion: "2.0.0-rc.2" },
     });
+  });
+
+  it("isolates an exact version from same-package historical prerelease, legacy, and damaged assets", async () => {
+    const target = packageRelease({ name: "demo", version: "2.0.0" });
+    const unrelated = [
+      {
+        tag_name: "workflow-package/demo/v1.9.0-rc.1", draft: false, prerelease: false,
+        assets: [],
+      },
+      {
+        tag_name: "workflow-package/demo/v1.0.0", draft: false, prerelease: false,
+        assets: [
+          { name: "workflow-package-demo-1.0.0.tar.gz", browser_download_url: "https://example.test/legacy-archive" },
+          { name: "workflow-package-demo-1.0.0.json", browser_download_url: "https://example.test/legacy-descriptor" },
+          { name: "workflow-package-demo-1.0.0.tar.gz.sha256", browser_download_url: "https://example.test/legacy-checksum" },
+        ],
+      },
+      {
+        tag_name: "workflow-package/demo/v1.5.0", draft: false, prerelease: false,
+        assets: [
+          { name: "workflow-package-demo-1.5.0.tar.gz", browser_download_url: "not-a-url" },
+        ],
+      },
+    ];
+
+    await expect(sourceFromReleases([...unrelated, target.release], target.responses).fetch({
+      name: "demo", version: { kind: "EXACT", value: "2.0.0" },
+    })).resolves.toMatchObject({
+      kind: "FOUND", candidate: { name: "demo", exactVersion: "2.0.0" },
+    });
+  });
+
+  it("fails closed when the exact target release is missing, duplicated, or invalid", async () => {
+    const target = packageRelease({ name: "demo", version: "2.0.0" });
+    const request = { name: "demo", version: { kind: "EXACT", value: "2.0.0" } } as const;
+
+    await expect(source([{ name: "demo", version: "1.0.0" }]).fetch(request))
+      .resolves.toEqual({ kind: "NOT_FOUND" });
+    await expect(sourceFromReleases([target.release, target.release], target.responses).fetch(request))
+      .resolves.toEqual({ kind: "INVALID" });
+    await expect(sourceFromReleases([{ ...target.release, assets: target.release.assets.slice(0, 3) }], target.responses).fetch(request))
+      .resolves.toEqual({ kind: "INVALID" });
   });
 
   it("selects the highest stable SemVer and ignores drafts", async () => {

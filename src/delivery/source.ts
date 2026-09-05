@@ -11,7 +11,7 @@ const MAX_ARCHIVE_BYTES = 134_217_728;
 const PAGE_SIZE = 100;
 const MAX_RELEASE_PAGES = 10;
 type Asset = Readonly<{ name: string; url: string }>;
-type Release = Readonly<{ tag: string; draft: boolean; prerelease: boolean; assets: readonly Asset[] }>;
+type Release = Readonly<{ tag: string; draft: boolean; prerelease: boolean; assets: readonly unknown[] }>;
 type PackageRecord = Readonly<{
   name: string; version: string; archive: Asset; descriptor: Asset; checksum: Asset; provenance: Asset;
 }>;
@@ -50,9 +50,7 @@ function release(value: unknown): Release | undefined {
   const record = value as Record<string, unknown>;
   if (typeof record.tag_name !== "string" || typeof record.draft !== "boolean"
     || typeof record.prerelease !== "boolean" || !Array.isArray(record.assets)) return undefined;
-  const assets = record.assets.map(asset);
-  if (assets.some((entry) => entry === undefined)) return undefined;
-  return Object.freeze({ tag: record.tag_name, draft: record.draft, prerelease: record.prerelease, assets: Object.freeze(assets as Asset[]) });
+  return Object.freeze({ tag: record.tag_name, draft: record.draft, prerelease: record.prerelease, assets: Object.freeze([...record.assets]) });
 }
 
 type Semver = Readonly<{ major: bigint; minor: bigint; patch: bigint; prerelease: boolean }>;
@@ -81,13 +79,16 @@ function scopedCoordinates(tag: string): Readonly<{ name: string; version: strin
 }
 
 function scopedRecord(item: Release, coordinates: Readonly<{ name: string; version: string }>): PackageRecord | undefined {
+  const parsedAssets = item.assets.map(asset);
+  if (parsedAssets.some((entry) => entry === undefined)) return undefined;
+  const assets = parsedAssets as Asset[];
   const archiveName = `workflow-package-${coordinates.name}-${coordinates.version}.tar.gz`;
   const descriptorName = `workflow-package-${coordinates.name}-${coordinates.version}.json`;
-  if (item.assets.length !== 4) return undefined;
-  const archive = oneAsset(item.assets, archiveName);
-  const descriptor = oneAsset(item.assets, descriptorName);
-  const checksum = oneAsset(item.assets, `${archiveName}.sha256`);
-  const provenance = oneAsset(item.assets, `workflow-package-${coordinates.name}-${coordinates.version}.provenance.json`);
+  if (assets.length !== 4) return undefined;
+  const archive = oneAsset(assets, archiveName);
+  const descriptor = oneAsset(assets, descriptorName);
+  const checksum = oneAsset(assets, `${archiveName}.sha256`);
+  const provenance = oneAsset(assets, `workflow-package-${coordinates.name}-${coordinates.version}.provenance.json`);
   const version = semver(coordinates.version);
   return archive !== undefined && descriptor !== undefined && checksum !== undefined && provenance !== undefined
     && version?.prerelease === item.prerelease
@@ -188,6 +189,10 @@ export class GitHubWorkflowPackageSource implements WorkflowPackageSource {
       if (!Array.isArray(values)) return Object.freeze({ kind: "INVALID" });
       const parsed = values.map(release);
       if (parsed.some((entry) => entry === undefined)) return Object.freeze({ kind: "INVALID" });
+      if (request.version.kind === "LATEST"
+        && (parsed as Release[]).some((entry) => entry.assets.some((value) => asset(value) === undefined))) {
+        return Object.freeze({ kind: "INVALID" });
+      }
       releases.push(...(parsed as Release[]).filter((entry) => !entry.draft));
       if (values.length < PAGE_SIZE) break;
       if (page === MAX_RELEASE_PAGES) return Object.freeze({ kind: "UNAVAILABLE" });
@@ -198,6 +203,7 @@ export class GitHubWorkflowPackageSource implements WorkflowPackageSource {
       const coordinates = scopedCoordinates(releaseItem.tag);
       if (coordinates !== undefined) {
         if (coordinates.name !== request.name) continue;
+        if (request.version.kind === "EXACT" && coordinates.version !== request.version.value) continue;
         if (request.version.kind === "LATEST" && releaseItem.prerelease) continue;
         const record = scopedRecord(releaseItem, coordinates);
         if (record === undefined) return Object.freeze({ kind: "INVALID" });
