@@ -2,7 +2,7 @@
 
 ## What's new
 
-4 commits
+6 commits
 
 ### Bug Fixes
 
@@ -12,6 +12,8 @@
 
 ### Maintenance
 
+- **qualification** cover selector rejection paths
+- **release** prepare Execution 0.2.7
 - **harness** tolerate loaded static checks
 
 ## Compatibility
